@@ -1,6 +1,13 @@
 spring:
+  # session配置
+  session:
+    #session过期时间，默认180秒，这里设置为30天
+    timeout: 2592000
+    store-type: redis
+
   profiles:
     active: local
+
   application:
     name: yu-ai-code-mother-backend
   datasource:
@@ -8,10 +15,21 @@ spring:
     url: jdbc:mysql://localhost:3306/yu_ai_code_mother
     username: root
     password: 123456
+  # redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      ttl: 3600
 server:
   port: 8123
   servlet:
     context-path: /api
+    # cookie过期时间，默认180秒，这里设置为30天
+    session:
+      cookie:
+        max-age: 2592000
 # springdoc-openapi
 springdoc:
   group-configs:
