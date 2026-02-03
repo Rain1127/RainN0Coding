@@ -2,7 +2,7 @@ package com.yupi.yuaicodemother.ai;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.yupi.yuaicodemother.ai.tools.FileWriteTool;
+import com.yupi.yuaicodemother.ai.tools.*;
 import com.yupi.yuaicodemother.config.RedisChatMemoryStoreConfig;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
@@ -47,6 +47,9 @@ public class AiCodeGeneratorServiceFactory {
 
     @Resource
     private ChatHistoryService chatHistoryService;
+
+    @Resource
+    private ToolManager toolManager;
 
 
     /**
@@ -107,16 +110,14 @@ public class AiCodeGeneratorServiceFactory {
         return switch (codeGenType){
             //只要你在AIservice方法中加上了@ToolMemoryId，那么你在构造AIservice时，就必须要传入chatMemoryProvider
             case VUE_PROJECT -> AiServices.builder(AiCodeGeneratorService.class)
-                    .chatModel(chatModel)
                     .streamingChatModel(reasoningStreamingChatModel)
                     .chatMemoryProvider(memoryId -> chatMemory)
-                    .tools(new FileWriteTool())
-                    // 处理幻觉工具调用
-                    .hallucinatedToolNameStrategy(toolExecutionRequest ->
-                        ToolExecutionResultMessage.from(toolExecutionRequest,
-                                "Error : there is no tool called" + toolExecutionRequest.name())
-                    )
+                    .tools(toolManager.getAllTools())
+                    .hallucinatedToolNameStrategy(toolExecutionRequest -> ToolExecutionResultMessage.from(
+                            toolExecutionRequest, "Error: there is no tool called " + toolExecutionRequest.name()
+                    ))
                     .build();
+
             // 原生 HTML 模式和多文件模式共享相同的配置
             case HTML,MULTI_FILE->AiServices.builder(AiCodeGeneratorService.class)
                     .chatModel(chatModel)
