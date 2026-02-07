@@ -34,10 +34,9 @@ public class VueProjectBuilder {
     }
 
     /**
-     * 构建 Vue 项目
-     *
+     * 同步构建 Vue 项目
      * @param projectPath 项目根目录路径
-     * @return 是否构建成功
+     * @return 构建是否成功
      */
     public boolean buildProject(String projectPath) {
         File projectDir = new File(projectPath);

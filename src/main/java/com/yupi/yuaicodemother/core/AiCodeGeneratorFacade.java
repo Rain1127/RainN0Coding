@@ -8,6 +8,8 @@ import com.yupi.yuaicodemother.ai.model.MultiFileCodeResult;
 import com.yupi.yuaicodemother.ai.model.message.AiResponseMessage;
 import com.yupi.yuaicodemother.ai.model.message.ToolExecutedMessage;
 import com.yupi.yuaicodemother.ai.model.message.ToolRequestMessage;
+import com.yupi.yuaicodemother.constant.AppConstant;
+import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.parser.CodeParserExecutor;
 import com.yupi.yuaicodemother.core.saver.CodeFileSaverExecutor;
 import com.yupi.yuaicodemother.exception.BusinessException;
@@ -36,6 +38,9 @@ import java.io.File;
 @Service
 @Slf4j
 public class AiCodeGeneratorFacade {
+
+    @Resource
+    private VueProjectBuilder vueProjectBuilder;
 
     @Resource
     private AiCodeGeneratorServiceFactory aiCodeGeneratorServiceFactory;
@@ -99,7 +104,7 @@ public class AiCodeGeneratorFacade {
             case VUE_PROJECT -> {
                 TokenStream tokenStream = aiCodeGeneratorService.generateVueProjectCodeStream(appid,userMessage);
                 //使用执行器处理代码流
-                yield processTokenStream(tokenStream);
+                yield processTokenStream(tokenStream,appid);
             }
             default -> {
                 String errorMessage = "不支持的生成类型" + codeGenTypeEnum.getValue();
@@ -109,13 +114,12 @@ public class AiCodeGeneratorFacade {
     }
 
     /**
-     * 适配器模式
-     * 将 TokenStream 转换为 Flux<String>，并传递工具调用信息
-     *
-     * @param tokenStream TokenStream 对象
-     * @return Flux<String> 流式响应
+     * 处理代码流
+     * @param tokenStream 代码流
+     * @param appId 应用id
+     * @return 代码流
      */
-    private Flux<String> processTokenStream(TokenStream tokenStream) {
+    private Flux<String> processTokenStream(TokenStream tokenStream, Long appId) {
         return Flux.create(sink -> {
             tokenStream.onPartialResponse((String partialResponse) -> {
                         AiResponseMessage aiResponseMessage = new AiResponseMessage(partialResponse);
@@ -133,6 +137,9 @@ public class AiCodeGeneratorFacade {
                     })
                     // 完成响应时触发
                     .onCompleteResponse((ChatResponse response) -> {
+                        // 执行VUE项目的同步构造（确保预览时项目已准备就绪）
+                        String projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/vue_project_" + appId;
+                        vueProjectBuilder.buildProject(projectPath);
                         sink.complete();
                     })
                     .onError((Throwable error) -> {
