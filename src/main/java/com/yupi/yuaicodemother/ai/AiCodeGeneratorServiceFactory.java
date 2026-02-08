@@ -2,6 +2,8 @@ package com.yupi.yuaicodemother.ai;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.yupi.yuaicodemother.ai.guardrail.PromptSafetyInputGuardrail;
+import com.yupi.yuaicodemother.ai.guardrail.RetryOutputGuardrail;
 import com.yupi.yuaicodemother.ai.tools.*;
 import com.yupi.yuaicodemother.config.RedisChatMemoryStoreConfig;
 import com.yupi.yuaicodemother.exception.BusinessException;
@@ -111,8 +113,11 @@ public class AiCodeGeneratorServiceFactory {
                         .chatMemoryProvider(memoryId -> chatMemory)
                         .tools(toolManager.getAllTools())
                         .hallucinatedToolNameStrategy(toolExecutionRequest -> ToolExecutionResultMessage.from(
-                                toolExecutionRequest, "Error: there is no tool called " + toolExecutionRequest.name()
-                        ))
+                                toolExecutionRequest, "Error: there is no tool called " + toolExecutionRequest.name())
+                        )
+                        .maxSequentialToolsInvocations(20) // 最大连续调用工具次数
+                        .inputGuardrails(new PromptSafetyInputGuardrail()) //添加输入护轨
+//                        .outputGuardrails(new RetryOutputGuardrail()) //添加输出护轨
                         .build();
             }
             // 原生 HTML 模式和多文件模式共享相同的配置
@@ -123,6 +128,8 @@ public class AiCodeGeneratorServiceFactory {
                         .chatModel(chatModel)
                         .streamingChatModel(openAiStreamingChatModel)
                         .chatMemory(chatMemory)
+                        .inputGuardrails(new PromptSafetyInputGuardrail()) //添加输入护轨
+//                        .outputGuardrails(new RetryOutputGuardrail()) //添加输出护轨
                         .build();
             }
             default ->
