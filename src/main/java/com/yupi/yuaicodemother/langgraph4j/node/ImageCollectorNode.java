@@ -42,11 +42,17 @@ public class ImageCollectorNode {
                 log.info("获取到图片收集计划，开始并发执行");
 
                 // 第二步：并发执行各种图片收集任务
+                // 创建一个CompletableFuture对象的列表，每个CompletableFuture将包含一个ImageResource列表
+                // 这是一个用于异步编程的集合，可以并行处理多个任务
                 List<CompletableFuture<List<ImageResource>>> futures = new ArrayList<>();
                 // 并发执行内容图片搜索
                 if (plan.getContentImageTasks() != null) {
                     ImageSearchTool imageSearchTool = SpringContextUtil.getBean(ImageSearchTool.class);
+                    // 使用for循环遍历ImageCollectionPlan中的所有内容图片搜索任务
                     for (ImageCollectionPlan.ImageSearchTask task : plan.getContentImageTasks()) {
+                        // 为每个搜索任务创建一个异步任务，并将其添加到futures列表中
+                        // 使用supplyAsync方法启动一个异步任务，调用imageSearchTool的searchContentImages方法
+                        // 并传入任务的查询条件作为参数
                         futures.add(CompletableFuture.supplyAsync(() ->
                                 imageSearchTool.searchContentImages(task.query())));
                     }
@@ -77,8 +83,14 @@ public class ImageCollectorNode {
                 }
 
                 // 等待所有任务完成并收集结果
+// 使用CompletableFuture.allOf方法创建一个新的CompletableFuture，
+// 它会在所有给定的CompletableFuture完成后才完成
+// 参数是一个CompletableFuture数组，这里将futures列表转换为数组
                 CompletableFuture<Void> allTasks = CompletableFuture.allOf(
                         futures.toArray(new CompletableFuture[0]));
+// 阻塞当前线程，等待allTasks完成
+// join()方法与get()类似，但是不会抛出受检异常
+// 它会等待所有异步任务执行完成
                 allTasks.join();
                 // 收集所有结果
                 for (CompletableFuture<List<ImageResource>> future : futures) {

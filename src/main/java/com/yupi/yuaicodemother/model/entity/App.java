@@ -106,4 +106,7 @@ public class App implements Serializable {
     @Column(value = "isDelete", isLogicDelete = true)
     private Integer isDelete;
 
+    @Column("currentVersion")
+    private Integer currentVersion;
+
 }

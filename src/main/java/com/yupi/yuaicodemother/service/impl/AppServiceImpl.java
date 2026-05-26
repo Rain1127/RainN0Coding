@@ -12,7 +12,6 @@ import com.yupi.yuaicodemother.ai.AiCodeGenTypeRoutingServiceFactory;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.AiCodeGeneratorFacade;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
-import com.yupi.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
@@ -24,6 +23,8 @@ import com.yupi.yuaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.model.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.UserVO;
+import com.yupi.yuaicodemother.monitor.MonitorContext;
+import com.yupi.yuaicodemother.monitor.MonitorContextHolder;
 import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.model.entity.User;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
@@ -57,9 +58,6 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
 
     @Resource
     private ChatHistoryService chatHistoryService;
-
-    @Resource
-    private StreamHandlerExecutor streamHandlerExecutor;
 
     @Resource
     private AiCodeGeneratorFacade aiCodeGeneratorFacade;
@@ -99,10 +97,26 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用代码生成类型错误");
         //5.在调用AI前，先保存用户消息到数据库中
         chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-        //6.调用AI生成代码
+        //6.设置监控上下文
+        MonitorContext monitorContext = MonitorContext.builder()
+                .userId(loginUser.getId().toString())
+                .appId(appId.toString())
+                .build();
+        MonitorContextHolder.setContext(monitorContext);
+        //7.调用 Python AI Agent 生成代码（SSE 流式透传）
         Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
-        //7.收集AI流式返回的代码，并且在完成对话后保存记录到数据库对话历史表中
-        return streamHandlerExecutor.doExecute(codeStream, chatHistoryService, appId, loginUser, codeGenTypeEnum);
+        //8.流完成后保存 AI 响应到对话历史
+        return codeStream
+                .doOnComplete(() -> {
+                    chatHistoryService.addChatMessage(appId,
+                            "[Python Agent] 代码生成完成",
+                            ChatHistoryMessageTypeEnum.AI.getValue(),
+                            loginUser.getId());
+                })
+                .doFinally(signalType -> {
+                    //流结束时清理ThreadLocal中的监控上下文
+                    MonitorContextHolder.clearContext();
+                });
     }
 
 
@@ -130,6 +144,13 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
     }
 
 
+    /**
+     * 部署APP
+     *
+     * @param appId     应用id
+     * @param loginUser 登录用户
+     * @return
+     */
     @Override
     public String deployApp(Long appId, User loginUser) {
         //1.参数校验

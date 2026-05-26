@@ -66,3 +66,14 @@ create table chat_history
     INDEX idx_createTime (createTime),             -- 提升基于时间的查询性能
     INDEX idx_appId_createTime (appId, createTime) -- 游标查询核心索引
 ) comment '对话历史' collate = utf8mb4_unicode_ci;
+
+-- 意图树配置表
+create table if not exists intent_config
+(
+    id          bigint auto_increment comment 'id' primary key,
+    config_name varchar(64)  null comment '配置名称',
+    tree_json   longtext     null comment '意图树 JSON',
+    updated_by  bigint       null comment '更新人',
+    createTime  datetime     null comment '创建时间',
+    updateTime  datetime     null comment '更新时间'
+) comment '意图树配置' collate = utf8mb4_unicode_ci;
