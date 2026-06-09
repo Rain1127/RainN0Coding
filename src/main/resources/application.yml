@@ -45,6 +45,18 @@ knife4j:
 python:
   ai:
     base-url: http://localhost:8000
+############## Sa-Token 配置 ##############
+sa-token:
+  token-name: satoken
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: true
+  is-read-cookie: true
+  is-read-header: true
+
 management:
   endpoints:
     web:

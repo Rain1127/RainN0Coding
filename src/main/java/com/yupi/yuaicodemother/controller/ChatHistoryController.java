@@ -10,6 +10,8 @@ import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
 import com.yupi.yuaicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
 import com.yupi.yuaicodemother.model.entity.User;
+import com.yupi.yuaicodemother.ratelimiter.annotation.RateLimit;
+import com.yupi.yuaicodemother.ratelimiter.enums.RateLimitType;
 import com.yupi.yuaicodemother.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,6 +48,7 @@ public class ChatHistoryController {
      * @return 对话历史分页
      */
     @GetMapping("/app/{appId}")
+    @RateLimit(limitType = RateLimitType.USER, rate = 30, rateInterval = 60, message = "查询过于频繁，请稍后再试")
     public BaseResponse<Page<ChatHistory>> listAppChatHistory(@PathVariable Long appId,
                                                               @RequestParam(defaultValue = "10") int pageSize,
                                                               @RequestParam(required = false) LocalDateTime lastCreateTime,

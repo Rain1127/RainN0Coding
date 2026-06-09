@@ -11,6 +11,8 @@ import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
 import com.yupi.yuaicodemother.model.dto.user.*;
+import com.yupi.yuaicodemother.ratelimiter.annotation.RateLimit;
+import com.yupi.yuaicodemother.ratelimiter.enums.RateLimitType;
 import com.yupi.yuaicodemother.model.vo.LoginUserVO;
 import com.yupi.yuaicodemother.model.vo.UserVO;
 import jakarta.annotation.Resource;
@@ -43,6 +45,7 @@ public class UserController {
      * @return 注册成功用户 id
      */
     @PostMapping("/register")
+    @RateLimit(limitType = RateLimitType.IP, rate = 3, rateInterval = 60, message = "注册请求过于频繁，请稍后再试")
     public BaseResponse<Long> register(@RequestBody UserRegisterRequest userRegisterRequest) {
         ThrowUtils.throwIf(userRegisterRequest == null, ErrorCode.PARAMS_ERROR);
         String userAccount = userRegisterRequest.getUserAccount();
@@ -80,6 +83,7 @@ public class UserController {
      * @return 脱敏后的用户信息
      */
     @PostMapping("/login")
+    @RateLimit(limitType = RateLimitType.IP, rate = 10, rateInterval = 60, message = "登录请求过于频繁，请稍后再试")
     public BaseResponse<LoginUserVO> login(@RequestBody UserLoginRequest userLoginRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(userLoginRequest == null, ErrorCode.PARAMS_ERROR);
         String userAccount = userLoginRequest.getUserAccount();

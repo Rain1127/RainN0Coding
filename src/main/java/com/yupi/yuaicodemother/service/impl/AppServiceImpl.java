@@ -32,6 +32,8 @@ import com.yupi.yuaicodemother.service.ScreenshotService;
 import com.yupi.yuaicodemother.service.UserService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -42,6 +44,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -71,6 +74,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
     @Resource
     private AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
 
+    @Resource
+    private RedissonClient redissonClient;
+
     /**
      * 应用对话：根据应用id和用户提示词生成代码。
      *
@@ -84,39 +90,64 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
         //1.参数校验
         ThrowUtils.throwIf(appId == null || appId<=0 , ErrorCode.PARAMS_ERROR, "应用id错误");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "提示词消息不能为空");
-        //2.查询应用
-        App app = this.getById(appId);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
-        //3.权限校验 只有本人可以和自己的应用对话
-        if (!app.getUserId().equals(loginUser.getId())){
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有权限对话该应用");
+        //2.获取分布式锁，防止同应用并发对话
+        String lockKey = "ai:chat:lock:" + appId + ":" + loginUser.getId();
+        RLock lock = redissonClient.getLock(lockKey);
+        boolean locked = false;
+        try {
+            locked = lock.tryLock(0, 300, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统繁忙，请稍后重试");
         }
-        //4.获取应用代码生成类型（纯HTML还是三件套？）
-        String codeGenType = app.getCodeGenType();
-        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
-        ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用代码生成类型错误");
-        //5.在调用AI前，先保存用户消息到数据库中
-        chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-        //6.设置监控上下文
-        MonitorContext monitorContext = MonitorContext.builder()
-                .userId(loginUser.getId().toString())
-                .appId(appId.toString())
-                .build();
-        MonitorContextHolder.setContext(monitorContext);
-        //7.调用 Python AI Agent 生成代码（SSE 流式透传）
-        Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
-        //8.流完成后保存 AI 响应到对话历史
-        return codeStream
-                .doOnComplete(() -> {
-                    chatHistoryService.addChatMessage(appId,
-                            "[Python Agent] 代码生成完成",
-                            ChatHistoryMessageTypeEnum.AI.getValue(),
-                            loginUser.getId());
-                })
-                .doFinally(signalType -> {
-                    //流结束时清理ThreadLocal中的监控上下文
-                    MonitorContextHolder.clearContext();
-                });
+        if (!locked) {
+            throw new BusinessException(ErrorCode.CHAT_IN_PROGRESS);
+        }
+        try {
+            //3.查询应用
+            App app = this.getById(appId);
+            ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+            //4.权限校验 只有本人可以和自己的应用对话
+            if (!app.getUserId().equals(loginUser.getId())){
+                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有权限对话该应用");
+            }
+            //5.获取应用代码生成类型（纯HTML还是三件套？）
+            String codeGenType = app.getCodeGenType();
+            CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
+            ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用代码生成类型错误");
+            //6.在调用AI前，先保存用户消息到数据库中
+            chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+            //7.设置监控上下文
+            MonitorContext monitorContext = MonitorContext.builder()
+                    .userId(loginUser.getId().toString())
+                    .appId(appId.toString())
+                    .build();
+            MonitorContextHolder.setContext(monitorContext);
+            //8.调用 Python AI Agent 生成代码（SSE 流式透传）
+            Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, loginUser.getId(), loginUser.getUserRole());
+            //9.流完成后保存 AI 响应到对话历史
+            return codeStream
+                    .doOnComplete(() -> {
+                        chatHistoryService.addChatMessage(appId,
+                                "[Python Agent] 代码生成完成",
+                                ChatHistoryMessageTypeEnum.AI.getValue(),
+                                loginUser.getId());
+                    })
+                    .doFinally(signalType -> {
+                        //流结束时释放锁
+                        if (lock.isHeldByCurrentThread()) {
+                            lock.unlock();
+                        }
+                        //流结束时清理ThreadLocal中的监控上下文
+                        MonitorContextHolder.clearContext();
+                    });
+        } catch (Exception e) {
+            //异常时释放锁
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+            throw e;
+        }
     }
 
 

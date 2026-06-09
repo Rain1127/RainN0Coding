@@ -2,6 +2,8 @@ package com.yupi.yuaicodemother.controller;
 
 import com.yupi.yuaicodemother.langgraph4j.CodeGenWorkflow;
 import com.yupi.yuaicodemother.langgraph4j.state.WorkflowContext;
+import com.yupi.yuaicodemother.ratelimiter.annotation.RateLimit;
+import com.yupi.yuaicodemother.ratelimiter.enums.RateLimitType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -20,6 +22,7 @@ public class WorkflowSseController {
      * 同步执行工作流
      */
     @PostMapping("/execute")
+    @RateLimit(limitType = RateLimitType.IP, rate = 20, rateInterval = 60, message = "工作流执行过于频繁，请稍后再试")
     public WorkflowContext executeWorkflow(@RequestParam String prompt) {
         log.info("收到同步工作流执行请求: {}", prompt);
         return new CodeGenWorkflow().executeWorkflow(prompt);
@@ -29,6 +32,7 @@ public class WorkflowSseController {
      * SSE 流式执行工作流
      */
     @GetMapping(value = "/execute-sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RateLimit(limitType = RateLimitType.IP, rate = 20, rateInterval = 60, message = "工作流执行过于频繁，请稍后再试")
     public SseEmitter executeWorkflowWithSse(@RequestParam String prompt) {
         log.info("收到 SSE 工作流执行请求: {}", prompt);
         return new CodeGenWorkflow().executeWorkflowWithSse(prompt);

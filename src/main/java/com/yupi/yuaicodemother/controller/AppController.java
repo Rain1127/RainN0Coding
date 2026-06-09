@@ -109,6 +109,7 @@ public class AppController {
      * @return 部署 URL
      */
     @PostMapping("/deploy")
+    @RateLimit(limitType = RateLimitType.USER, rate = 10, rateInterval = 60, message = "部署请求过于频繁，请稍后再试")
     public BaseResponse<String> deployApp(@RequestBody AppDeployRequest appDeployRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(appDeployRequest == null, ErrorCode.PARAMS_ERROR);
         Long appId = appDeployRequest.getAppId();
@@ -130,6 +131,7 @@ public class AppController {
      * @param response 响应
      */
     @GetMapping("/download/{appId}")
+    @RateLimit(limitType = RateLimitType.USER, rate = 20, rateInterval = 60, message = "下载请求过于频繁，请稍后再试")
     public void downloadAppCode(@PathVariable Long appId,
                                 HttpServletRequest request,
                                 HttpServletResponse response) {
@@ -166,6 +168,7 @@ public class AppController {
      * @return 应用ID
      */
     @PostMapping("/add")
+    @RateLimit(limitType = RateLimitType.USER, rate = 30, rateInterval = 60, message = "创建应用过于频繁，请稍后再试")
     public BaseResponse<Long> addApp(@RequestBody AppAddRequest appAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(appAddRequest == null, ErrorCode.PARAMS_ERROR);
         // 获取当前登录用户

@@ -83,6 +83,23 @@
             <artifactId>redisson</artifactId>
             <version>3.50.0</version>
         </dependency>
+        <!-- Sa-Token 鉴权框架 (Spring Boot 3.x) -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <version>1.45.0</version>
+        </dependency>
+        <!-- Sa-Token Redis 集成 (Jackson 序列化) -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-jackson</artifactId>
+            <version>1.45.0</version>
+        </dependency>
+        <!-- Redis 连接池 (Sa-Token Redis 集成必需) -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+        </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai-spring-boot-starter</artifactId>

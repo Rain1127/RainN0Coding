@@ -1,5 +1,6 @@
 package com.yupi.yuaicodemother.service.impl;
 
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
@@ -21,8 +22,6 @@ import org.springframework.util.DigestUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
-
-import static com.yupi.yuaicodemother.constant.UserConstant.USER_LOGIN_STATE;
 
 /**
  * 用户 服务层实现。
@@ -83,15 +82,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>  implements U
 
     @Override
     public User getLoginUser(HttpServletRequest request) {
-        //判断用户是否登录
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if (currentUser == null || currentUser.getId() == null) {
+        // 使用 Sa-Token 获取当前登录用户 ID
+        long userId;
+        try {
+            userId = StpUtil.getLoginIdAsLong();
+        } catch (Exception e) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
-        //从数据库查询当前信息
-        long userId = currentUser.getId();
-        currentUser = this.getById(userId);
+        // 从数据库查询当前用户信息
+        User currentUser = this.getById(userId);
         if (currentUser == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
@@ -119,13 +118,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>  implements U
 
     @Override
     public boolean userLogout(HttpServletRequest request) {
-        //判断用户是否登录
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        if (userObj == null) {
+        // 使用 Sa-Token 登出
+        if (!StpUtil.isLogin()) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "用户未登录");
         }
-        //移除登录态
-        request.getSession().removeAttribute(USER_LOGIN_STATE);
+        StpUtil.logout();
         return true;
     }
 
@@ -175,8 +172,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>  implements U
         if (user == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
-        //4.记录用户的登录态（如果用户存在）
-        request.getSession().setAttribute(USER_LOGIN_STATE, user);
+        //4.记录用户的登录态（使用 Sa-Token）
+        StpUtil.login(user.getId());
         //5.返回脱敏后的用户信息
         return this.getLoginUserVO(user);
     }

@@ -47,14 +47,15 @@ public class AiCodeGeneratorFacade {
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage,
                                                    CodeGenTypeEnum codeGenTypeEnum,
-                                                   Long appId) {
+                                                   Long appId,
+                                                   Long userId,
+                                                   String userRole) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "代码生成类型不能为空");
         }
 
-        String userId = String.valueOf(appId);
         Flux<String> sseStream = pythonAiClient.streamCodeGen(
-                userId, String.valueOf(appId), userMessage, codeGenTypeEnum.getValue());
+                String.valueOf(userId), String.valueOf(appId), userMessage, codeGenTypeEnum.getValue(), userRole);
 
         // 收集 code_file 事件中的文件，流完成后保存
         List<CodeFileSaverExecutor.CodeFileDto> codeFiles = new ArrayList<>();
