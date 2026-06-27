@@ -35,6 +35,8 @@ import java.util.List;
 @RequestMapping("/user")
 public class UserController {
 
+    private static final long MAX_PAGE_SIZE = 50;
+
     @Resource
     private UserService userService;
 
@@ -172,6 +174,7 @@ public class UserController {
         ThrowUtils.throwIf(userQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long pageNum = userQueryRequest.getPageNum();
         long pageSize = userQueryRequest.getPageSize();
+        ThrowUtils.throwIf(pageSize <= 0 || pageSize > MAX_PAGE_SIZE, ErrorCode.PARAMS_ERROR, "每页最多查询 50 个用户");
         Page<User> userPage = userService.page(Page.of(pageNum, pageSize),
                 userService.getQueryWrapper(userQueryRequest));
         // 数据脱敏

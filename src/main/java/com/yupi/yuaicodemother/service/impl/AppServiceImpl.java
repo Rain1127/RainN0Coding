@@ -30,6 +30,7 @@ import com.yupi.yuaicodemother.model.entity.User;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import com.yupi.yuaicodemother.service.ScreenshotService;
 import com.yupi.yuaicodemother.service.UserService;
+import com.yupi.yuaicodemother.utils.SqlSafetyUtils;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -55,6 +56,10 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppService{
+
+    private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
+            "id", "appName", "codeGenType", "priority", "createTime", "editTime", "deployedTime"
+    );
 
     @Resource
     private UserService userService;
@@ -117,10 +122,13 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
             ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用代码生成类型错误");
             //6.在调用AI前，先保存用户消息到数据库中
             chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-            //7.设置监控上下文
+            //7.设置监控上下文（含全链路 traceId）
+            String traceId = java.util.UUID.randomUUID().toString();
+            log.info("全链路追踪 traceId: {}", traceId);
             MonitorContext monitorContext = MonitorContext.builder()
                     .userId(loginUser.getId().toString())
                     .appId(appId.toString())
+                    .traceId(traceId)
                     .build();
             MonitorContextHolder.setContext(monitorContext);
             //8.调用 Python AI Agent 生成代码（SSE 流式透传）
@@ -304,7 +312,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
                 .collect(Collectors.toMap(User::getId, userService::getUserVO));
 
         return appList.stream().map(app -> {
-            AppVO appVO = getAppVO(app);
+            AppVO appVO = new AppVO();
+            BeanUtil.copyProperties(app, appVO);
             UserVO userVO = userVOMap.get(app.getUserId());
             appVO.setUser(userVO);
             return appVO;
@@ -332,7 +341,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
         Long userId = appQueryRequest.getUserId();
         String sortField = appQueryRequest.getSortField();
         String sortOrder = appQueryRequest.getSortOrder();
-        return QueryWrapper.create()
+        QueryWrapper queryWrapper = QueryWrapper.create()
                 .eq("id", id)
                 .like("appName", appName)
                 .like("cover", cover)
@@ -340,8 +349,12 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
                 .eq("codeGenType", codeGenType)
                 .eq("deployKey", deployKey)
                 .eq("priority", priority)
-                .eq("userId", userId)
-                .orderBy(sortField, "ascend".equals(sortOrder));
+                .eq("userId", userId);
+        String safeSortField = SqlSafetyUtils.safeSortField(sortField, ALLOWED_SORT_FIELDS);
+        if (safeSortField != null) {
+            queryWrapper.orderBy(safeSortField, "ascend".equals(sortOrder));
+        }
+        return queryWrapper;
     }
 
     /**

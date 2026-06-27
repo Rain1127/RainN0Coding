@@ -27,7 +27,7 @@ class AiCodeGeneratorFacadeTest {
 
     @Test
     void generateAndSaveCodeStream() {
-        Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream("生成一个登录页面,不超过20行", CodeGenTypeEnum.HTML,1L);
+        Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream("生成一个登录页面,不超过20行", CodeGenTypeEnum.HTML, 1L, 1L, "user");
         //等所有流式输出完成，返回一个List。若没完成，则阻塞到完成。
         List<String> result = codeStream.collectList().block();
         //验证结果
@@ -41,7 +41,7 @@ class AiCodeGeneratorFacadeTest {
     void generateVueProjectCodeStream() {
         Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(
                 "简单的任务记录网站，总代码量不超过 200 行",
-                CodeGenTypeEnum.VUE_PROJECT, 1L);
+                CodeGenTypeEnum.VUE_PROJECT, 1L, 1L, "user");
         // 阻塞等待所有数据收集完成
         List<String> result = codeStream.collectList().block();
         // 验证结果

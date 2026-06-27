@@ -1,0 +1,326 @@
+{
+  "dashboard": {
+    "uid": "ai-workflow-monitoring",
+    "title": "AI Workflow Monitoring",
+    "description": "Python Agent 工作流监控：阶段耗时、LLM 调用、重试分析、RAG 缓存、熔断器",
+    "tags": ["ai", "python", "workflow"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "代码生成请求吞吐",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 0, "h": 9, "w": 12},
+        "targets": [
+          {
+            "expr": "sum(rate(ai_code_gen_requests_total[5m])) by (code_gen_type)",
+            "legendFormat": "{{code_gen_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {"lineWidth": 2, "fillOpacity": 10}
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "请求状态分布",
+        "type": "piechart",
+        "gridPos": {"x": 12, "y": 0, "h": 9, "w": 6},
+        "targets": [
+          {
+            "expr": "sum(ai_code_gen_requests_total) by (status)",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "mappings": [
+              {"type": "value", "value": "success", "text": "成功", "color": "green"},
+              {"type": "value", "value": "error", "text": "失败", "color": "red"}
+            ]
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "当前活跃请求",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 0, "h": 4, "w": 6},
+        "targets": [
+          {
+            "expr": "ai_code_gen_active_requests",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 3, "color": "orange"}, {"value": 10, "color": "red"}]},
+            "mappings": []
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "请求总数 (今日)",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 4, "h": 5, "w": 6},
+        "targets": [
+          {
+            "expr": "sum(increase(ai_code_gen_requests_total[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {"defaults": {"mappings": []}}
+      },
+      {
+        "id": 10,
+        "title": "各阶段耗时 P50/P95/P99",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 9, "h": 10, "w": 12},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(ai_code_gen_phase_duration_seconds_bucket[5m])) by (phase, le))",
+            "legendFormat": "{{phase}} P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(ai_code_gen_phase_duration_seconds_bucket[5m])) by (phase, le))",
+            "legendFormat": "{{phase}} P95",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": {"lineWidth": 2, "fillOpacity": 0}
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "阶段平均耗时",
+        "type": "barchart",
+        "gridPos": {"x": 12, "y": 9, "h": 10, "w": 12},
+        "targets": [
+          {
+            "expr": "avg by (phase) (ai_code_gen_phase_duration_seconds_sum / ai_code_gen_phase_duration_seconds_count)",
+            "legendFormat": "{{phase}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 20,
+        "title": "LLM 调用次数 (每阶段)",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 19, "h": 9, "w": 12},
+        "targets": [
+          {
+            "expr": "sum(rate(ai_code_gen_llm_calls_total{status=\"success\"}[5m])) by (phase)",
+            "legendFormat": "{{phase}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "cps",
+            "custom": {"stacking": {"mode": "normal"}, "fillOpacity": 20}
+          }
+        }
+      },
+      {
+        "id": 21,
+        "title": "LLM 调用成功率",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 19, "h": 4, "w": 6},
+        "targets": [
+          {
+            "expr": "sum(ai_code_gen_llm_calls_total{status=\"success\"}) / sum(ai_code_gen_llm_calls_total) * 100",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {"steps": [{"value": 0, "color": "red"}, {"value": 95, "color": "orange"}, {"value": 99, "color": "green"}]}
+          }
+        }
+      },
+      {
+        "id": 22,
+        "title": "LLM 调用总数",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 19, "h": 4, "w": 6},
+        "targets": [
+          {
+            "expr": "sum(increase(ai_code_gen_llm_calls_total[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {"defaults": {"mappings": []}}
+      },
+      {
+        "id": 23,
+        "title": "LLM 调用按模型分布",
+        "type": "piechart",
+        "gridPos": {"x": 12, "y": 23, "h": 5, "w": 12},
+        "targets": [
+          {
+            "expr": "sum(ai_code_gen_llm_calls_total) by (model_name)",
+            "legendFormat": "{{model_name}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 30,
+        "title": "重试次数分布",
+        "type": "barchart",
+        "gridPos": {"x": 0, "y": 28, "h": 8, "w": 8},
+        "targets": [
+          {
+            "expr": "sum(increase(ai_code_gen_retries_bucket[1h])) by (le)",
+            "legendFormat": "<= {{le}} retries",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 31,
+        "title": "平均重试次数",
+        "type": "stat",
+        "gridPos": {"x": 8, "y": 28, "h": 4, "w": 8},
+        "targets": [
+          {
+            "expr": "avg(ai_code_gen_retries_sum / ai_code_gen_retries_count)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}, {"value": 2, "color": "red"}]}
+          }
+        }
+      },
+      {
+        "id": 32,
+        "title": "每次生成产出文件数",
+        "type": "stat",
+        "gridPos": {"x": 8, "y": 32, "h": 4, "w": 8},
+        "targets": [
+          {
+            "expr": "avg(ai_code_gen_files_generated_sum / ai_code_gen_files_generated_count)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {"defaults": {"mappings": []}}
+      },
+      {
+        "id": 33,
+        "title": "文件产出数分布",
+        "type": "barchart",
+        "gridPos": {"x": 0, "y": 36, "h": 8, "w": 8},
+        "targets": [
+          {
+            "expr": "sum(increase(ai_code_gen_files_generated_bucket[1h])) by (le)",
+            "legendFormat": "<= {{le}} files",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 40,
+        "title": "RAG 缓存命中率",
+        "type": "stat",
+        "gridPos": {"x": 16, "y": 28, "h": 4, "w": 8},
+        "targets": [
+          {
+            "expr": "sum(ai_rag_cache_hit_total{status=\"hit\"}) / sum(ai_rag_cache_hit_total) * 100",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {"steps": [{"value": 0, "color": "red"}, {"value": 50, "color": "orange"}, {"value": 80, "color": "green"}]}
+          }
+        }
+      },
+      {
+        "id": 41,
+        "title": "缓存命中趋势",
+        "type": "timeseries",
+        "gridPos": {"x": 16, "y": 32, "h": 8, "w": 8},
+        "targets": [
+          {
+            "expr": "rate(ai_rag_cache_hit_total{status=\"hit\"}[5m])",
+            "legendFormat": "命中",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(ai_rag_cache_hit_total{status=\"miss\"}[5m])",
+            "legendFormat": "未命中",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {"lineWidth": 2}
+          }
+        }
+      },
+      {
+        "id": 50,
+        "title": "熔断器状态",
+        "type": "statestimeline",
+        "gridPos": {"x": 0, "y": 44, "h": 6, "w": 24},
+        "targets": [
+          {
+            "expr": "ai_circuit_breaker_state",
+            "legendFormat": "{{model_name}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "value": 0, "text": "CLOSED"},
+              {"type": "value", "value": 1, "text": "OPEN"},
+              {"type": "value", "value": 2, "text": "HALF_OPEN"}
+            ],
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "red"},
+                {"value": 2, "color": "orange"}
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "overwrite": true
+}

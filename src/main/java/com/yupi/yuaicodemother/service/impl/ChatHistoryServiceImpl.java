@@ -16,6 +16,7 @@ import com.yupi.yuaicodemother.model.entity.User;
 import com.yupi.yuaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
+import com.yupi.yuaicodemother.utils.SqlSafetyUtils;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 对话历史 服务层实现。
@@ -35,6 +37,10 @@ import java.util.List;
 @Slf4j
 @Service
 public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatHistory>  implements ChatHistoryService{
+
+    private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
+            "id", "appId", "userId", "messageType", "createTime"
+    );
 
     @Resource
     @Lazy
@@ -168,8 +174,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             queryWrapper.lt("createTime", lastCreateTime);
         }
         // 排序
-        if (StrUtil.isNotBlank(sortField)) {
-            queryWrapper.orderBy(sortField, "ascend".equals(sortOrder));
+        String safeSortField = SqlSafetyUtils.safeSortField(sortField, ALLOWED_SORT_FIELDS);
+        if (safeSortField != null) {
+            queryWrapper.orderBy(safeSortField, "ascend".equals(sortOrder));
         } else {
             // 默认按创建时间降序排列
             queryWrapper.orderBy("createTime", false);

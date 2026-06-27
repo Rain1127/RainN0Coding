@@ -1,6 +1,19 @@
 ### CUSTOM ###
 application-local.yml
+*.local.yml
+*.env
+!.env.example
+python-agent/.env
 tmp
+data/
+AliyunJavaAgent/logs/
+**/__pycache__/
+*.pyc
+*.db
+*.db-shm
+*.db-wal
+*.log
+.vs/
 
 HELP.md
 target/
