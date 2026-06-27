@@ -8,6 +8,7 @@ import com.yupi.yuaicodemother.core.python.PythonAiClient;
 import com.yupi.yuaicodemother.core.saver.CodeFileSaverExecutor;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
+import com.yupi.yuaicodemother.monitor.MonitorContextHolder;
 import com.yupi.yuaicodemother.model.enums.CodeGenTypeEnum;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -54,8 +55,12 @@ public class AiCodeGeneratorFacade {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "代码生成类型不能为空");
         }
 
+        String traceId = MonitorContextHolder.getContext().getTraceId();
+        log.info("透传 traceId 到 Python Agent: {}", traceId);
+
         Flux<String> sseStream = pythonAiClient.streamCodeGen(
-                String.valueOf(userId), String.valueOf(appId), userMessage, codeGenTypeEnum.getValue(), userRole);
+                String.valueOf(userId), String.valueOf(appId), userMessage,
+                codeGenTypeEnum.getValue(), userRole, traceId);
 
         // 收集 code_file 事件中的文件，流完成后保存
         List<CodeFileSaverExecutor.CodeFileDto> codeFiles = new ArrayList<>();

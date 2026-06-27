@@ -1,6 +1,8 @@
 package com.yupi.yuaicodemother.controller;
 
 import com.yupi.yuaicodemother.constant.AppConstant;
+import com.yupi.yuaicodemother.exception.BusinessException;
+import com.yupi.yuaicodemother.utils.PathSafetyUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.File;
+import java.nio.file.Path;
 
 /**
  * 静态资源控制器
@@ -23,7 +26,7 @@ import java.io.File;
 public class StaticResourceController {
 
     // 应用生成根目录（用于浏览）
-    private static final String PREVIEW_ROOT_DIR = AppConstant.CODE_OUTPUT_ROOT_DIR;
+    private static final Path PREVIEW_ROOT_DIR = Path.of(AppConstant.CODE_DEPLOY_ROOT_DIR);
 
     /**
      * 提供静态资源访问，支持目录重定向
@@ -48,8 +51,10 @@ public class StaticResourceController {
                 resourcePath = "/index.html";
             }
             // 构建文件路径
-            String filePath = PREVIEW_ROOT_DIR + "/" + deployKey + resourcePath;
-            File file = new File(filePath);
+            String normalizedResourcePath = resourcePath.startsWith("/") ? resourcePath.substring(1) : resourcePath;
+            Path safePath = PathSafetyUtils.resolveInside(PREVIEW_ROOT_DIR, deployKey, normalizedResourcePath);
+            String filePath = safePath.toString();
+            File file = safePath.toFile();
             // 检查文件是否存在
             if (!file.exists()) {
                 return ResponseEntity.notFound().build();
@@ -59,6 +64,8 @@ public class StaticResourceController {
             return ResponseEntity.ok()
                     .header("Content-Type", getContentTypeWithCharset(filePath))
                     .body(resource);
+        } catch (BusinessException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }

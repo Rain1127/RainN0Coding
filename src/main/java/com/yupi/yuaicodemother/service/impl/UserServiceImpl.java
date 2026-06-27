@@ -4,63 +4,58 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.digest.BCrypt;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
+import com.yupi.yuaicodemother.mapper.UserMapper;
 import com.yupi.yuaicodemother.model.dto.user.UserQueryRequest;
 import com.yupi.yuaicodemother.model.entity.User;
-import com.yupi.yuaicodemother.mapper.UserMapper;
 import com.yupi.yuaicodemother.model.enums.UserRoleEnum;
 import com.yupi.yuaicodemother.model.vo.LoginUserVO;
 import com.yupi.yuaicodemother.model.vo.UserVO;
 import com.yupi.yuaicodemother.service.UserService;
+import com.yupi.yuaicodemother.utils.SqlSafetyUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * 用户 服务层实现。
- *
- * @author <a>Rain</a>
- */
 @Service
-public class UserServiceImpl extends ServiceImpl<UserMapper, User>  implements UserService{
+public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
+
+    private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
+            "id", "userAccount", "userName", "userRole", "createTime", "updateTime"
+    );
 
     @Override
     public long userRegister(String userAccount, String userPassword, String checkPassword) {
-        // 校验参数
         if (StrUtil.hasBlank(userAccount, userPassword, checkPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
         }
-        //校验账号
-        if (userAccount.length()<4) {
+        if (userAccount.length() < 4) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号长度不能小于4位");
         }
-        //密码长度校验
         if (userPassword.length() < 8 || checkPassword.length() < 8) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "密码长度不能小于8位");
         }
         if (!userPassword.equals(checkPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "两次输入的密码不一致");
         }
-        //查询用户是否存在
         QueryWrapper queryWrapper = new QueryWrapper();
         queryWrapper.eq("userAccount", userAccount);
         long count = this.mapper.selectCountByQuery(queryWrapper);
         if (count > 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号已存在");
         }
-        //加密密码
-        String encryptPassword = getEncryptPassword(userPassword);
-        //创建用户,插入数据库
         User user = new User();
         user.setUserAccount(userAccount);
-        user.setUserPassword(encryptPassword);
+        user.setUserPassword(getEncryptPassword(userPassword));
         user.setUserName("sb");
         user.setUserRole(UserRoleEnum.USER.getValue());
         boolean saveResult = this.save(user);
@@ -82,14 +77,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>  implements U
 
     @Override
     public User getLoginUser(HttpServletRequest request) {
-        // 使用 Sa-Token 获取当前登录用户 ID
         long userId;
         try {
             userId = StpUtil.getLoginIdAsLong();
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
-        // 从数据库查询当前用户信息
         User currentUser = this.getById(userId);
         if (currentUser == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
@@ -115,10 +108,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>  implements U
         return userList.stream().map(this::getUserVO).collect(Collectors.toList());
     }
 
-
     @Override
     public boolean userLogout(HttpServletRequest request) {
-        // 使用 Sa-Token 登出
         if (!StpUtil.isLogin()) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "用户未登录");
         }
@@ -138,50 +129,63 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>  implements U
         String userRole = userQueryRequest.getUserRole();
         String sortField = userQueryRequest.getSortField();
         String sortOrder = userQueryRequest.getSortOrder();
-        return QueryWrapper.create()
+        QueryWrapper queryWrapper = QueryWrapper.create()
                 .eq("id", id)
                 .eq("userRole", userRole)
                 .like("userAccount", userAccount)
                 .like("userName", userName)
-                .like("userProfile", userProfile)
-                .orderBy(sortField, "ascend".equals(sortOrder));
+                .like("userProfile", userProfile);
+        String safeSortField = SqlSafetyUtils.safeSortField(sortField, ALLOWED_SORT_FIELDS);
+        if (safeSortField != null) {
+            queryWrapper.orderBy(safeSortField, "ascend".equals(sortOrder));
+        }
+        return queryWrapper;
     }
-
 
     @Override
     public LoginUserVO userLogin(String userAccount, String userPassword, HttpServletRequest request) {
-        //1.校验参数
         if (StrUtil.hasBlank(userAccount, userPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
         }
-        //校验账号
-        if (userAccount.length()<4) {
+        if (userAccount.length() < 4) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号长度不能小于4位");
         }
-        //密码长度校验
         if (userPassword.length() < 8) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "密码长度不能小于8位");
         }
-        //2.加密
-        String encryptPassword = getEncryptPassword(userPassword);
-        //3.查询用户是否存在
         QueryWrapper queryWrapper = new QueryWrapper();
         queryWrapper.eq("userAccount", userAccount);
-        queryWrapper.eq("userPassword", encryptPassword);
         User user = this.mapper.selectOneByQuery(queryWrapper);
-        if (user == null) {
+        if (user == null || !matchesPassword(userPassword, user.getUserPassword())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
-        //4.记录用户的登录态（使用 Sa-Token）
+        if (getLegacyEncryptPassword(userPassword).equals(user.getUserPassword())) {
+            User updateUser = new User();
+            updateUser.setId(user.getId());
+            updateUser.setUserPassword(getEncryptPassword(userPassword));
+            this.updateById(updateUser);
+        }
         StpUtil.login(user.getId());
-        //5.返回脱敏后的用户信息
         return this.getLoginUserVO(user);
     }
 
     @Override
     public String getEncryptPassword(String userPassword) {
-        //盐值，混淆密码
-        final String SALT = "rain";
-        return DigestUtils.md5DigestAsHex((SALT + userPassword).getBytes());
+        return BCrypt.hashpw(userPassword, BCrypt.gensalt());
+    }
+
+    private boolean matchesPassword(String rawPassword, String encryptedPassword) {
+        if (StrUtil.isBlank(encryptedPassword)) {
+            return false;
+        }
+        if (encryptedPassword.startsWith("$2")) {
+            return BCrypt.checkpw(rawPassword, encryptedPassword);
+        }
+        return getLegacyEncryptPassword(rawPassword).equals(encryptedPassword);
+    }
+
+    private String getLegacyEncryptPassword(String userPassword) {
+        final String salt = "rain";
+        return DigestUtils.md5DigestAsHex((salt + userPassword).getBytes());
     }
 }

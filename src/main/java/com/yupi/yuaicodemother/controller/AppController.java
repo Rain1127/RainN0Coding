@@ -51,6 +51,8 @@ import java.util.Map;
 @RequestMapping("/app")
 public class AppController {
 
+    private static final long MAX_PAGE_SIZE = 50;
+
     @Resource
     private AppService appService;
 
@@ -367,6 +369,7 @@ public class AppController {
         ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long pageNum = appQueryRequest.getPageNum();
         long pageSize = appQueryRequest.getPageSize();
+        ThrowUtils.throwIf(pageSize <= 0 || pageSize > MAX_PAGE_SIZE, ErrorCode.PARAMS_ERROR, "每页最多查询 50 个应用");
         QueryWrapper queryWrapper = appService.getQueryWrapper(appQueryRequest);
         Page<App> appPage = appService.page(Page.of(pageNum, pageSize), queryWrapper);
         // 数据封装

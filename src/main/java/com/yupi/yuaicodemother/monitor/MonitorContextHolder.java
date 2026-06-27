@@ -12,6 +12,9 @@ public class MonitorContextHolder {
      */
     public static void setContext(MonitorContext context) {
         CONTEXT_HOLDER.set(context);
+        if (context != null && context.getTraceId() != null) {
+            org.slf4j.MDC.put("traceId", context.getTraceId());
+        }
     }
 
     /**
@@ -26,5 +29,6 @@ public class MonitorContextHolder {
      */
     public static void clearContext() {
         CONTEXT_HOLDER.remove();
+        org.slf4j.MDC.remove("traceId");
     }
 }

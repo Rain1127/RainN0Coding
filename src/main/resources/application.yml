@@ -12,16 +12,16 @@ spring:
     name: yu-ai-code-mother-backend
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/yu_ai_code_mother
-    username: root
-    password: 123456
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/yu_ai_code_mother}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
   # redis
   data:
     redis:
-      host: localhost
-      port: 6379
-      database: 0
-      password:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD:}
       ttl: 3600
 server:
   port: 8123
@@ -44,7 +44,10 @@ knife4j:
 # Python AI Agent 服务
 python:
   ai:
-    base-url: http://localhost:8000
+    base-url: ${PYTHON_AI_BASE_URL:http://localhost:8000}
+app:
+  cors:
+    allowed-origin-patterns: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
 ############## Sa-Token 配置 ##############
 sa-token:
   token-name: satoken

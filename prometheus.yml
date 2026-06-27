@@ -28,3 +28,11 @@ scrape_configs:
       - targets: [ 'localhost:8123' ]  # 应用服务器地址
     scrape_interval: 10s  # 每 10 秒抓取一次
     scrape_timeout: 10s   # 抓取超时时间
+
+  # Python FastAPI AI Agent 监控
+  - job_name: 'yu-ai-code-mother-python'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: [ 'localhost:8000' ]
+    scrape_interval: 10s
+    scrape_timeout: 10s

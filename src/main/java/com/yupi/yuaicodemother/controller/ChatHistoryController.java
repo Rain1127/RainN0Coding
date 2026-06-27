@@ -32,6 +32,8 @@ import java.util.List;
 @RequestMapping("/chatHistory")
 public class ChatHistoryController {
 
+    private static final long MAX_PAGE_SIZE = 50;
+
     @Resource
     private ChatHistoryService chatHistoryService;
 
@@ -70,6 +72,7 @@ public class ChatHistoryController {
         ThrowUtils.throwIf(chatHistoryQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long pageNum = chatHistoryQueryRequest.getPageNum();
         long pageSize = chatHistoryQueryRequest.getPageSize();
+        ThrowUtils.throwIf(pageSize <= 0 || pageSize > MAX_PAGE_SIZE, ErrorCode.PARAMS_ERROR, "每页最多查询 50 条记录");
         // 查询数据
         QueryWrapper queryWrapper = chatHistoryService.getQueryWrapper(chatHistoryQueryRequest);
         Page<ChatHistory> result = chatHistoryService.page(Page.of(pageNum, pageSize), queryWrapper);
