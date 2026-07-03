@@ -11,6 +11,12 @@ progress.md
 task_plan.md
 .codex-test-cookie.txt
 .planning/
+.claude/
+.codex-mysql/
+.venv/
+verified_code/
+python-agent/verified_code/
+.DS_Store
 tmp
 data/
 AliyunJavaAgent/logs/
