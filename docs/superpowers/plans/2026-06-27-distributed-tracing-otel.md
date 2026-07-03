@@ -46,19 +46,19 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add pom.xml src/main/resources/application.yml src/main/resources/logback-spring.xml src/test/java/com/yupi/yuaicodemother/monitor/TraceIdResolverTest.java src/main/java/com/yupi/yuaicodemother/monitor/TraceIdResolver.java
+git add pom.xml src/main/resources/application.yml src/main/resources/logback-spring.xml src/test/java/com/rain/rainn0coding/monitor/TraceIdResolverTest.java src/main/java/com/rain/rainn0coding/monitor/TraceIdResolver.java
 git commit -m "feat: add otel tracing foundation"
 ```
 
 ### Task 2: Make Java outbound calls trace-aware
 
 **Files:**
-- Modify: `src/main/java/com/yupi/yuaicodemother/core/python/PythonAiClient.java`
-- Modify: `src/main/java/com/yupi/yuaicodemother/core/AiCodeGeneratorFacade.java`
-- Modify: `src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java`
-- Create: `src/main/java/com/yupi/yuaicodemother/monitor/TraceIdResolver.java`
-- Create: `src/test/java/com/yupi/yuaicodemother/core/python/PythonAiClientTest.java`
-- Create: `src/test/java/com/yupi/yuaicodemother/monitor/TraceIdResolverTest.java`
+- Modify: `src/main/java/com/rain/rainn0coding/core/python/PythonAiClient.java`
+- Modify: `src/main/java/com/rain/rainn0coding/core/AiCodeGeneratorFacade.java`
+- Modify: `src/main/java/com/rain/rainn0coding/service/impl/AppServiceImpl.java`
+- Create: `src/main/java/com/rain/rainn0coding/monitor/TraceIdResolver.java`
+- Create: `src/test/java/com/rain/rainn0coding/core/python/PythonAiClientTest.java`
+- Create: `src/test/java/com/rain/rainn0coding/monitor/TraceIdResolverTest.java`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -89,7 +89,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/yupi/yuaicodemother/core/python/PythonAiClient.java src/main/java/com/yupi/yuaicodemother/core/AiCodeGeneratorFacade.java src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java src/main/java/com/yupi/yuaicodemother/monitor/TraceIdResolver.java src/test/java/com/yupi/yuaicodemother/core/python/PythonAiClientTest.java src/test/java/com/yupi/yuaicodemother/monitor/TraceIdResolverTest.java
+git add src/main/java/com/rain/rainn0coding/core/python/PythonAiClient.java src/main/java/com/rain/rainn0coding/core/AiCodeGeneratorFacade.java src/main/java/com/rain/rainn0coding/service/impl/AppServiceImpl.java src/main/java/com/rain/rainn0coding/monitor/TraceIdResolver.java src/test/java/com/rain/rainn0coding/core/python/PythonAiClientTest.java src/test/java/com/rain/rainn0coding/monitor/TraceIdResolverTest.java
 git commit -m "feat: propagate trace context through java gateway"
 ```
 

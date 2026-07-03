@@ -74,7 +74,7 @@ def setup_tracing(app, service_name: str = "python-agent") -> None:
     resource = Resource.create(
         {
             "service.name": service_name,
-            "service.namespace": "yu-ai-code-mother",
+            "service.namespace": "RainN0Coding",
         }
     )
     provider = TracerProvider(resource=resource)

@@ -113,7 +113,7 @@ Some tests may intentionally carry both `integration` and `harness`. That is acc
 
 ### 2. Shared Fixture Layer
 
-Create a lightweight [`python-agent/tests/conftest.py`](D:/yu-ai-code-mother/python-agent/tests/conftest.py) with only the shared setup patterns already proven useful.
+Create a lightweight [`python-agent/tests/conftest.py`](D:/RainN0Coding/python-agent/tests/conftest.py) with only the shared setup patterns already proven useful.
 
 Expected helpers:
 - guardrail module reload helper
@@ -125,7 +125,7 @@ This file should stay intentionally small. It is not a dumping ground for every 
 
 ### 3. Pytest Configuration
 
-Register the markers in [`python-agent/pyproject.toml`](D:/yu-ai-code-mother/python-agent/pyproject.toml) under pytest configuration so marker use is explicit and warning-free.
+Register the markers in [`python-agent/pyproject.toml`](D:/RainN0Coding/python-agent/pyproject.toml) under pytest configuration so marker use is explicit and warning-free.
 
 At minimum, the configuration should:
 - declare `unit`, `integration`, and `harness`
@@ -137,27 +137,27 @@ No new plugins are required for this slice.
 
 Initial mapping should be conservative and based on actual behavior:
 
-- [`python-agent/tests/test_guardrails_prompt.py`](D:/yu-ai-code-mother/python-agent/tests/test_guardrails_prompt.py)
+- [`python-agent/tests/test_guardrails_prompt.py`](D:/RainN0Coding/python-agent/tests/test_guardrails_prompt.py)
   - primarily `unit`
   - some tests may also be `integration` if they intentionally verify engine routing rather than pure prompt classification
 
-- [`python-agent/tests/test_guardrails_tools.py`](D:/yu-ai-code-mother/python-agent/tests/test_guardrails_tools.py)
+- [`python-agent/tests/test_guardrails_tools.py`](D:/RainN0Coding/python-agent/tests/test_guardrails_tools.py)
   - `integration`
   - `harness`
 
-- [`python-agent/tests/test_guardrails_output.py`](D:/yu-ai-code-mother/python-agent/tests/test_guardrails_output.py)
+- [`python-agent/tests/test_guardrails_output.py`](D:/RainN0Coding/python-agent/tests/test_guardrails_output.py)
   - `integration`
   - `harness`
 
-- [`python-agent/tests/test_internal_auth_and_concurrency.py`](D:/yu-ai-code-mother/python-agent/tests/test_internal_auth_and_concurrency.py)
+- [`python-agent/tests/test_internal_auth_and_concurrency.py`](D:/RainN0Coding/python-agent/tests/test_internal_auth_and_concurrency.py)
   - `integration`
   - `harness`
 
-- [`python-agent/tests/test_tools.py`](D:/yu-ai-code-mother/python-agent/tests/test_tools.py)
+- [`python-agent/tests/test_tools.py`](D:/RainN0Coding/python-agent/tests/test_tools.py)
   - `integration`
   - optionally `harness` if it remains part of the standard focused production suite
 
-- [`python-agent/tests/test_workflow_imports_unittest.py`](D:/yu-ai-code-mother/python-agent/tests/test_workflow_imports_unittest.py)
+- [`python-agent/tests/test_workflow_imports_unittest.py`](D:/RainN0Coding/python-agent/tests/test_workflow_imports_unittest.py)
   - `harness`
   - not necessarily `integration`, because it is mostly a wiring smoke test rather than runtime boundary behavior
 
@@ -214,7 +214,7 @@ Rules:
 
 ### 8. Documentation
 
-Update [`docs/production-hardening-harness.md`](D:/yu-ai-code-mother/docs/production-hardening-harness.md) so the Python section clearly explains:
+Update [`docs/production-hardening-harness.md`](D:/RainN0Coding/docs/production-hardening-harness.md) so the Python section clearly explains:
 - what each marker means
 - which command is the canonical focused harness command
 - which focused files are currently included
@@ -226,20 +226,20 @@ The doc should stay operator-oriented and command-first.
 
 Expected files to modify or create:
 
-- modify [`python-agent/pyproject.toml`](D:/yu-ai-code-mother/python-agent/pyproject.toml)
+- modify [`python-agent/pyproject.toml`](D:/RainN0Coding/python-agent/pyproject.toml)
   - add pytest marker registration
 
-- create [`python-agent/tests/conftest.py`](D:/yu-ai-code-mother/python-agent/tests/conftest.py)
+- create [`python-agent/tests/conftest.py`](D:/RainN0Coding/python-agent/tests/conftest.py)
   - minimal shared deterministic helpers
 
-- modify selected files under [`python-agent/tests/`](D:/yu-ai-code-mother/python-agent/tests)
+- modify selected files under [`python-agent/tests/`](D:/RainN0Coding/python-agent/tests)
   - add markers
   - remove small duplicated setup where clearly replaced by `conftest.py`
 
-- modify [`docs/production-hardening-harness.md`](D:/yu-ai-code-mother/docs/production-hardening-harness.md)
+- modify [`docs/production-hardening-harness.md`](D:/RainN0Coding/docs/production-hardening-harness.md)
   - document unit/integration/harness execution model
 
-- modify [`.planning/2026-06-30-production-hardening/progress.md`](D:/yu-ai-code-mother/.planning/2026-06-30-production-hardening/progress.md)
+- modify [`.planning/2026-06-30-production-hardening/progress.md`](D:/RainN0Coding/.planning/2026-06-30-production-hardening/progress.md)
   - record area 3 implementation and verification evidence
 
 ## Testing Strategy

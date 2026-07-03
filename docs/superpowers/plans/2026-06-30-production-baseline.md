@@ -12,23 +12,23 @@
 
 ## File Structure
 
-- Create `src/main/java/com/yupi/yuaicodemother/config/PythonAiProperties.java`: typed Java properties for Python base URL, token, and timeout budgets.
-- Create `src/main/java/com/yupi/yuaicodemother/config/AiCodegenProperties.java`: typed Java properties for generation concurrency permits.
-- Create `src/main/java/com/yupi/yuaicodemother/config/IdempotencyProperties.java`: typed Java properties for idempotency TTLs and enablement.
+- Create `src/main/java/com/rain/rainn0coding/config/PythonAiProperties.java`: typed Java properties for Python base URL, token, and timeout budgets.
+- Create `src/main/java/com/rain/rainn0coding/config/AiCodegenProperties.java`: typed Java properties for generation concurrency permits.
+- Create `src/main/java/com/rain/rainn0coding/config/IdempotencyProperties.java`: typed Java properties for idempotency TTLs and enablement.
 - Modify `src/main/resources/application.yml`: add the new property defaults.
-- Modify `src/main/java/com/yupi/yuaicodemother/exception/ErrorCode.java`: add specific production-baseline error codes.
-- Create `src/main/java/com/yupi/yuaicodemother/idempotency/IdempotencyStatus.java`: enum for `PROCESSING`, `SUCCESS`, `FAILED`.
-- Create `src/main/java/com/yupi/yuaicodemother/idempotency/IdempotencyRecord.java`: serializable Redis record.
-- Create `src/main/java/com/yupi/yuaicodemother/idempotency/IdempotencyDecision.java`: result object returned by idempotency start checks.
-- Create `src/main/java/com/yupi/yuaicodemother/idempotency/IdempotencyService.java`: Redis-backed idempotency state machine.
-- Create `src/main/java/com/yupi/yuaicodemother/concurrency/AiGenerationPermitService.java`: Redisson-backed global AI permit service.
-- Modify `src/main/java/com/yupi/yuaicodemother/core/python/PythonAiClient.java`: add headers, request IDs, token, timeouts, and safer error mapping.
-- Modify `src/main/java/com/yupi/yuaicodemother/service/AppService.java`: add idempotency/request-id aware overload for chat generation.
-- Modify `src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java`: acquire global permits and mark idempotency state around AI generation.
-- Modify `src/main/java/com/yupi/yuaicodemother/controller/AppController.java`: read `Idempotency-Key`, call idempotent wrappers for add/deploy, and pass idempotency metadata to chat.
+- Modify `src/main/java/com/rain/rainn0coding/exception/ErrorCode.java`: add specific production-baseline error codes.
+- Create `src/main/java/com/rain/rainn0coding/idempotency/IdempotencyStatus.java`: enum for `PROCESSING`, `SUCCESS`, `FAILED`.
+- Create `src/main/java/com/rain/rainn0coding/idempotency/IdempotencyRecord.java`: serializable Redis record.
+- Create `src/main/java/com/rain/rainn0coding/idempotency/IdempotencyDecision.java`: result object returned by idempotency start checks.
+- Create `src/main/java/com/rain/rainn0coding/idempotency/IdempotencyService.java`: Redis-backed idempotency state machine.
+- Create `src/main/java/com/rain/rainn0coding/concurrency/AiGenerationPermitService.java`: Redisson-backed global AI permit service.
+- Modify `src/main/java/com/rain/rainn0coding/core/python/PythonAiClient.java`: add headers, request IDs, token, timeouts, and safer error mapping.
+- Modify `src/main/java/com/rain/rainn0coding/service/AppService.java`: add idempotency/request-id aware overload for chat generation.
+- Modify `src/main/java/com/rain/rainn0coding/service/impl/AppServiceImpl.java`: acquire global permits and mark idempotency state around AI generation.
+- Modify `src/main/java/com/rain/rainn0coding/controller/AppController.java`: read `Idempotency-Key`, call idempotent wrappers for add/deploy, and pass idempotency metadata to chat.
 - Modify `python-agent/config.py`: add `INTERNAL_API_TOKEN`, `AGENT_MAX_CONCURRENT_REQUESTS`, and `AGENT_OVERLOAD_STATUS_CODE`.
 - Modify `python-agent/server/main.py`: add internal-token middleware, local semaphore, request id fields, and structured overload behavior.
-- Create or extend Java tests under `src/test/java/com/yupi/yuaicodemother/...`.
+- Create or extend Java tests under `src/test/java/com/rain/rainn0coding/...`.
 - Create Python tests under `python-agent/tests/test_internal_auth_and_concurrency.py`.
 - Create `docs/production-hardening-harness.md`: local verification guide.
 
@@ -37,17 +37,17 @@
 ### Task 1: Configuration and Error Codes
 
 **Files:**
-- Create: `src/main/java/com/yupi/yuaicodemother/config/PythonAiProperties.java`
-- Create: `src/main/java/com/yupi/yuaicodemother/config/AiCodegenProperties.java`
-- Create: `src/main/java/com/yupi/yuaicodemother/config/IdempotencyProperties.java`
+- Create: `src/main/java/com/rain/rainn0coding/config/PythonAiProperties.java`
+- Create: `src/main/java/com/rain/rainn0coding/config/AiCodegenProperties.java`
+- Create: `src/main/java/com/rain/rainn0coding/config/IdempotencyProperties.java`
 - Modify: `src/main/resources/application.yml`
-- Modify: `src/main/java/com/yupi/yuaicodemother/exception/ErrorCode.java`
-- Test: `src/test/java/com/yupi/yuaicodemother/config/ProductionBaselinePropertiesTest.java`
+- Modify: `src/main/java/com/rain/rainn0coding/exception/ErrorCode.java`
+- Test: `src/test/java/com/rain/rainn0coding/config/ProductionBaselinePropertiesTest.java`
 
 - [ ] **Step 1: Write the failing properties test**
 
 ```java
-package com.yupi.yuaicodemother.config;
+package com.rain.rainn0coding.config;
 
 import org.junit.jupiter.api.Test;
 
@@ -110,7 +110,7 @@ Expected: compilation fails because the three properties classes do not exist.
 Create `PythonAiProperties.java`:
 
 ```java
-package com.yupi.yuaicodemother.config;
+package com.rain.rainn0coding.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -146,7 +146,7 @@ public class PythonAiProperties {
 Create `AiCodegenProperties.java`:
 
 ```java
-package com.yupi.yuaicodemother.config;
+package com.rain.rainn0coding.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -165,7 +165,7 @@ public class AiCodegenProperties {
 Create `IdempotencyProperties.java`:
 
 ```java
-package com.yupi.yuaicodemother.config;
+package com.rain.rainn0coding.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -257,18 +257,18 @@ Expected: test passes.
 ### Task 2: Redis-Backed Idempotency Service
 
 **Files:**
-- Create: `src/main/java/com/yupi/yuaicodemother/idempotency/IdempotencyStatus.java`
-- Create: `src/main/java/com/yupi/yuaicodemother/idempotency/IdempotencyRecord.java`
-- Create: `src/main/java/com/yupi/yuaicodemother/idempotency/IdempotencyDecision.java`
-- Create: `src/main/java/com/yupi/yuaicodemother/idempotency/IdempotencyService.java`
-- Test: `src/test/java/com/yupi/yuaicodemother/idempotency/IdempotencyServiceTest.java`
+- Create: `src/main/java/com/rain/rainn0coding/idempotency/IdempotencyStatus.java`
+- Create: `src/main/java/com/rain/rainn0coding/idempotency/IdempotencyRecord.java`
+- Create: `src/main/java/com/rain/rainn0coding/idempotency/IdempotencyDecision.java`
+- Create: `src/main/java/com/rain/rainn0coding/idempotency/IdempotencyService.java`
+- Test: `src/test/java/com/rain/rainn0coding/idempotency/IdempotencyServiceTest.java`
 
 - [ ] **Step 1: Write the failing idempotency tests**
 
 ```java
-package com.yupi.yuaicodemother.idempotency;
+package com.rain.rainn0coding.idempotency;
 
-import com.yupi.yuaicodemother.config.IdempotencyProperties;
+import com.rain.rainn0coding.config.IdempotencyProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RBucket;
@@ -361,7 +361,7 @@ Expected: compilation fails because idempotency classes do not exist.
 Create `IdempotencyStatus.java`:
 
 ```java
-package com.yupi.yuaicodemother.idempotency;
+package com.rain.rainn0coding.idempotency;
 
 public enum IdempotencyStatus {
     PROCESSING,
@@ -373,7 +373,7 @@ public enum IdempotencyStatus {
 Create `IdempotencyRecord.java`:
 
 ```java
-package com.yupi.yuaicodemother.idempotency;
+package com.rain.rainn0coding.idempotency;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -416,7 +416,7 @@ public class IdempotencyRecord implements Serializable {
 Create `IdempotencyDecision.java`:
 
 ```java
-package com.yupi.yuaicodemother.idempotency;
+package com.rain.rainn0coding.idempotency;
 
 public record IdempotencyDecision(Type type, String redisKey, IdempotencyRecord record) {
 
@@ -442,10 +442,10 @@ public record IdempotencyDecision(Type type, String redisKey, IdempotencyRecord 
 - [ ] **Step 4: Add `IdempotencyService`**
 
 ```java
-package com.yupi.yuaicodemother.idempotency;
+package com.rain.rainn0coding.idempotency;
 
 import cn.hutool.core.util.StrUtil;
-import com.yupi.yuaicodemother.config.IdempotencyProperties;
+import com.rain.rainn0coding.config.IdempotencyProperties;
 import jakarta.annotation.Resource;
 import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
@@ -546,15 +546,15 @@ Expected: tests pass.
 ### Task 3: Global AI Generation Permit Service
 
 **Files:**
-- Create: `src/main/java/com/yupi/yuaicodemother/concurrency/AiGenerationPermitService.java`
-- Test: `src/test/java/com/yupi/yuaicodemother/concurrency/AiGenerationPermitServiceTest.java`
+- Create: `src/main/java/com/rain/rainn0coding/concurrency/AiGenerationPermitService.java`
+- Test: `src/test/java/com/rain/rainn0coding/concurrency/AiGenerationPermitServiceTest.java`
 
 - [ ] **Step 1: Write the failing permit tests**
 
 ```java
-package com.yupi.yuaicodemother.concurrency;
+package com.rain.rainn0coding.concurrency;
 
-import com.yupi.yuaicodemother.config.AiCodegenProperties;
+import com.rain.rainn0coding.config.AiCodegenProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RPermitExpirableSemaphore;
@@ -630,9 +630,9 @@ Expected: compilation fails because `AiGenerationPermitService` does not exist.
 - [ ] **Step 3: Add the permit service**
 
 ```java
-package com.yupi.yuaicodemother.concurrency;
+package com.rain.rainn0coding.concurrency;
 
-import com.yupi.yuaicodemother.config.AiCodegenProperties;
+import com.rain.rainn0coding.config.AiCodegenProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RPermitExpirableSemaphore;
 import org.redisson.api.RedissonClient;
@@ -700,8 +700,8 @@ Expected: tests pass.
 ### Task 4: Harden `PythonAiClient`
 
 **Files:**
-- Modify: `src/main/java/com/yupi/yuaicodemother/core/python/PythonAiClient.java`
-- Modify: `src/test/java/com/yupi/yuaicodemother/core/python/PythonAiClientTest.java`
+- Modify: `src/main/java/com/rain/rainn0coding/core/python/PythonAiClient.java`
+- Modify: `src/test/java/com/rain/rainn0coding/core/python/PythonAiClientTest.java`
 
 - [ ] **Step 1: Replace the existing client test with header and timeout coverage**
 
@@ -826,27 +826,27 @@ Expected: tests pass.
 ### Task 5: Wire Idempotency and Concurrency into Java App Flow
 
 **Files:**
-- Modify: `src/main/java/com/yupi/yuaicodemother/service/AppService.java`
-- Modify: `src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java`
-- Modify: `src/main/java/com/yupi/yuaicodemother/controller/AppController.java`
-- Test: `src/test/java/com/yupi/yuaicodemother/controller/AppControllerProductionBaselineTest.java`
-- Test: `src/test/java/com/yupi/yuaicodemother/service/impl/AppServiceImplProductionBaselineTest.java`
+- Modify: `src/main/java/com/rain/rainn0coding/service/AppService.java`
+- Modify: `src/main/java/com/rain/rainn0coding/service/impl/AppServiceImpl.java`
+- Modify: `src/main/java/com/rain/rainn0coding/controller/AppController.java`
+- Test: `src/test/java/com/rain/rainn0coding/controller/AppControllerProductionBaselineTest.java`
+- Test: `src/test/java/com/rain/rainn0coding/service/impl/AppServiceImplProductionBaselineTest.java`
 
 - [ ] **Step 1: Write controller tests for add idempotency replay**
 
 ```java
-package com.yupi.yuaicodemother.controller;
+package com.rain.rainn0coding.controller;
 
 import cn.hutool.json.JSONUtil;
-import com.yupi.yuaicodemother.common.BaseResponse;
-import com.yupi.yuaicodemother.exception.ErrorCode;
-import com.yupi.yuaicodemother.idempotency.IdempotencyDecision;
-import com.yupi.yuaicodemother.idempotency.IdempotencyRecord;
-import com.yupi.yuaicodemother.idempotency.IdempotencyService;
-import com.yupi.yuaicodemother.model.dto.app.AppAddRequest;
-import com.yupi.yuaicodemother.model.entity.User;
-import com.yupi.yuaicodemother.service.AppService;
-import com.yupi.yuaicodemother.service.UserService;
+import com.rain.rainn0coding.common.BaseResponse;
+import com.rain.rainn0coding.exception.ErrorCode;
+import com.rain.rainn0coding.idempotency.IdempotencyDecision;
+import com.rain.rainn0coding.idempotency.IdempotencyRecord;
+import com.rain.rainn0coding.idempotency.IdempotencyService;
+import com.rain.rainn0coding.model.dto.app.AppAddRequest;
+import com.rain.rainn0coding.model.entity.User;
+import com.rain.rainn0coding.service.AppService;
+import com.rain.rainn0coding.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -907,7 +907,7 @@ class AppControllerProductionBaselineTest {
         body.setInitPrompt("build app");
 
         org.junit.jupiter.api.Assertions.assertThrows(
-                com.yupi.yuaicodemother.exception.BusinessException.class,
+                com.rain.rainn0coding.exception.BusinessException.class,
                 () -> controller.addApp(body, "idem", request)
         );
     }

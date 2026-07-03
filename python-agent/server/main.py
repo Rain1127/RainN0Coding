@@ -6,7 +6,7 @@ Endpoints:
   GET  /api/health         - health check
 
 Run:
-  PYTHONPATH=D:/code/yu-ai-code-mother/python-agent .venv/Scripts/python.exe server/main.py
+  PYTHONPATH=D:/code/RainN0Coding/python-agent .venv/Scripts/python.exe server/main.py
   or uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
 """
 import asyncio

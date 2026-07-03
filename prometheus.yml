@@ -22,7 +22,7 @@ scrape_configs:
       - targets: [ 'localhost:9090' ]
 
   # Spring Boot 应用监控
-  - job_name: 'yu-ai-code-mother'
+  - job_name: 'RainN0Coding'
     metrics_path: '/api/actuator/prometheus'  # Spring Boot Actuator 端点
     static_configs:
       - targets: [ 'localhost:8123' ]  # 应用服务器地址
@@ -30,7 +30,7 @@ scrape_configs:
     scrape_timeout: 10s   # 抓取超时时间
 
   # Python FastAPI AI Agent 监控
-  - job_name: 'yu-ai-code-mother-python'
+  - job_name: 'RainN0Coding-python'
     metrics_path: '/metrics'
     static_configs:
       - targets: [ 'localhost:8000' ]

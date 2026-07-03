@@ -11,11 +11,11 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.yupi</groupId>
-    <artifactId>yu-ai-code-mother</artifactId>
+    <groupId>com.rain</groupId>
+    <artifactId>RainN0Coding</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>yu-ai-code-mother</name>
-    <description>yu-ai-code-mother</description>
+    <name>RainN0Coding</name>
+    <description>RainN0Coding</description>
 
     <properties>
         <java.version>21</java.version>

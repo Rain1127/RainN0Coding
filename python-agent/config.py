@@ -29,7 +29,7 @@ class Config:
     LANGSMITH_TRACING: bool = os.getenv("LANGSMITH_TRACING", "false").lower() == "true"
     LANGSMITH_API_KEY: str = os.getenv("LANGSMITH_API_KEY", "")
     LANGSMITH_ENDPOINT: str = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-    LANGSMITH_PROJECT: str = os.getenv("LANGSMITH_PROJECT", "yu-ai-code-mother")
+    LANGSMITH_PROJECT: str = os.getenv("LANGSMITH_PROJECT", "RainN0Coding")
 
     # ===== 熔断器 =====
     CB_FAILURE_THRESHOLD: int = 3         # 连续失败 N 次后熔断

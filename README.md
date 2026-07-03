@@ -1,4 +1,4 @@
-# yu-ai-code-mother
+# RainN0Coding
 
 AI-powered code generation platform with a Java gateway and a Python multi-agent engine.
 
@@ -27,16 +27,16 @@ mvn test
 
 ```powershell
 cd python-agent
-$env:PYTHONPATH="D:/yu-ai-code-mother/python-agent"
+$env:PYTHONPATH="D:/RainN0Coding/python-agent"
 .venv/Scripts/python.exe server/main.py
 ```
 
 ### Frontend
 
-Frontend code is expected in `yu-ai-code-mother-frontend/` when working in the full local setup.
+Frontend code is expected in `RainN0Coding-frontend/` when working in the full local setup.
 
 ```powershell
-cd yu-ai-code-mother-frontend
+cd RainN0Coding-frontend
 npm run dev
 ```
 

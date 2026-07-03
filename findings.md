@@ -30,7 +30,7 @@ This file stores raw observations from the current audit. Treat entries as notes
 
 ## Frontend / Static Assets
 
-- `yu-ai-code-mother-frontend` exists but appears to contain no source files in this workspace; only built assets exist under `src/main/resources/static`.
+- `RainN0Coding-frontend` exists but appears to contain no source files in this workspace; only built assets exist under `src/main/resources/static`.
 - Built frontend assets use axios with `baseURL="/api"` and `withCredentials=true`; SSE fetch uses `credentials:"include"`.
 - Java CORS config allows credentialed requests from any origin, which combines badly with cookie-based Sa-Token auth.
 

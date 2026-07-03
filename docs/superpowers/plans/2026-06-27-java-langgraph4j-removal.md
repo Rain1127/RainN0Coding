@@ -13,8 +13,8 @@
 ### Task 1: Remove the last Java runtime entrypoint
 
 **Files:**
-- Delete: `src/main/java/com/yupi/yuaicodemother/controller/WorkflowSseController.java`
-- Verify: `src/main/java/com/yupi/yuaicodemother/core/AiCodeGeneratorFacade.java`
+- Delete: `src/main/java/com/rain/rainn0coding/controller/WorkflowSseController.java`
+- Verify: `src/main/java/com/rain/rainn0coding/core/AiCodeGeneratorFacade.java`
 
 - [ ] Delete the controller that exposes `/workflow/*` endpoints backed by Java LangGraph4j.
 - [ ] Confirm the production generation path still centers on `AiCodeGeneratorFacade` and Python SSE integration.
@@ -22,8 +22,8 @@
 ### Task 2: Remove Java LangGraph4j sources and tests
 
 **Files:**
-- Delete: `src/main/java/com/yupi/yuaicodemother/langgraph4j/**`
-- Delete: `src/test/java/com/yupi/yuaicodemother/langgraph4j/**`
+- Delete: `src/main/java/com/rain/rainn0coding/langgraph4j/**`
+- Delete: `src/test/java/com/rain/rainn0coding/langgraph4j/**`
 
 - [ ] Delete the full Java `langgraph4j` package from main sources.
 - [ ] Delete the full Java `langgraph4j` package from test sources.

@@ -30,7 +30,7 @@ JAVA_HOME="D:/Program Files/Java/jdk-23" mvn test -Dtest=AiCodeGeneratorFacadeTe
 # Start the app (from IDE or mvn spring-boot:run, needs MySQL + Redis running)
 
 # Generate MyBatis code (custom generator)
-mvn exec:java -Dexec.mainClass="com.yupi.yuaicodemother.generator.MyBatisCodeGenerator"
+mvn exec:java -Dexec.mainClass="com.rain.rainn0coding.generator.MyBatisCodeGenerator"
 ```
 
 ### Python Agent (FastAPI + LangGraph)
@@ -39,7 +39,7 @@ mvn exec:java -Dexec.mainClass="com.yupi.yuaicodemother.generator.MyBatisCodeGen
 cd python-agent
 
 # Start the API server (venv python avoids uv torch DLL issues on Windows)
-PYTHONPATH=D:/yu-ai-code-mother/python-agent .venv/Scripts/python.exe server/main.py
+PYTHONPATH=D:/RainN0Coding/python-agent .venv/Scripts/python.exe server/main.py
 
 # Or with uvicorn directly
 uv run uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
@@ -57,7 +57,7 @@ PYTHONPATH=. .venv/Scripts/python.exe rag/seed_milvus.py
 ### Frontend (Vue 3 + Vite)
 
 ```bash
-cd yu-ai-code-mother-frontend
+cd RainN0Coding-frontend
 npm run dev      # Development server
 npm run build    # vue-tsc type-check + vite build
 npm run preview  # Preview production build
@@ -75,7 +75,7 @@ prometheus --config.file=prometheus.yml
 
 ## Architecture
 
-### Java Package Structure (`src/main/java/com/yupi/yuaicodemother/`)
+### Java Package Structure (`src/main/java/com/rain/rainn0coding/`)
 
 | Package | Role |
 |---------|------|
@@ -149,7 +149,7 @@ START → intent_agent → pm_agent → architect_agent → fork_coder_and_image
 
 **Embedding**: `BAAI/bge-small-zh-v1.5` (512-dim), local PyTorch CPU inference (~10ms/sample)
 
-### Database Tables (MySQL `yu_ai_code_mother`)
+### Database Tables (MySQL `rainn0coding`)
 
 - `user` — users, snowflake IDs, `userAccount` unique
 - `app` — user applications, linked to userId, `deployKey` unique

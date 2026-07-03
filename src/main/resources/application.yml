@@ -9,10 +9,10 @@ spring:
     active: local
 
   application:
-    name: yu-ai-code-mother-backend
+    name: RainN0Coding-backend
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/yu_ai_code_mother}
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/rainn0coding}
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:}
   # redis
@@ -35,7 +35,7 @@ server:
 springdoc:
   group-configs:
     - group: 'default'
-      packages-to-scan: com.yupi.yuaicodemother.controller
+      packages-to-scan: com.rain.rainn0coding.controller
 # knife4j
 knife4j:
   enable: true
@@ -92,7 +92,7 @@ otel:
   resource:
     attributes:
       - name: service.name
-        value: yu-ai-code-mother-backend
+        value: RainN0Coding-backend
   tracer_provider:
     processors:
       - batch:

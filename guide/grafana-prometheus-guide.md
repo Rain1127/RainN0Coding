@@ -1,6 +1,6 @@
 # Grafana + Prometheus + Tempo 使用指南
 
-适用于 `yu-ai-code-mother` 的本地可观测性环境。
+适用于 `RainN0Coding` 的本地可观测性环境。
 
 当前方案分成两条链路：
 - 指标链路：Spring Boot / FastAPI -> Prometheus -> Grafana

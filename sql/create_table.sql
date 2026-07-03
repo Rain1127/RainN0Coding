@@ -1,9 +1,9 @@
 -- Database bootstrap for local development and tests
-CREATE DATABASE IF NOT EXISTS yu_ai_code_mother
+CREATE DATABASE IF NOT EXISTS rainn0coding
   DEFAULT CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE yu_ai_code_mother;
+USE rainn0coding;
 
 CREATE TABLE IF NOT EXISTS `user` (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

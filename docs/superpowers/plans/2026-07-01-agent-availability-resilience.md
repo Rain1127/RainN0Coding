@@ -34,9 +34,9 @@
   - Document new high-availability harness commands and expected degraded/partial-success semantics.
 - Modify `.planning/2026-06-30-production-hardening/progress.md`
   - Record route 4 completion evidence and exact verification commands.
-- Modify `src/main/java/com/yupi/yuaicodemother/controller/AppController.java`
+- Modify `src/main/java/com/rain/rainn0coding/controller/AppController.java`
   - Treat `degraded_success` and `partial_success` as non-system-error semantic terminal states.
-- Modify `src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java`
+- Modify `src/main/java/com/rain/rainn0coding/service/impl/AppServiceImpl.java`
   - Preserve meaningful chat-history summary text for `degraded_success` and `partial_success`.
 
 ---
@@ -982,8 +982,8 @@ git commit -m "test: cover workflow degraded and partial-success paths"
 ### Task 7: Add Lightweight Java Compatibility for New Terminal Statuses
 
 **Files:**
-- Modify: `src/main/java/com/yupi/yuaicodemother/controller/AppController.java`
-- Modify: `src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java`
+- Modify: `src/main/java/com/rain/rainn0coding/controller/AppController.java`
+- Modify: `src/main/java/com/rain/rainn0coding/service/impl/AppServiceImpl.java`
 - Test: existing focused Java SSE/controller tests covering semantic failure parsing
 
 - [ ] **Step 1: Write the compatibility behavior change in code first**
@@ -1046,7 +1046,7 @@ Expected: PASS with no regression in overload and semantic SSE handling.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/main/java/com/yupi/yuaicodemother/controller/AppController.java src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java
+git add src/main/java/com/rain/rainn0coding/controller/AppController.java src/main/java/com/rain/rainn0coding/service/impl/AppServiceImpl.java
 git commit -m "fix: treat degraded workflow statuses as non-fatal"
 ```
 

@@ -103,7 +103,7 @@ graph TD
   "scope": "rag:query code:generate",
   "iat": 1710000000,
   "exp": 1710003600,
-  "iss": "yu-ai-code-mother",
+  "iss": "RainN0Coding",
   "aud": "yu-ai-code-api",
   "jti": "token_unique_id"
 }

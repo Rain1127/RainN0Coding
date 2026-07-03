@@ -1,4 +1,4 @@
-# yu-ai-code-mother 技术参考文档
+# RainN0Coding 技术参考文档
 
 > 最后更新：2026-05-24
 > 涵盖：项目架构、数据表、技术栈、优化建议、多 Agent 架构、RAG 反幻觉体系、Python 实现现状
@@ -72,13 +72,13 @@
 | 变体 | 位置 | 状态 |
 |---|---|---|
 | 单体版本 | `src/` | 主力代码库 |
-| 微服务重构 | `fronted/yu-ai-code-mother-microservice/` | 开发中，Dubbo + Nacos |
-| 前端 | `yu-ai-code-mother-frontend/` | 生产环境 |
+| 微服务重构 | `fronted/RainN0Coding-microservice/` | 开发中，Dubbo + Nacos |
+| 前端 | `RainN0Coding-frontend/` | 生产环境 |
 
 ### 1.3 包结构
 
 ```
-com.yupi.yuaicodemother
+com.rain.rainn0coding
 ├── controller/       # REST 控制器 (App, User, ChatHistory, Health, WorkflowSse...)
 ├── service/          # 业务服务接口
 ├── service/impl/     # 业务服务实现
@@ -196,7 +196,7 @@ com.yupi.yuaicodemother
 
 | 组件 | 地址 | 用途 |
 |---|---|---|
-| MySQL | localhost:3306 | 主数据库（库名 `yu_ai_code_mother`） |
+| MySQL | localhost:3306 | 主数据库（库名 `rainn0coding`） |
 | Redis | localhost:6379 (DB 0) | 会话存储 / 缓存 / AI 聊天记忆 / 限流 |
 | Milvus | localhost:19530 | 向量数据库（代码片段嵌入、相似检索、RAG） |
 | Nacos | localhost:8848 | 微服务注册中心（仅微服务版本） |
@@ -220,7 +220,7 @@ com.yupi.yuaicodemother
 
 | 配置项 | 值 |
 |---|---|
-| 应用名 | `yu-ai-code-mother-backend` |
+| 应用名 | `RainN0Coding-backend` |
 | 服务端口 | `8123` |
 | 上下文路径 | `/api` |
 | 会话超时 | 30 天（2592000 秒） |
@@ -2067,5 +2067,5 @@ httpx>=0.27.0
 | 分支 | master |
 |---|---|
 | 最新提交 | `a8f95e5` DAY11 - 系统优化（稳定性优化） |
-| 前端目录 | `yu-ai-code-mother-frontend/` |
-| 微服务重构 | `fronted/yu-ai-code-mother-microservice/` |
+| 前端目录 | `RainN0Coding-frontend/` |
+| 微服务重构 | `fronted/RainN0Coding-microservice/` |

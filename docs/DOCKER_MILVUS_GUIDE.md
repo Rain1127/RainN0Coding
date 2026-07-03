@@ -50,7 +50,7 @@ wsl --install
 所有命令在 `milvus/` 目录下执行：
 
 ```bash
-cd D:/code/yu-ai-code-mother/milvus
+cd D:/code/RainN0Coding/milvus
 ```
 
 ### 2.1 启动
@@ -92,7 +92,7 @@ curl http://localhost:9091/healthz
 Python 验证：
 
 ```bash
-cd D:/code/yu-ai-code-mother/python-agent
+cd D:/code/RainN0Coding/python-agent
 .venv/Scripts/python.exe -c "from pymilvus import MilvusClient; c = MilvusClient(uri='http://localhost:19530'); print(c.list_collections())"
 ```
 
@@ -128,7 +128,7 @@ docker compose logs -f milvus-standalone
          没有的话手动开一下，等图标变绿
 
 2. 启动 Milvus:
-   cd D:/code/yu-ai-code-mother/milvus
+   cd D:/code/RainN0Coding/milvus
    docker compose up -d
 
 3. 开发/测试 → 用 Python 连 localhost:19530
@@ -216,7 +216,7 @@ client.load_collection("code_store")  # 加载到内存
 ### Q: 想彻底重置（删除所有数据）
 
 ```bash
-cd D:/code/yu-ai-code-mother/milvus
+cd D:/code/RainN0Coding/milvus
 docker compose down -v   # 删除容器 + 数据卷
 docker compose up -d      # 重新创建
 ```
@@ -246,6 +246,6 @@ Milvus Standalone 默认占用约 4GB 内存。如果 Docker Desktop 只分配�
 MILVUS_MODE=lite
 
 # 初始化（自动创建本地文件数据库）
-cd D:/code/yu-ai-code-mother/python-agent
+cd D:/code/RainN0Coding/python-agent
 .venv/Scripts/python.exe -c "from rag.milvus_client import milvus_store; milvus_store.connect(); milvus_store.init_collections()"
 ```

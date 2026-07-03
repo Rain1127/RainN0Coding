@@ -1,6 +1,6 @@
 # 腾讯云部署清单与操作流程
 
-适用项目：`yu-ai-code-mother`
+适用项目：`RainN0Coding`
 
 目标架构：腾讯云 CVM 上运行 Spring Boot 网关、Python FastAPI Agent、Redis、MySQL、Milvus Standalone，并通过 Nginx 对外暴露 HTTPS。前端由 Vite 构建后打入 Spring Boot `src/main/resources/static`，生产访问路径建议统一走 `/api`。
 
@@ -187,23 +187,23 @@ create table if not exists app_version
 服务器上建议统一放到 `/opt`：
 
 ```bash
-sudo mkdir -p /opt/yu-ai-code-mother
-sudo mkdir -p /opt/yu-ai-code-mother/logs/java
-sudo mkdir -p /opt/yu-ai-code-mother/logs/python
-sudo mkdir -p /opt/yu-ai-code-mother/data/mysql
-sudo mkdir -p /opt/yu-ai-code-mother/data/redis
-sudo mkdir -p /opt/yu-ai-code-mother/data/milvus
-sudo mkdir -p /opt/yu-ai-code-mother/tmp/code_output
-sudo mkdir -p /opt/yu-ai-code-mother/tmp/code_deploy
-sudo mkdir -p /opt/yu-ai-code-mother/python-agent/rag_data
-sudo chown -R $USER:$USER /opt/yu-ai-code-mother
+sudo mkdir -p /opt/RainN0Coding
+sudo mkdir -p /opt/RainN0Coding/logs/java
+sudo mkdir -p /opt/RainN0Coding/logs/python
+sudo mkdir -p /opt/RainN0Coding/data/mysql
+sudo mkdir -p /opt/RainN0Coding/data/redis
+sudo mkdir -p /opt/RainN0Coding/data/milvus
+sudo mkdir -p /opt/RainN0Coding/tmp/code_output
+sudo mkdir -p /opt/RainN0Coding/tmp/code_deploy
+sudo mkdir -p /opt/RainN0Coding/python-agent/rag_data
+sudo chown -R $USER:$USER /opt/RainN0Coding
 ```
 
 推荐创建专用用户：
 
 ```bash
 sudo useradd --system --create-home --shell /usr/sbin/nologin yuai
-sudo chown -R yuai:yuai /opt/yu-ai-code-mother
+sudo chown -R yuai:yuai /opt/RainN0Coding
 ```
 
 ---
@@ -262,27 +262,27 @@ sudo mysql
 执行：
 
 ```sql
-create database if not exists yu_ai_code_mother
+create database if not exists rainn0coding
   default character set utf8mb4
   collate utf8mb4_unicode_ci;
 
 create user if not exists 'yuai'@'127.0.0.1'
   identified by 'replace-with-strong-password';
 
-grant all privileges on yu_ai_code_mother.* to 'yuai'@'127.0.0.1';
+grant all privileges on rainn0coding.* to 'yuai'@'127.0.0.1';
 flush privileges;
 ```
 
 ### 6.2 导入表结构
 
 ```bash
-mysql -h127.0.0.1 -uyuai -p yu_ai_code_mother < /opt/yu-ai-code-mother/sql/create_table.sql
+mysql -h127.0.0.1 -uyuai -p rainn0coding < /opt/RainN0Coding/sql/create_table.sql
 ```
 
 然后补充 `app_version`：
 
 ```bash
-mysql -h127.0.0.1 -uyuai -p yu_ai_code_mother
+mysql -h127.0.0.1 -uyuai -p rainn0coding
 ```
 
 执行第 3.5 节的 `app_version` SQL。
@@ -339,8 +339,8 @@ redis-cli -a replace-with-strong-redis-password ping
 
 ```bash
 cd /opt
-git clone <your-repo-url> yu-ai-code-mother
-cd /opt/yu-ai-code-mother
+git clone <your-repo-url> RainN0Coding
+cd /opt/RainN0Coding
 ```
 
 如果用本地构建产物上传，也要把 `milvus/docker-compose.yml` 和 `python-agent` 上传到服务器。
@@ -360,7 +360,7 @@ MinIO 和 etcd 不需要映射公网端口。
 ### 8.3 启动 Milvus
 
 ```bash
-cd /opt/yu-ai-code-mother/milvus
+cd /opt/RainN0Coding/milvus
 docker compose up -d
 docker compose ps
 curl http://127.0.0.1:9091/healthz
@@ -375,7 +375,7 @@ curl http://127.0.0.1:9091/healthz
 ### 9.1 创建虚拟环境
 
 ```bash
-cd /opt/yu-ai-code-mother/python-agent
+cd /opt/RainN0Coding/python-agent
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -U pip uv
 .venv/bin/uv sync
@@ -385,10 +385,10 @@ python3.12 -m venv .venv
 
 ### 9.2 创建生产环境变量文件
 
-创建 `/opt/yu-ai-code-mother/python-agent/.env.prod`：
+创建 `/opt/RainN0Coding/python-agent/.env.prod`：
 
 ```bash
-cat > /opt/yu-ai-code-mother/python-agent/.env.prod <<'EOF'
+cat > /opt/RainN0Coding/python-agent/.env.prod <<'EOF'
 DEEPSEEK_API_KEY=replace-with-real-key
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-v4-pro
@@ -416,37 +416,37 @@ RAG_TOP_K=8
 RAG_DEDUP_THRESHOLD=0.95
 RAG_PARALLEL_WORKERS=5
 
-SQLITE_DB_PATH=/opt/yu-ai-code-mother/python-agent/rag_data/exact_search.db
-CODE_STORE_DIR=/opt/yu-ai-code-mother/python-agent/verified_code
+SQLITE_DB_PATH=/opt/RainN0Coding/python-agent/rag_data/exact_search.db
+CODE_STORE_DIR=/opt/RainN0Coding/python-agent/verified_code
 USE_HYBRID_ENGINE=true
 
 LANGSMITH_TRACING=false
 LANGSMITH_API_KEY=
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
-LANGSMITH_PROJECT=yu-ai-code-mother
+LANGSMITH_PROJECT=RainN0Coding
 EOF
 
-chmod 600 /opt/yu-ai-code-mother/python-agent/.env.prod
+chmod 600 /opt/RainN0Coding/python-agent/.env.prod
 ```
 
 注意：当前 `Config` 使用 `python-dotenv` 默认加载 `.env`。生产可把 `.env.prod` 复制为 `.env`，或在 systemd 里通过 `EnvironmentFile` 注入。
 
 ```bash
-cp /opt/yu-ai-code-mother/python-agent/.env.prod /opt/yu-ai-code-mother/python-agent/.env
+cp /opt/RainN0Coding/python-agent/.env.prod /opt/RainN0Coding/python-agent/.env
 ```
 
 ### 9.3 初始化 Milvus Collection 和种子数据
 
 ```bash
-cd /opt/yu-ai-code-mother/python-agent
-PYTHONPATH=/opt/yu-ai-code-mother/python-agent \
+cd /opt/RainN0Coding/python-agent
+PYTHONPATH=/opt/RainN0Coding/python-agent \
   .venv/bin/python rag/seed_milvus.py
 ```
 
 验证：
 
 ```bash
-PYTHONPATH=/opt/yu-ai-code-mother/python-agent \
+PYTHONPATH=/opt/RainN0Coding/python-agent \
   .venv/bin/python -c "from rag.milvus_client import milvus_store; milvus_store.connect(); print('milvus ok')"
 ```
 
@@ -464,14 +464,14 @@ Wants=network-online.target
 Type=simple
 User=yuai
 Group=yuai
-WorkingDirectory=/opt/yu-ai-code-mother/python-agent
-EnvironmentFile=/opt/yu-ai-code-mother/python-agent/.env.prod
-Environment=PYTHONPATH=/opt/yu-ai-code-mother/python-agent
-ExecStart=/opt/yu-ai-code-mother/python-agent/.venv/bin/python -m uvicorn server.main:app --host 127.0.0.1 --port 8000 --workers 1
+WorkingDirectory=/opt/RainN0Coding/python-agent
+EnvironmentFile=/opt/RainN0Coding/python-agent/.env.prod
+Environment=PYTHONPATH=/opt/RainN0Coding/python-agent
+ExecStart=/opt/RainN0Coding/python-agent/.venv/bin/python -m uvicorn server.main:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=always
 RestartSec=5
-StandardOutput=append:/opt/yu-ai-code-mother/logs/python/stdout.log
-StandardError=append:/opt/yu-ai-code-mother/logs/python/stderr.log
+StandardOutput=append:/opt/RainN0Coding/logs/python/stdout.log
+StandardError=append:/opt/RainN0Coding/logs/python/stderr.log
 
 [Install]
 WantedBy=multi-user.target
@@ -496,10 +496,10 @@ curl http://127.0.0.1:8000/api/health
 - 生产构建 `base` 是 `/api/`。
 - 构建输出目录是 `../src/main/resources/static`。
 
-创建 `yu-ai-code-mother-frontend/.env.production`：
+创建 `RainN0Coding-frontend/.env.production`：
 
 ```bash
-cat > /opt/yu-ai-code-mother/yu-ai-code-mother-frontend/.env.production <<'EOF'
+cat > /opt/RainN0Coding/RainN0Coding-frontend/.env.production <<'EOF'
 VITE_API_BASE=/api
 EOF
 ```
@@ -507,7 +507,7 @@ EOF
 构建：
 
 ```bash
-cd /opt/yu-ai-code-mother/yu-ai-code-mother-frontend
+cd /opt/RainN0Coding/RainN0Coding-frontend
 npm ci
 npm run build
 ```
@@ -515,7 +515,7 @@ npm run build
 构建成功后应看到：
 
 ```text
-/opt/yu-ai-code-mother/src/main/resources/static
+/opt/RainN0Coding/src/main/resources/static
 ```
 
 ---
@@ -524,20 +524,20 @@ npm run build
 
 ### 11.1 生产配置文件
 
-创建 `/opt/yu-ai-code-mother/config/application-prod.yml`：
+创建 `/opt/RainN0Coding/config/application-prod.yml`：
 
 ```yaml
 spring:
   profiles:
     active: prod
   application:
-    name: yu-ai-code-mother-backend
+    name: RainN0Coding-backend
   session:
     timeout: 2592000
     store-type: redis
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/yu_ai_code_mother?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://127.0.0.1:3306/rainn0coding?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: yuai
     password: replace-with-strong-password
   data:
@@ -595,7 +595,7 @@ pexels:
 设置权限：
 
 ```bash
-chmod 600 /opt/yu-ai-code-mother/config/application-prod.yml
+chmod 600 /opt/RainN0Coding/config/application-prod.yml
 ```
 
 ### 11.2 构建 Jar
@@ -603,28 +603,28 @@ chmod 600 /opt/yu-ai-code-mother/config/application-prod.yml
 推荐在 CI 或本地构建后上传 Jar。若在服务器构建，确保 JDK 版本满足项目要求。仓库说明里提到 Lombok 编译建议使用 JDK 23。
 
 ```bash
-cd /opt/yu-ai-code-mother
+cd /opt/RainN0Coding
 mvn clean package -DskipTests -Dspring.profiles.active=prod
 ```
 
 产物：
 
 ```text
-target/yu-ai-code-mother-0.0.1-SNAPSHOT.jar
+target/RainN0Coding-0.0.1-SNAPSHOT.jar
 ```
 
 ### 11.3 创建 Java 环境变量文件
 
-创建 `/opt/yu-ai-code-mother/config/java.env`：
+创建 `/opt/RainN0Coding/config/java.env`：
 
 ```bash
-cat > /opt/yu-ai-code-mother/config/java.env <<'EOF'
+cat > /opt/RainN0Coding/config/java.env <<'EOF'
 COS_SECRET_ID=replace-with-real-secret-id
 COS_SECRET_KEY=replace-with-real-secret-key
 PEXELS_API_KEY=replace-with-real-key
 EOF
 
-chmod 600 /opt/yu-ai-code-mother/config/java.env
+chmod 600 /opt/RainN0Coding/config/java.env
 ```
 
 ### 11.4 创建 Java systemd 服务
@@ -641,13 +641,13 @@ Wants=network-online.target
 Type=simple
 User=yuai
 Group=yuai
-WorkingDirectory=/opt/yu-ai-code-mother
-EnvironmentFile=/opt/yu-ai-code-mother/config/java.env
-ExecStart=/usr/bin/java -Xms512m -Xmx2g -jar /opt/yu-ai-code-mother/target/yu-ai-code-mother-0.0.1-SNAPSHOT.jar --spring.config.additional-location=file:/opt/yu-ai-code-mother/config/application-prod.yml --spring.profiles.active=prod
+WorkingDirectory=/opt/RainN0Coding
+EnvironmentFile=/opt/RainN0Coding/config/java.env
+ExecStart=/usr/bin/java -Xms512m -Xmx2g -jar /opt/RainN0Coding/target/RainN0Coding-0.0.1-SNAPSHOT.jar --spring.config.additional-location=file:/opt/RainN0Coding/config/application-prod.yml --spring.profiles.active=prod
 Restart=always
 RestartSec=5
-StandardOutput=append:/opt/yu-ai-code-mother/logs/java/stdout.log
-StandardError=append:/opt/yu-ai-code-mother/logs/java/stderr.log
+StandardOutput=append:/opt/RainN0Coding/logs/java/stdout.log
+StandardError=append:/opt/RainN0Coding/logs/java/stderr.log
 
 [Install]
 WantedBy=multi-user.target
@@ -672,7 +672,7 @@ curl http://127.0.0.1:8123/api/actuator/health
 https://your-domain.com/api/
 ```
 
-创建 `/etc/nginx/sites-available/yu-ai-code-mother.conf`：
+创建 `/etc/nginx/sites-available/RainN0Coding.conf`：
 
 ```nginx
 upstream yuai_java {
@@ -712,7 +712,7 @@ server {
 启用：
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/yu-ai-code-mother.conf /etc/nginx/sites-enabled/yu-ai-code-mother.conf
+sudo ln -s /etc/nginx/sites-available/RainN0Coding.conf /etc/nginx/sites-enabled/RainN0Coding.conf
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -763,7 +763,7 @@ sudo systemctl restart mysql
 sudo systemctl restart redis-server
 sudo systemctl restart docker
 
-cd /opt/yu-ai-code-mother/milvus
+cd /opt/RainN0Coding/milvus
 docker compose up -d
 
 sudo systemctl restart yuai-python-agent
@@ -783,7 +783,7 @@ systemctl is-active redis-server
 systemctl is-active yuai-python-agent
 systemctl is-active yuai-java
 systemctl is-active nginx
-docker compose -f /opt/yu-ai-code-mother/milvus/docker-compose.yml ps
+docker compose -f /opt/RainN0Coding/milvus/docker-compose.yml ps
 ```
 
 ### 15.2 健康检查
@@ -813,7 +813,7 @@ curl -I https://your-domain.com/api/
 3. 确认前端收到 SSE 流。
 4. 确认 Java 日志没有 Python 连接错误。
 5. 确认 Python 日志出现 Agent 工作流阶段。
-6. 确认 `/opt/yu-ai-code-mother/tmp/code_output` 或当前代码实际输出目录下生成项目。
+6. 确认 `/opt/RainN0Coding/tmp/code_output` 或当前代码实际输出目录下生成项目。
 7. 点击部署。
 8. 访问部署 URL。
 9. 确认截图上传 COS 成功，`app.cover` 被更新。
@@ -836,8 +836,8 @@ select count(*) from app_version;
 
 ```bash
 sudo journalctl -u yuai-java -f
-tail -f /opt/yu-ai-code-mother/logs/java/stdout.log
-tail -f /opt/yu-ai-code-mother/logs/java/stderr.log
+tail -f /opt/RainN0Coding/logs/java/stdout.log
+tail -f /opt/RainN0Coding/logs/java/stderr.log
 ```
 
 常见问题：
@@ -851,8 +851,8 @@ tail -f /opt/yu-ai-code-mother/logs/java/stderr.log
 
 ```bash
 sudo journalctl -u yuai-python-agent -f
-tail -f /opt/yu-ai-code-mother/logs/python/stdout.log
-tail -f /opt/yu-ai-code-mother/logs/python/stderr.log
+tail -f /opt/RainN0Coding/logs/python/stdout.log
+tail -f /opt/RainN0Coding/logs/python/stderr.log
 ```
 
 常见问题：
@@ -864,7 +864,7 @@ tail -f /opt/yu-ai-code-mother/logs/python/stderr.log
 ### 16.3 Milvus
 
 ```bash
-cd /opt/yu-ai-code-mother/milvus
+cd /opt/RainN0Coding/milvus
 docker compose ps
 docker compose logs -f milvus-standalone
 docker compose logs -f etcd
@@ -893,17 +893,17 @@ SSE 中断时重点检查：
 ### 17.1 MySQL 备份
 
 ```bash
-mkdir -p /opt/yu-ai-code-mother/backups/mysql
+mkdir -p /opt/RainN0Coding/backups/mysql
 mysqldump -h127.0.0.1 -uyuai -p \
   --single-transaction \
-  yu_ai_code_mother \
-  > /opt/yu-ai-code-mother/backups/mysql/yu_ai_code_mother_$(date +%F_%H%M%S).sql
+  rainn0coding \
+  > /opt/RainN0Coding/backups/mysql/rainn0coding_$(date +%F_%H%M%S).sql
 ```
 
 恢复：
 
 ```bash
-mysql -h127.0.0.1 -uyuai -p yu_ai_code_mother < backup.sql
+mysql -h127.0.0.1 -uyuai -p rainn0coding < backup.sql
 ```
 
 ### 17.2 Redis 备份
@@ -911,7 +911,7 @@ mysql -h127.0.0.1 -uyuai -p yu_ai_code_mother < backup.sql
 Redis 用于会话、限流、记忆摘要。建议开启 AOF，定期备份：
 
 ```bash
-sudo cp /var/lib/redis/appendonly.aof /opt/yu-ai-code-mother/backups/redis/appendonly_$(date +%F_%H%M%S).aof
+sudo cp /var/lib/redis/appendonly.aof /opt/RainN0Coding/backups/redis/appendonly_$(date +%F_%H%M%S).aof
 ```
 
 ### 17.3 Milvus 备份
@@ -927,8 +927,8 @@ sudo cp /var/lib/redis/appendonly.aof /opt/yu-ai-code-mother/backups/redis/appen
 备份：
 
 ```bash
-tar -czf /opt/yu-ai-code-mother/backups/code_output_$(date +%F_%H%M%S).tar.gz \
-  -C /opt/yu-ai-code-mother tmp/code_output tmp/code_deploy
+tar -czf /opt/RainN0Coding/backups/code_output_$(date +%F_%H%M%S).tar.gz \
+  -C /opt/RainN0Coding tmp/code_output tmp/code_deploy
 ```
 
 ---
@@ -938,16 +938,16 @@ tar -czf /opt/yu-ai-code-mother/backups/code_output_$(date +%F_%H%M%S).tar.gz \
 ### 18.1 发布
 
 ```bash
-cd /opt/yu-ai-code-mother
+cd /opt/RainN0Coding
 git fetch --all
 git checkout <release-tag-or-branch>
 git pull
 
-cd yu-ai-code-mother-frontend
+cd RainN0Coding-frontend
 npm ci
 npm run build
 
-cd /opt/yu-ai-code-mother
+cd /opt/RainN0Coding
 mvn clean package -DskipTests
 
 sudo systemctl restart yuai-python-agent
@@ -962,14 +962,14 @@ sudo systemctl reload nginx
 保留上一版 Jar：
 
 ```bash
-cp target/yu-ai-code-mother-0.0.1-SNAPSHOT.jar \
-  releases/yu-ai-code-mother-$(date +%F_%H%M%S).jar
+cp target/RainN0Coding-0.0.1-SNAPSHOT.jar \
+  releases/RainN0Coding-$(date +%F_%H%M%S).jar
 ```
 
 回滚时：
 
 ```bash
-ln -sfn /opt/yu-ai-code-mother/releases/previous.jar /opt/yu-ai-code-mother/app.jar
+ln -sfn /opt/RainN0Coding/releases/previous.jar /opt/RainN0Coding/app.jar
 sudo systemctl restart yuai-java
 ```
 
@@ -1009,27 +1009,27 @@ sudo systemctl restart yuai-java
 sudo systemctl enable --now mysql redis-server docker nginx
 
 # 2. 数据库
-mysql -h127.0.0.1 -uyuai -p yu_ai_code_mother < /opt/yu-ai-code-mother/sql/create_table.sql
+mysql -h127.0.0.1 -uyuai -p rainn0coding < /opt/RainN0Coding/sql/create_table.sql
 
 # 3. Milvus
-cd /opt/yu-ai-code-mother/milvus
+cd /opt/RainN0Coding/milvus
 docker compose up -d
 
 # 4. Python
-cd /opt/yu-ai-code-mother/python-agent
+cd /opt/RainN0Coding/python-agent
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -U pip uv
 .venv/bin/uv sync
-PYTHONPATH=/opt/yu-ai-code-mother/python-agent .venv/bin/python rag/seed_milvus.py
+PYTHONPATH=/opt/RainN0Coding/python-agent .venv/bin/python rag/seed_milvus.py
 sudo systemctl enable --now yuai-python-agent
 
 # 5. 前端
-cd /opt/yu-ai-code-mother/yu-ai-code-mother-frontend
+cd /opt/RainN0Coding/RainN0Coding-frontend
 npm ci
 npm run build
 
 # 6. Java
-cd /opt/yu-ai-code-mother
+cd /opt/RainN0Coding
 mvn clean package -DskipTests
 sudo systemctl enable --now yuai-java
 
