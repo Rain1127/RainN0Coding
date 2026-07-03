@@ -1,21 +1,35 @@
 # RainN0Coding
 
-AI-powered code generation platform with a Java gateway and a Python multi-agent engine.
+AI-powered multi-agent code generation platform built around a Spring Boot gateway and a FastAPI/LangGraph agent engine.
 
-## Architecture
+## Overview
 
-- `src/`: Spring Boot 3 backend, auth, CRUD, rate limiting, SSE proxy
-- `python-agent/`: FastAPI + LangGraph 8-agent workflow, RAG, Milvus integration
-- `milvus/`, `grafana/`, `prometheus.yml`, `otel-collector-config.yml`: local infrastructure and observability
-- `docs/`: design notes, runbooks, and implementation records
+RainN0Coding turns a user prompt into runnable project code through a multi-stage generation pipeline. The Java service handles auth, CRUD, rate limiting, and SSE proxying, while the Python service runs the agent workflow, retrieval pipeline, and code generation logic.
 
 Request flow:
 
-`Frontend -> Spring Boot (/api) -> Python FastAPI SSE -> LangGraph workflow -> Spring SSE proxy -> Client`
+`Client -> Spring Boot (/api) -> FastAPI SSE -> LangGraph workflow -> Spring SSE proxy -> Client`
+
+## Repository Structure
+
+- `src/`: Spring Boot backend and API gateway
+- `python-agent/`: FastAPI service, LangGraph agents, guardrails, and RAG pipeline
+- `milvus/`: local vector database setup
+- `grafana/`, `prometheus.yml`, `otel-collector-config.yml`: observability stack
+- `sql/`, `mysql-init.sql`: database schema and bootstrap SQL
+- `docs/`: selected reference and deployment documentation
+
+## Tech Stack
+
+- Java 21 + Spring Boot 3
+- Python 3.12 + FastAPI + LangGraph
+- MySQL + Redis
+- Milvus vector search
+- Prometheus + Grafana + OpenTelemetry
 
 ## Quick Start
 
-### Java backend
+### 1. Java backend
 
 ```powershell
 $env:JAVA_HOME="D:/Program Files/Java/jdk-23"
@@ -23,32 +37,40 @@ mvn compile -DskipTests
 mvn test
 ```
 
-### Python agent
+### 2. Python agent
 
 ```powershell
 cd python-agent
-$env:PYTHONPATH="D:/RainN0Coding/python-agent"
+$env:PYTHONPATH="."
 .venv/Scripts/python.exe server/main.py
 ```
 
-### Frontend
-
-Frontend code is expected in `RainN0Coding-frontend/` when working in the full local setup.
+### 3. Infrastructure
 
 ```powershell
-cd RainN0Coding-frontend
-npm run dev
+cd milvus
+docker compose up -d
 ```
 
-## Environment Setup
+## Configuration
 
-- Java runtime config uses `src/main/resources/application.yml`
-- Local-only secrets belong in ignored files such as `src/main/resources/application-local.yml`
-- Python agent secrets belong in `python-agent/.env`
-- Start from `python-agent/.env.example` and replace placeholders locally
+- Main Java config: `src/main/resources/application.yml`
+- Local Java overrides: `src/main/resources/application-local.yml`
+- Python agent env file: `python-agent/.env`
+- Example Python env file: `python-agent/.env.example`
 
-## Repository Notes
+Keep secrets in ignored local files only. Do not commit real API keys, tokens, or passwords.
 
-- This repository intentionally keeps runtime secrets out of tracked files
-- Operational notes and design docs are under `docs/`
-- If you plan to open-source this repo, consider moving temporary planning artifacts out of the repository root
+## Documentation
+
+- [API文档](docs/API文档.md)
+- [API接口文档](docs/API接口文档.md)
+- [Milvus Guide](docs/MILVUS_GUIDE.md)
+- [Docker Milvus Guide](docs/DOCKER_MILVUS_GUIDE.md)
+- [Technical Reference](docs/TECHNICAL_REFERENCE.md)
+- [Tencent Cloud Deployment Runbook](docs/tencent-cloud-deployment-runbook.md)
+
+## Notes
+
+- This repository currently focuses on the backend and agent services.
+- Frontend code, if used in your local setup, can live in a separate companion repository or workspace.
