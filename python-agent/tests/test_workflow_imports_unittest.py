@@ -1,5 +1,10 @@
 import unittest
 
+import pytest
+
+
+pytestmark = pytest.mark.harness
+
 
 class WorkflowImportTest(unittest.TestCase):
     def test_code_gen_workflow_imports_builder_agent(self):

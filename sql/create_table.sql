@@ -1,79 +1,76 @@
-# 数据库初始化
+-- Database bootstrap for local development and tests
+CREATE DATABASE IF NOT EXISTS yu_ai_code_mother
+  DEFAULT CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
 
--- 创建库
-create database if not exists yu_ai_code_mother;
+USE yu_ai_code_mother;
 
--- 切换库
-use yu_ai_code_mother;
+CREATE TABLE IF NOT EXISTS `user` (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  userAccount VARCHAR(256) NOT NULL,
+  userPassword VARCHAR(512) NOT NULL,
+  userName VARCHAR(256) DEFAULT NULL,
+  userAvatar VARCHAR(1024) DEFAULT NULL,
+  userProfile VARCHAR(512) DEFAULT NULL,
+  userRole VARCHAR(256) NOT NULL DEFAULT 'user',
+  editTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  createTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updateTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  isDelete TINYINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_userAccount (userAccount),
+  KEY idx_userName (userName)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 用户表
--- 以下是建表语句
+CREATE TABLE IF NOT EXISTS app (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  appName VARCHAR(256) DEFAULT NULL,
+  cover VARCHAR(512) DEFAULT NULL,
+  initPrompt TEXT DEFAULT NULL,
+  codeGenType VARCHAR(64) DEFAULT NULL,
+  deployKey VARCHAR(64) DEFAULT NULL,
+  deployedTime DATETIME DEFAULT NULL,
+  priority INT NOT NULL DEFAULT 0,
+  userId BIGINT NOT NULL,
+  editTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  createTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updateTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  isDelete TINYINT NOT NULL DEFAULT 0,
+  currentVersion INT DEFAULT NULL,
+  UNIQUE KEY uk_deployKey (deployKey),
+  KEY idx_appName (appName),
+  KEY idx_userId (userId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS chat_history (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  message TEXT NOT NULL,
+  messageType VARCHAR(32) NOT NULL,
+  appId BIGINT NOT NULL,
+  userId BIGINT NOT NULL,
+  createTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updateTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  isDelete TINYINT NOT NULL DEFAULT 0,
+  KEY idx_appId (appId),
+  KEY idx_createTime (createTime),
+  KEY idx_appId_createTime (appId, createTime)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 用户表
-create table if not exists user
-(
-    id           bigint auto_increment comment 'id' primary key,
-    userAccount  varchar(256)                           not null comment '账号',
-    userPassword varchar(512)                           not null comment '密码',
-    userName     varchar(256)                           null comment '用户昵称',
-    userAvatar   varchar(1024)                          null comment '用户头像',
-    userProfile  varchar(512)                           null comment '用户简介',
-    userRole     varchar(256) default 'user'            not null comment '用户角色：user/admin',
-    editTime     datetime     default CURRENT_TIMESTAMP not null comment '编辑时间',
-    createTime   datetime     default CURRENT_TIMESTAMP not null comment '创建时间',
-    updateTime   datetime     default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
-    isDelete     tinyint      default 0                 not null comment '是否删除',
-    UNIQUE KEY uk_userAccount (userAccount),
-    INDEX idx_userName (userName)
-) comment '用户' collate = utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS intent_config (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  configName VARCHAR(64) DEFAULT NULL,
+  treeJson LONGTEXT DEFAULT NULL,
+  updatedBy BIGINT DEFAULT NULL,
+  createTime DATETIME DEFAULT NULL,
+  updateTime DATETIME DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-
--- 应用表
-create table app
-(
-    id           bigint auto_increment comment 'id' primary key,
-    appName      varchar(256)                       null comment '应用名称',
-    cover        varchar(512)                       null comment '应用封面',
-    initPrompt   text                               null comment '应用初始化的 prompt',
-    codeGenType  varchar(64)                        null comment '代码生成类型（枚举）',
-    deployKey    varchar(64)                        null comment '部署标识',
-    deployedTime datetime                           null comment '部署时间',
-    priority     int      default 0                 not null comment '优先级',
-    userId       bigint                             not null comment '创建用户id',
-    editTime     datetime default CURRENT_TIMESTAMP not null comment '编辑时间',
-    createTime   datetime default CURRENT_TIMESTAMP not null comment '创建时间',
-    updateTime   datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
-    isDelete     tinyint  default 0                 not null comment '是否删除',
-    UNIQUE KEY uk_deployKey (deployKey), -- 确保部署标识唯一
-    INDEX idx_appName (appName),         -- 提升基于应用名称的查询性能
-    INDEX idx_userId (userId)            -- 提升基于用户 ID 的查询性能
-) comment '应用' collate = utf8mb4_unicode_ci;
-
-
--- 对话历史表
-create table chat_history
-(
-    id          bigint auto_increment comment 'id' primary key,
-    message     text                               not null comment '消息',
-    messageType varchar(32)                        not null comment 'user/ai',
-    appId       bigint                             not null comment '应用id',
-    userId      bigint                             not null comment '创建用户id',
-    createTime  datetime default CURRENT_TIMESTAMP not null comment '创建时间',
-    updateTime  datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
-    isDelete    tinyint  default 0                 not null comment '是否删除',
-    INDEX idx_appId (appId),                       -- 提升基于应用的查询性能
-    INDEX idx_createTime (createTime),             -- 提升基于时间的查询性能
-    INDEX idx_appId_createTime (appId, createTime) -- 游标查询核心索引
-) comment '对话历史' collate = utf8mb4_unicode_ci;
-
--- 意图树配置表
-create table if not exists intent_config
-(
-    id          bigint auto_increment comment 'id' primary key,
-    config_name varchar(64)  null comment '配置名称',
-    tree_json   longtext     null comment '意图树 JSON',
-    updated_by  bigint       null comment '更新人',
-    createTime  datetime     null comment '创建时间',
-    updateTime  datetime     null comment '更新时间'
-) comment '意图树配置' collate = utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS app_version (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  app_id BIGINT DEFAULT NULL,
+  version_number INT DEFAULT NULL,
+  code_content LONGTEXT DEFAULT NULL,
+  description VARCHAR(1024) DEFAULT NULL,
+  create_time DATETIME DEFAULT NULL,
+  KEY idx_app_id (app_id),
+  KEY idx_version_number (version_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

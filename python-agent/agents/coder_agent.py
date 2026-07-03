@@ -13,6 +13,7 @@ import json
 import os
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from config import config, get_lang_config
 from state.code_gen_state import CodeGenState
 from rag.rag_builder import build_rag_context
@@ -276,6 +277,13 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
     app_id = state.get("app_id", "unknown")
     mode = state.get("mode", "new")
     retry_count = state.get("retry_count", 0)
+    architecture = state.get("architecture") or state.get("existing_architecture")
+    target_files = len((architecture or {}).get("file_list", []))
+
+    log_agent_start(
+        "Coder Agent",
+        f"正在生成代码，mode={mode} retry_count={retry_count} target_files={target_files}",
+    )
 
     # 根据模式选择 System Prompt
     if mode == "modify":
@@ -284,16 +292,17 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
         system_prompt = _build_coder_prompt(code_gen_type)
 
     # architecture 校验：modify 模式用 existing_architecture 兜底
-    architecture = state.get("architecture") or state.get("existing_architecture")
     if not architecture:
         state["error"] = "Architecture 为空，Coder Agent 无法生成代码"
         state["phase"] = "error"
+        log_agent_fail("Coder Agent", "缺少 architecture，无法生成代码")
         return state
 
     file_list = architecture.get("file_list", [])
     if not file_list and mode != "modify":
         state["error"] = "Architecture.file_list 为空，没有需要生成的文件"
         state["phase"] = "error"
+        log_agent_fail("Coder Agent", "architecture.file_list 为空，没有可生成的目标文件")
         return state
 
     # === 设置工具工作目录 ===
@@ -416,7 +425,7 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
             round_extra["metadata"]["react_round"] = round_num
             response = llm.invoke(messages, config=round_extra)
         except Exception as e:
-            print(f"[Coder Agent] LLM 调用失败 (第{round_num}轮): {e}")
+            log_agent_fail("Coder Agent", f"第{round_num}轮 LLM 调用失败，原因={e}")
             state["error"] = f"Coder Agent LLM 调用失败 (第{round_num}轮): {e}"
             state["phase"] = "error"
             return state
@@ -446,10 +455,10 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
                 messages.append(ToolMessage(content=str(tool_result),
                                             tool_call_id=tool_id))
 
-            print(f"[Coder Agent] 第{round_num}轮: {len(response.tool_calls)} 次工具调用")
+            log_agent_ok("Coder Agent", f"第{round_num}轮工具调用完成，tool_calls={len(response.tool_calls)}")
 
             if exited:
-                print(f"[Coder Agent] exit_tool 被调用，退出 ReAct 循环")
+                log_agent_ok("Coder Agent", "收到 exit_tool，结束代码生成循环")
                 break
         else:
             # 没有 tool_calls —— 可能是 LLM 直接输出了文本（旧 JSON 模式兜底）
@@ -460,7 +469,7 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
                     if "files" in parsed:
                         code_files = [{"path": f["path"], "content": f["content"]}
                                       for f in parsed["files"]]
-                        print(f"[Coder Agent] 兜底 JSON 解析: {len(code_files)} 文件")
+                        log_agent_ok("Coder Agent", f"LLM 直接返回文件结果，files={len(code_files)}")
                 except (json.JSONDecodeError, KeyError, TypeError):
                     pass
             break
@@ -473,13 +482,17 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
     if not code_files:
         state["error"] = "Coder Agent 未能生成任何代码文件"
         state["phase"] = "error"
+        log_agent_fail("Coder Agent", "未生成任何代码文件")
         return state
 
     state["code_files"] = code_files
     state["phase"] = "code_done"
 
     total_lines = sum(len(f["content"].split("\n")) for f in code_files)
-    print(f"[Coder Agent] 完成: {len(code_files)} 文件, 总计 {total_lines} 行代码")
+    log_agent_ok(
+        "Coder Agent",
+        f"代码已生成，files={len(code_files)} total_lines={total_lines} project_dir={project_dir}",
+    )
 
     return state
 

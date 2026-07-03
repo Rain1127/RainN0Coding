@@ -17,6 +17,9 @@ dependencies = [
     "langgraph>=1.2.1",
     "milvus-lite>=3.0",
     "onnxruntime>=1.26.0",
+    "opentelemetry-api>=1.42.0",
+    "opentelemetry-sdk>=1.42.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.42.0",
     "prometheus-client>=0.22.0",
     "prometheus-fastapi-instrumentator>=7.1.0",
     "pydantic>=2.13.4",
@@ -40,3 +43,10 @@ link-mode = "copy"
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: deterministic pure-python checks",
+    "integration: runtime boundary checks inside python-agent",
+    "harness: focused production-hardening verification suites",
+]

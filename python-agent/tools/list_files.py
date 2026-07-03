@@ -1,8 +1,12 @@
-"""列出目录结构 —— 对标 Java FileDirReadTool"""
+"""List files tool."""
 
 import os
+
+from guardrails.audit import audit_from_decision
+from guardrails.engine import evaluate_tool_action
+from guardrails.models import ToolAction
 from langchain_core.tools import tool
-from tools.context import get_project_dir
+from tools.context import get_app_id, get_project_dir, get_user_role
 from tools.path_guard import resolve_project_path
 
 _IGNORED_NAMES = {
@@ -16,23 +20,35 @@ _IGNORED_EXTENSIONS = {".log", ".tmp", ".cache", ".lock", ".pyc"}
 
 @tool
 def list_files(dir_path: str = "") -> str:
-    """读取目录结构，获取指定目录下的所有文件和子目录信息。留空则读取整个项目结构。
-
-    Args:
-        dir_path: 目录的相对路径，为空则读取整个项目根目录
-    """
+    """List project files and directories."""
     project_dir = get_project_dir()
     if not project_dir:
-        return "错误：工作目录未设置，无法读取目录"
+        return "错误：未设置工作目录，无法读取目录"
 
     lines = ["项目目录结构:"]
 
     try:
+        decision = evaluate_tool_action(
+            ToolAction(
+                tool_name="list_files",
+                project_dir=project_dir,
+                dir_path=dir_path,
+                user_role=get_user_role(),
+            )
+        )
+        audit_from_decision(
+            decision,
+            app_id=get_app_id(),
+            tool_name="list_files",
+            path=dir_path,
+        )
+        if decision.action == "block":
+            return f"guardrail_blocked:{decision.rule_id}:{decision.message}"
+
         target = resolve_project_path(project_dir, dir_path)
         if not os.path.isdir(target):
             return f"错误：目录不存在或不是目录 - {dir_path or '根目录'}"
         for root, dirs, files in os.walk(target):
-            # 原地修改 dirs 来跳过忽略的目录
             dirs[:] = [d for d in dirs if d not in _IGNORED_NAMES]
 
             depth = _get_depth(target, root)

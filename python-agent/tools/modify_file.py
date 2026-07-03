@@ -1,29 +1,46 @@
-"""修改文件 —— 对标 Java FileModifyTool。仅 admin/user 可用。"""
+"""Modify file tool."""
 
 import os
+
+from guardrails.audit import audit_from_decision
+from guardrails.engine import evaluate_tool_action
+from guardrails.models import ToolAction
 from langchain_core.tools import tool
-from tools.context import get_project_dir
-from tools.guard import check_tool_permission, PERMISSION_DENIED_MSG
+from tools.context import get_app_id, get_project_dir, get_user_role
+from tools.guard import PERMISSION_DENIED_MSG, check_tool_permission
 from tools.path_guard import resolve_project_path
 
 
 @tool
 def modify_file(path: str, old_content: str, new_content: str) -> str:
-    """修改文件内容，用new_content替换文件中所有的old_content。
-
-    Args:
-        path: 文件的相对路径
-        old_content: 要替换的旧内容（精确匹配，区分大小写）
-        new_content: 替换后的新内容
-    """
+    """Replace all matching old_content with new_content in a file."""
     if not check_tool_permission("modify_file"):
         return PERMISSION_DENIED_MSG
 
     project_dir = get_project_dir()
     if not project_dir:
-        return "错误：工作目录未设置，无法修改文件"
+        return "错误：未设置工作目录，无法修改文件"
 
     try:
+        decision = evaluate_tool_action(
+            ToolAction(
+                tool_name="modify_file",
+                project_dir=project_dir,
+                relative_path=path,
+                old_content=old_content,
+                new_content=new_content,
+                user_role=get_user_role(),
+            )
+        )
+        audit_from_decision(
+            decision,
+            app_id=get_app_id(),
+            tool_name="modify_file",
+            path=path,
+        )
+        if decision.action == "block":
+            return f"guardrail_blocked:{decision.rule_id}:{decision.message}"
+
         full_path = resolve_project_path(project_dir, path)
         if not os.path.isfile(full_path):
             return f"错误：文件不存在或不是文件 - {path}"

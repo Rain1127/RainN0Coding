@@ -79,10 +79,9 @@ prometheus --config.file=prometheus.yml
 
 | Package | Role |
 |---------|------|
-| `controller/` | REST endpoints: `AppController`, `UserController`, `ChatHistoryController`, `HealthController`, `WorkflowSseController` |
+| `controller/` | REST endpoints: `AppController`, `UserController`, `ChatHistoryController`, `HealthController` |
 | `core/` | Code generation pipeline: `AiCodeGeneratorFacade` (delegates to Python), `CodeParser`, `CodeFileSaver`, `python/PythonAiClient` (WebClient SSE proxy) |
 | `ai/` | **Deprecated** — old LangChain4j direct LLM calls, being phased out in favor of Python |
-| `langgraph4j/` | **Deprecated** — old Java-side LangGraph4j workflows, being phased out |
 | `service/` + `service/impl/` | Business services: `UserService`, `AppService`, `ChatHistoryService`, `ScreenshotService`, `ProjectDownloadService` |
 | `mapper/` | MyBatis-Flex mapper interfaces (User, App, ChatHistory, AppVersion, IntentConfig) |
 | `model/entity/`, `dto/`, `vo/`, `enums/` | Domain models |
@@ -173,6 +172,6 @@ START → intent_agent → pm_agent → architect_agent → fork_coder_and_image
 - **DeepSeek v4-pro** is a reasoning model — does NOT support `response_format` (json_mode) or `function_calling`. All structured output uses manual JSON parsing (`create_json_parser` + `FIELD_SPEC` + `_strip_code_fences`)
 - **No `with_structured_output`** — this LangChain feature doesn't work with DeepSeek. Every Agent uses the manual JSON pattern
 - **Python on Windows**: `uv run` may silently upgrade torch, breaking DLL loading. Use `.venv/Scripts/python.exe` directly for running the server
-- **Java langchain4j/langgraph4j packages are deprecated** — kept only for backward compatibility. All AI logic lives in Python
+- **Java-side agent workflows have been removed**. The only supported agent implementation lives in `python-agent/`, and Java stays on the gateway/SSE proxy path.
 - **SSE event format**: Python emits standard `data: {"type":"...","phase":"...",...}` lines. Java facade extracts `code_file` events for file saving but otherwise transparently proxies
 - **Lombok requires JDK 23+** for annotation processing — use `JAVA_HOME="D:/Program Files/Java/jdk-23"` when compiling

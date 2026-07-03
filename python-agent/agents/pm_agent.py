@@ -9,6 +9,7 @@ import json
 import os
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
+from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start, summarize_request
 from llm_factory import create_json_parser
 from state.code_gen_state import CodeGenState
 from config import get_lang_config
@@ -97,9 +98,16 @@ def pm_agent(state: CodeGenState) -> CodeGenState:
     parser = create_json_parser(PRD, PRD_FIELD_SPEC, group="structured", agent_name="pm_agent")
 
     user_request = state.get("user_request", "")
+    log_agent_start(
+        "PM Agent",
+        f"正在生成 PRD，code_gen_type={state.get('code_gen_type', 'vue_project')} "
+        f"request={summarize_request(user_request)}",
+    )
+
     if not user_request:
         state["error"] = "user_request 为空"
         state["phase"] = "error"
+        log_agent_fail("PM Agent", "缺少 user_request，无法生成 PRD")
         return state
 
     code_gen_type = state.get("code_gen_type", "vue_project")
@@ -114,11 +122,13 @@ def pm_agent(state: CodeGenState) -> CodeGenState:
     except Exception as e:
         state["error"] = f"PM Agent LLM 调用失败: {e}"
         state["phase"] = "error"
+        log_agent_fail("PM Agent", f"生成 PRD 失败，原因={e}")
         return state
 
     if prd is None:
         state["error"] = "PM Agent 失败：所有模型候选不可用（全部已熔断或调用失败）"
         state["phase"] = "error"
+        log_agent_fail("PM Agent", "生成 PRD 失败，可用模型候选为空")
         return state
 
     state["prd"] = prd.model_dump()
@@ -128,8 +138,11 @@ def pm_agent(state: CodeGenState) -> CodeGenState:
 
     state["phase"] = "prd_done"
 
-    print(f"[PM Agent] 完成: {prd.page_name}, {len(prd.features)} 功能, "
-          f"high={sum(1 for f in prd.features if f.priority == 'high')}")
+    log_agent_ok(
+        "PM Agent",
+        f"PRD 已生成，page_name={prd.page_name} feature_count={len(prd.features)} "
+        f"high_priority_count={sum(1 for f in prd.features if f.priority == 'high')}",
+    )
     return state
 
 

@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import shutil
 import glob as glob_mod
+from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from state.code_gen_state import CodeGenState
 from config import get_lang_config, config
 from rag.rag_builder import index_code_files
@@ -275,14 +276,21 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
     project_dir = state.get("project_dir", "")
     app_id = state.get("app_id", "")
 
+    log_agent_start(
+        "Builder Agent",
+        f"正在构建项目，code_gen_type={code_gen_type} file_count={len(code_files)} project_dir={project_dir}",
+    )
+
     if not code_files:
         state["error"] = "code_files 为空，Builder 无文件可构建"
         state["phase"] = "error"
+        log_agent_fail("Builder Agent", "缺少 code_files，无法执行构建")
         return state
 
     if not project_dir or not os.path.isdir(project_dir):
         state["error"] = f"project_dir 不存在: {project_dir}"
         state["phase"] = "error"
+        log_agent_fail("Builder Agent", f"project_dir 不存在，无法执行构建: {project_dir}")
         return state
 
     try:
@@ -308,6 +316,7 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
         # 3. 仅需要对 npm build 的项目执行构建
         build_success = True
         build_log = ""
+        build_log_mode = "unknown"
         if lc.get("needs_npm_build"):
             try:
                 result = subprocess.run(
@@ -317,6 +326,7 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                 if result.returncode != 0:
                     build_success = False
                     build_log = "npm install failed:\n" + result.stderr[-2000:]
+                    build_log_mode = "npm_install_failed"
                 else:
                     result = subprocess.run(
                         ["npm", "run", "build"], cwd=project_dir,
@@ -325,16 +335,21 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                     if result.returncode != 0:
                         build_success = False
                         build_log = "npm run build failed:\n" + result.stderr[-2000:]
+                        build_log_mode = "npm_build_failed"
                     else:
                         build_log = result.stdout[-1000:]
+                        build_log_mode = "npm_build"
             except FileNotFoundError:
                 build_log = "[本地无 Node.js，跳过实际构建。代码文件已写入磁盘。]"
                 build_success = True
+                build_log_mode = "node_missing"
             except subprocess.TimeoutExpired:
                 build_log = "构建超时（超过 180 秒）"
                 build_success = False
+                build_log_mode = "build_timeout"
         else:
             build_log = f"[{code_gen_type} 项目无需 npm build，文件已就绪]"
+            build_log_mode = "no_npm_build"
 
         state["build_result"] = {
             "success": build_success,
@@ -342,6 +357,10 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
             "project_dir": project_dir,
         }
         state["phase"] = "build_done"
+        log_agent_ok(
+            "Builder Agent",
+            f"构建阶段完成，build_success={'yes' if build_success else 'no'} log_mode={build_log_mode}",
+        )
 
         # === 3.5 质量门禁 (P0) ===
         lc = get_lang_config(code_gen_type)
@@ -369,10 +388,20 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
             "syntax_log": syntax_result["log"][:500],
             "reason": "; ".join(gate_reason_parts) if gate_reason_parts else "ok",
         }
-        print(f"[Builder Agent] 质量门禁: {'PASS' if quality_gate_passed else 'FAIL'} "
-              f"(review={review_gate['score']}, "
-              f"syntax={'OK' if syntax_result['passed'] else 'FAIL'}, "
-              f"reason={state['quality_gate_result']['reason']})")
+        if quality_gate_passed:
+            log_agent_ok(
+                "Builder Agent",
+                f"质量门禁通过，review_score={review_gate['score']} "
+                f"syntax_passed={'yes' if syntax_result['passed'] else 'no'} "
+                f"reason={state['quality_gate_result']['reason']}",
+            )
+        else:
+            log_agent_fail(
+                "Builder Agent",
+                f"质量门禁未通过，review_score={review_gate['score']} "
+                f"syntax_passed={'yes' if syntax_result['passed'] else 'no'} "
+                f"reason={state['quality_gate_result']['reason']}",
+            )
 
         # === 4. 索引代码到 RAG 知识库（检索闭环 + 质量门禁） ===
         review_score = state.get("review", {}).get("score", 0)
@@ -387,6 +416,7 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                     "indexed_count": len(code_files),
                     "total_count": len(code_files),
                 }
+                log_agent_ok("Builder Agent", f"索引完成，files={len(code_files)} app_id={app_id}")
             except Exception as e:
                 state["indexing_result"] = {
                     "success": False,
@@ -394,7 +424,7 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                     "indexed_count": 0,
                     "total_count": len(code_files),
                 }
-                print(f"[Builder Agent] 索引警告: {e}")
+                log_agent_fail("Builder Agent", f"索引失败，但不影响构建，原因={e}")
         elif not app_id:
             state["indexing_result"] = {
                 "success": False,
@@ -402,6 +432,7 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                 "indexed_count": 0,
                 "total_count": len(code_files),
             }
+            log_agent_ok("Builder Agent", "跳过索引，reason=app_id missing")
         elif not build_success:
             state["indexing_result"] = {
                 "success": False,
@@ -409,6 +440,7 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                 "indexed_count": 0,
                 "total_count": len(code_files),
             }
+            log_agent_ok("Builder Agent", "跳过索引，reason=build_success false")
         else:
             # quality_gate_passed == False
             reason = state.get("quality_gate_result", {}).get("reason", "质量门禁未通过")
@@ -418,6 +450,7 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                 "indexed_count": 0,
                 "total_count": len(code_files),
             }
+            log_agent_ok("Builder Agent", f"跳过索引，reason={reason}")
 
         # === 5. 反馈闭环 (P2)：根据构建结果更新检索过的条目质量分 ===
         if app_id:
@@ -425,17 +458,19 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                 from rag.feedback_tracker import feedback_tracker
                 feedback_tracker.apply_feedback(app_id, build_success)
             except Exception as e:
-                print(f"[Builder Agent] 反馈更新失败（不影响构建）: {e}")
+                log_agent_fail("Builder Agent", f"反馈更新失败，但不影响构建，原因={e}")
 
-        status = "OK" if build_success else "FAIL"
-        gate_status = "PASS" if state.get("quality_gate_result", {}).get("passed") else "GATE_FAIL"
-        print(f"[Builder Agent] 构建{status}, 质量门禁{gate_status}: "
-              f"{len(code_files)} 文件 @ {project_dir}")
+        log_agent_ok(
+            "Builder Agent",
+            f"构建结束，build_success={'yes' if build_success else 'no'} "
+            f"quality_gate={'passed' if state.get('quality_gate_result', {}).get('passed') else 'failed'} "
+            f"files={len(code_files)} project_dir={project_dir}",
+        )
         return state
 
     except Exception as e:
         state["build_result"] = {"success": False, "log": str(e), "project_dir": project_dir}
         state["phase"] = "build_done"
         state["error"] = str(e)
-        print(f"[Builder Agent] 异常: {e}")
+        log_agent_fail("Builder Agent", f"构建异常，原因={e}")
         return state

@@ -17,6 +17,7 @@ LangGraph 用法：
         }
     )
 """
+from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from state.code_gen_state import CodeGenState
 from config import config
 
@@ -28,6 +29,7 @@ def supervisor_decision(state: CodeGenState) -> str:
     返回的字符串必须是 workflow.add_conditional_edges 中 mapping 的 key 之一。
     """
     phase = state.get("phase", "init")
+    log_agent_start("Supervisor Agent", f"正在判断下一步路由，phase={phase}")
 
     # phase → next_node 映射表
     routing_table: dict[str, str | callable] = {
@@ -48,6 +50,7 @@ def supervisor_decision(state: CodeGenState) -> str:
     if callable(handler):
         return handler(state)
 
+    log_agent_ok("Supervisor Agent", f"路由完成，next={handler}")
     return handler
 
 
@@ -58,14 +61,27 @@ def _handle_review_result(state: CodeGenState) -> str:
     max_retries = state.get("max_retries", config.MAX_RETRIES)
 
     if review.get("passed"):
+        log_agent_ok("Supervisor Agent", "review 已通过，进入 builder_agent")
         return "builder_agent"
 
     if retry_count < max_retries:
         # 架构级问题走 AutoGen 三方讨论，代码级问题直接重试
         if _has_architectural_issues(review):
+            log_agent_ok(
+                "Supervisor Agent",
+                f"review 未通过，检测到架构问题，进入 autogen_discussion，retry_count={retry_count}/{max_retries}",
+            )
             return "autogen_discussion"
+        log_agent_ok(
+            "Supervisor Agent",
+            f"review 未通过，进入 coder_agent，retry_count={retry_count}/{max_retries}",
+        )
         return "coder_agent"
 
+    log_agent_fail(
+        "Supervisor Agent",
+        f"review 未通过且重试已达上限，进入 human_intervention，retry_count={retry_count}/{max_retries}",
+    )
     return "human_intervention"
 
 

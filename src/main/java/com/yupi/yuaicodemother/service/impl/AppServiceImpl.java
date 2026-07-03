@@ -5,13 +5,15 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
-import com.yupi.yuaicodemother.ai.AiCodeGenTypeRoutingService;
-import com.yupi.yuaicodemother.ai.AiCodeGenTypeRoutingServiceFactory;
 import com.yupi.yuaicodemother.constant.AppConstant;
+import com.yupi.yuaicodemother.concurrency.AiGenerationPermitService;
 import com.yupi.yuaicodemother.core.AiCodeGeneratorFacade;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
+import com.yupi.yuaicodemother.core.python.PythonAiClient;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
@@ -25,6 +27,7 @@ import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.UserVO;
 import com.yupi.yuaicodemother.monitor.MonitorContext;
 import com.yupi.yuaicodemother.monitor.MonitorContextHolder;
+import com.yupi.yuaicodemother.monitor.TraceIdResolver;
 import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.model.entity.User;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
@@ -34,6 +37,7 @@ import com.yupi.yuaicodemother.utils.SqlSafetyUtils;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
+import org.redisson.api.RFuture;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -43,9 +47,11 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
@@ -60,6 +66,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
     private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
             "id", "appName", "codeGenType", "priority", "createTime", "editTime", "deployedTime"
     );
+    private static final CodeGenTypeEnum DEFAULT_CODE_GEN_TYPE = CodeGenTypeEnum.VUE_PROJECT;
 
     @Resource
     private UserService userService;
@@ -77,10 +84,16 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
     private ScreenshotService screenshotService;
 
     @Resource
-    private AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
+    private PythonAiClient pythonAiClient;
 
     @Resource
     private RedissonClient redissonClient;
+
+    @Resource
+    private TraceIdResolver traceIdResolver;
+
+    @Resource
+    private AiGenerationPermitService aiGenerationPermitService;
 
     /**
      * 应用对话：根据应用id和用户提示词生成代码。
@@ -92,15 +105,28 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
      */
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, User loginUser) {
+        return chatToGenCode(appId, message, loginUser, null, null);
+    }
+
+    @Override
+    public Flux<String> chatToGenCode(Long appId, String message, User loginUser, String requestId, String idempotencyKey) {
         //1.参数校验
         ThrowUtils.throwIf(appId == null || appId<=0 , ErrorCode.PARAMS_ERROR, "应用id错误");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "提示词消息不能为空");
+        return Flux.defer(() -> doChatToGenCode(appId, message, loginUser, requestId, idempotencyKey));
+    }
+
+    private Flux<String> doChatToGenCode(Long appId, String message, User loginUser, String requestId, String idempotencyKey) {
         //2.获取分布式锁，防止同应用并发对话
         String lockKey = "ai:chat:lock:" + appId + ":" + loginUser.getId();
         RLock lock = redissonClient.getLock(lockKey);
         boolean locked = false;
+        long lockThreadId = -1L;
         try {
-            locked = lock.tryLock(0, 300, TimeUnit.SECONDS);
+            locked = lock.tryLock(0, TimeUnit.SECONDS);
+            if (locked) {
+                lockThreadId = Thread.currentThread().threadId();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统繁忙，请稍后重试");
@@ -108,6 +134,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
         if (!locked) {
             throw new BusinessException(ErrorCode.CHAT_IN_PROGRESS);
         }
+        final long acquiredLockThreadId = lockThreadId;
+        AiGenerationPermitService.PermitHandle permit = null;
         try {
             //3.查询应用
             App app = this.getById(appId);
@@ -123,7 +151,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
             //6.在调用AI前，先保存用户消息到数据库中
             chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
             //7.设置监控上下文（含全链路 traceId）
-            String traceId = java.util.UUID.randomUUID().toString();
+            String traceId = traceIdResolver.resolveCurrentTraceId();
             log.info("全链路追踪 traceId: {}", traceId);
             MonitorContext monitorContext = MonitorContext.builder()
                     .userId(loginUser.getId().toString())
@@ -132,32 +160,120 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
                     .build();
             MonitorContextHolder.setContext(monitorContext);
             //8.调用 Python AI Agent 生成代码（SSE 流式透传）
-            Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, loginUser.getId(), loginUser.getUserRole());
+            permit = aiGenerationPermitService.tryAcquire();
+            if (!permit.acquired()) {
+                chatHistoryService.addChatMessage(appId,
+                        "[Python Agent] 代码生成失败: AI 生成服务繁忙",
+                        ChatHistoryMessageTypeEnum.AI.getValue(),
+                        loginUser.getId());
+                return Flux.just(
+                                "{\"type\":\"error\",\"status\":\"overloaded\",\"message\":\"AI generation capacity is full. Please retry later.\"}",
+                                "{\"type\":\"done\",\"status\":\"overloaded\"}"
+                        )
+                        .doFinally(signalType -> {
+                            releaseLock(lock, acquiredLockThreadId);
+                            MonitorContextHolder.clearContext();
+                        });
+            }
+            AiGenerationPermitService.PermitHandle acquiredPermit = permit;
+            Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(
+                    message, codeGenTypeEnum, appId, loginUser.getId(), loginUser.getUserRole(), requestId, idempotencyKey);
             //9.流完成后保存 AI 响应到对话历史
+            AtomicReference<String> semanticFailure = new AtomicReference<>();
             return codeStream
+                    .doOnNext(chunk -> {
+                        String failure = semanticFailureMessage(chunk);
+                        if (failure != null) {
+                            semanticFailure.compareAndSet(null, failure);
+                        }
+                    })
                     .doOnComplete(() -> {
+                        String failure = semanticFailure.get();
+                        if (failure != null) {
+                            chatHistoryService.addChatMessage(appId,
+                                    "[Python Agent] 代码生成失败: " + failure,
+                                    ChatHistoryMessageTypeEnum.AI.getValue(),
+                                    loginUser.getId());
+                            return;
+                        }
                         chatHistoryService.addChatMessage(appId,
                                 "[Python Agent] 代码生成完成",
                                 ChatHistoryMessageTypeEnum.AI.getValue(),
                                 loginUser.getId());
                     })
                     .doFinally(signalType -> {
+                        aiGenerationPermitService.release(acquiredPermit);
                         //流结束时释放锁
-                        if (lock.isHeldByCurrentThread()) {
-                            lock.unlock();
-                        }
+                        releaseLock(lock, acquiredLockThreadId);
                         //流结束时清理ThreadLocal中的监控上下文
                         MonitorContextHolder.clearContext();
                     });
         } catch (Exception e) {
             //异常时释放锁
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+            aiGenerationPermitService.release(permit);
+            releaseLock(lock, lockThreadId);
+            MonitorContextHolder.clearContext();
             throw e;
         }
     }
 
+    private String semanticFailureMessage(String chunk) {
+        JSONObject payload = parseSsePayload(chunk);
+        if (payload == null) {
+            return null;
+        }
+        String type = payload.getStr("type");
+        String status = payload.getStr("status");
+        if ("error".equals(type)) {
+            return StrUtil.blankToDefault(payload.getStr("message"), StrUtil.blankToDefault(status, "error"));
+        }
+        if ("done".equals(type) && StrUtil.isNotBlank(status)) {
+            if ("partial_success".equals(status) || "degraded_success".equals(status)) {
+                return null;
+            }
+            if (!"success".equals(status)) {
+                return status;
+            }
+        }
+        return null;
+    }
+
+    private JSONObject parseSsePayload(String chunk) {
+        if (StrUtil.isBlank(chunk)) {
+            return null;
+        }
+        String json = chunk.trim();
+        if (json.startsWith("data:")) {
+            json = json.substring(5).trim();
+        }
+        if (!json.startsWith("{")) {
+            return null;
+        }
+        try {
+            return JSONUtil.parseObj(json);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+
+    private void releaseLock(RLock lock, long lockThreadId) {
+        if (lock == null || lockThreadId < 0) {
+            return;
+        }
+        try {
+            RFuture<Void> unlockFuture = lock.unlockAsync(lockThreadId);
+            if (unlockFuture != null) {
+                unlockFuture.onComplete((ignored, throwable) -> {
+                    if (throwable != null) {
+                        log.warn("Release AI chat lock failed for thread {}: {}", lockThreadId, throwable.getMessage());
+                    }
+                });
+            }
+        } catch (Exception e) {
+            log.warn("Release AI chat lock failed for thread {}: {}", lockThreadId, e.getMessage());
+        }
+    }
 
 
     @Override
@@ -171,9 +287,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
         app.setUserId(loginUser.getId());
         // 应用名称暂时为 initPrompt 前 12 位
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
-        // 使用 AI 智能选择代码生成类型(多例模式)
-        AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService = aiCodeGenTypeRoutingServiceFactory.createAiCodeGenTypeRoutingService();
-        CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
+        // 代码生成类型路由已迁到 Python agent，Java 侧仅接收结果并兜底
+        CodeGenTypeEnum selectedCodeGenType = resolveCodeGenType(initPrompt);
         app.setCodeGenType(selectedCodeGenType.getValue());
         // 插入数据库
         boolean result = this.save(app);
@@ -250,13 +365,39 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
         return appDeployUrl;
     }
 
+    private CodeGenTypeEnum resolveCodeGenType(String prompt) {
+        try {
+            String rawCodeGenType = pythonAiClient.routeCodeGenType(prompt);
+            CodeGenTypeEnum resolved = normalizeCodeGenType(rawCodeGenType);
+            if (resolved != null) {
+                return resolved;
+            }
+            log.warn("Python agent returned unsupported codeGenType: {}, fallback to {}",
+                    rawCodeGenType, DEFAULT_CODE_GEN_TYPE.getValue());
+        } catch (Exception e) {
+            log.warn("Python agent routeCodeGenType failed, fallback to {}: {}",
+                    DEFAULT_CODE_GEN_TYPE.getValue(), e.getMessage());
+        }
+        return DEFAULT_CODE_GEN_TYPE;
+    }
+
+    private CodeGenTypeEnum normalizeCodeGenType(String rawCodeGenType) {
+        if (StrUtil.isBlank(rawCodeGenType)) {
+            return null;
+        }
+        String normalized = rawCodeGenType.trim()
+                .toLowerCase(Locale.ROOT)
+                .replace('-', '_')
+                .replace(' ', '_');
+        return CodeGenTypeEnum.getEnumByValue(normalized);
+    }
+
     /**
      * 异步生成应用截图并更新应用封面
      * @param appId 应用id
      * @param appDeployUrl 应用部署URL
      */
-    @Override
-    public void generateAppScreenshotAsync(Long appId, String appDeployUrl){
+    private void generateAppScreenshotAsync(Long appId, String appDeployUrl){
         //使用虚拟线程异步执行截图
         Thread.startVirtualThread(() ->{
             String screenshotUrl = screenshotService.generateAndUploadScreenshot(appDeployUrl);

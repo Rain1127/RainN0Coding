@@ -18,8 +18,6 @@ import java.util.List;
  */
 public interface AppService extends IService<App> {
 
-    void generateAppScreenshotAsync(Long appId, String appDeployUrl);
-
     /**
      * 获取应用封装类
      *
@@ -52,6 +50,8 @@ public interface AppService extends IService<App> {
      * @return 代码流
      */
     Flux<String> chatToGenCode(Long appId,String message,User loginUser);
+
+    Flux<String> chatToGenCode(Long appId, String message, User loginUser, String requestId, String idempotencyKey);
 
     /**
      * 创建应用

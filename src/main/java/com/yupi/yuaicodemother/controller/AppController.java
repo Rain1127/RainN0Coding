@@ -2,20 +2,25 @@ package com.yupi.yuaicodemother.controller;
 
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.convert.Convert;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
-import com.yupi.yuaicodemother.ai.AiCodeGenTypeRoutingService;
 import com.yupi.yuaicodemother.annotation.AuthCheck;
 import com.yupi.yuaicodemother.common.BaseResponse;
 import com.yupi.yuaicodemother.common.DeleteRequest;
 import com.yupi.yuaicodemother.common.ResultUtils;
+import com.yupi.yuaicodemother.config.IdempotencyProperties;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.constant.UserConstant;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
+import com.yupi.yuaicodemother.idempotency.IdempotencyDecision;
+import com.yupi.yuaicodemother.idempotency.IdempotencyRecord;
+import com.yupi.yuaicodemother.idempotency.IdempotencyService;
 import com.yupi.yuaicodemother.model.dto.app.*;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.User;
@@ -41,6 +46,8 @@ import java.io.File;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 应用 控制层。
@@ -50,6 +57,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/app")
 public class AppController {
+
+    private static final long USER_PAGE_SIZE_LIMIT = 20;
 
     private static final long MAX_PAGE_SIZE = 50;
 
@@ -61,6 +70,12 @@ public class AppController {
 
     @Resource
     private ProjectDownloadService projectDownloadService;
+
+    @Resource
+    private IdempotencyService idempotencyService;
+
+    @Resource
+    private IdempotencyProperties idempotencyProperties;
 
 
     /**
@@ -75,6 +90,7 @@ public class AppController {
     @RateLimit(limitType = RateLimitType.USER, rate = 5, rateInterval = 60, message = "AI对话请求过于频繁，请稍后再试")
     public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
                                     @RequestParam String message,
+                                    @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
                                     HttpServletRequest request) {
         //produces = MediaType.TEXT_EVENT_STREAM_VALUE:(SSE 流式返回)
         //1.参数校验
@@ -82,10 +98,37 @@ public class AppController {
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "消息不能为空");
         //2.获取当前登录用户
         User loginUser = userService.getLoginUser(request);
+        String requestId = StrUtil.isNotBlank(idempotencyKey) ? idempotencyKey : UUID.randomUUID().toString();
+        String fingerprint = idempotencyService.fingerprint("app:chat:gen-code", appId, message);
+        IdempotencyDecision decision = idempotencyService.start(
+                "app:chat:gen-code", loginUser.getId(), idempotencyKey, fingerprint, idempotencyProperties.aiProcessingTtl());
+        if (decision.type() == IdempotencyDecision.Type.IN_PROGRESS) {
+            return duplicateSse("duplicate_in_progress");
+        }
+        if (decision.type() == IdempotencyDecision.Type.REPLAY_SUCCESS) {
+            return duplicateSse("duplicate_completed");
+        }
+        if (decision.type() == IdempotencyDecision.Type.REPLAY_FAILED) {
+            return failedReplaySse(decision.record());
+        }
+        if (decision.type() == IdempotencyDecision.Type.FINGERPRINT_MISMATCH) {
+            throw new BusinessException(ErrorCode.REQUEST_REPLAY_CONFLICT);
+        }
         //3.调用服务，生成代码 (SSE 流式返回)
-        Flux<String> contentFlux = appService.chatToGenCode(appId, message, loginUser);
+        Flux<String> contentFlux;
+        try {
+            contentFlux = appService.chatToGenCode(appId, message, loginUser, requestId, idempotencyKey);
+        } catch (BusinessException e) {
+            idempotencyService.markFailed(decision.redisKey(), fingerprint, e.getCode(), e.getMessage());
+            throw e;
+        }
+        AtomicReference<SseFailure> semanticFailure = new AtomicReference<>();
         return contentFlux
                 .map(chunk->{
+                    SseFailure failure = detectSemanticFailure(chunk);
+                    if (failure != null) {
+                        semanticFailure.compareAndSet(null, failure);
+                    }
                     //解决了返回内容缺省问题
                     Map<String,String> wrapper = Map.of("d",chunk);
                     String jsonData = JSONUtil.toJsonStr(wrapper);
@@ -93,6 +136,21 @@ public class AppController {
                             .data(jsonData)
                             .build();
                 })
+                .doOnComplete(() -> {
+                    SseFailure failure = semanticFailure.get();
+                    if (failure != null) {
+                        idempotencyService.markFailed(decision.redisKey(), fingerprint,
+                                failure.errorCode(), failure.message());
+                    } else {
+                        idempotencyService.markSuccess(decision.redisKey(), fingerprint,
+                                JSONUtil.toJsonStr(Map.of("type", "done", "status", "success")), 200);
+                    }
+                })
+                .doOnError(throwable -> idempotencyService.markFailed(decision.redisKey(), fingerprint,
+                        throwable instanceof BusinessException businessException
+                                ? businessException.getCode()
+                                : ErrorCode.SYSTEM_ERROR.getCode(),
+                        throwable.getMessage()))
                 // 合并结束事件
                 .concatWith(Mono.just(
                         //发送结束事件
@@ -112,15 +170,37 @@ public class AppController {
      */
     @PostMapping("/deploy")
     @RateLimit(limitType = RateLimitType.USER, rate = 10, rateInterval = 60, message = "部署请求过于频繁，请稍后再试")
-    public BaseResponse<String> deployApp(@RequestBody AppDeployRequest appDeployRequest, HttpServletRequest request) {
+    public BaseResponse<String> deployApp(@RequestBody AppDeployRequest appDeployRequest,
+                                          @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+                                          HttpServletRequest request) {
         ThrowUtils.throwIf(appDeployRequest == null, ErrorCode.PARAMS_ERROR);
         Long appId = appDeployRequest.getAppId();
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
         // 获取当前登录用户
         User loginUser = userService.getLoginUser(request);
         // 调用服务部署应用
-        String deployUrl = appService.deployApp(appId, loginUser);
-        return ResultUtils.success(deployUrl);
+        String fingerprint = idempotencyService.fingerprint("app:deploy", appId);
+        IdempotencyDecision decision = idempotencyService.start(
+                "app:deploy", loginUser.getId(), idempotencyKey, fingerprint, idempotencyProperties.processingTtl());
+        BaseResponse<String> replay = replayResponse(decision, String.class);
+        if (replay != null) {
+            return replay;
+        }
+        replayFailed(decision);
+        rejectActiveOrConflictingReplay(decision);
+        try {
+            String deployUrl = appService.deployApp(appId, loginUser);
+            BaseResponse<String> response = ResultUtils.success(deployUrl);
+            idempotencyService.markSuccess(decision.redisKey(), fingerprint, JSONUtil.toJsonStr(response), 200);
+            return response;
+        } catch (BusinessException e) {
+            idempotencyService.markFailed(decision.redisKey(), fingerprint, e.getCode(), e.getMessage());
+            throw e;
+        } catch (RuntimeException e) {
+            idempotencyService.markFailed(decision.redisKey(), fingerprint,
+                    ErrorCode.SYSTEM_ERROR.getCode(), systemErrorMessage(e));
+            throw e;
+        }
     }
 
 
@@ -171,12 +251,34 @@ public class AppController {
      */
     @PostMapping("/add")
     @RateLimit(limitType = RateLimitType.USER, rate = 30, rateInterval = 60, message = "创建应用过于频繁，请稍后再试")
-    public BaseResponse<Long> addApp(@RequestBody AppAddRequest appAddRequest, HttpServletRequest request) {
+    public BaseResponse<Long> addApp(@RequestBody AppAddRequest appAddRequest,
+                                     @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+                                     HttpServletRequest request) {
         ThrowUtils.throwIf(appAddRequest == null, ErrorCode.PARAMS_ERROR);
         // 获取当前登录用户
         User loginUser = userService.getLoginUser(request);
-        Long appId = appService.createApp(appAddRequest, loginUser);
-        return ResultUtils.success(appId);
+        String fingerprint = idempotencyService.fingerprint("app:add", appAddRequest.getInitPrompt());
+        IdempotencyDecision decision = idempotencyService.start(
+                "app:add", loginUser.getId(), idempotencyKey, fingerprint, idempotencyProperties.processingTtl());
+        BaseResponse<Long> replay = replayResponse(decision, Long.class);
+        if (replay != null) {
+            return replay;
+        }
+        replayFailed(decision);
+        rejectActiveOrConflictingReplay(decision);
+        try {
+            Long appId = appService.createApp(appAddRequest, loginUser);
+            BaseResponse<Long> response = ResultUtils.success(appId);
+            idempotencyService.markSuccess(decision.redisKey(), fingerprint, JSONUtil.toJsonStr(response), 200);
+            return response;
+        } catch (BusinessException e) {
+            idempotencyService.markFailed(decision.redisKey(), fingerprint, e.getCode(), e.getMessage());
+            throw e;
+        } catch (RuntimeException e) {
+            idempotencyService.markFailed(decision.redisKey(), fingerprint,
+                    ErrorCode.SYSTEM_ERROR.getCode(), systemErrorMessage(e));
+            throw e;
+        }
     }
 
 
@@ -268,8 +370,7 @@ public class AppController {
         ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR);
         User loginUser = userService.getLoginUser(request);
         // 限制每页最多 20 个
-        long pageSize = appQueryRequest.getPageSize();
-        ThrowUtils.throwIf(pageSize > 20, ErrorCode.PARAMS_ERROR, "每页最多查询 20 个应用");
+        long pageSize = normalizeUserPageSize(appQueryRequest.getPageSize());
         long pageNum = appQueryRequest.getPageNum();
         // 只查询当前用户的应用
         appQueryRequest.setUserId(loginUser.getId());
@@ -297,8 +398,7 @@ public class AppController {
     public BaseResponse<Page<AppVO>> listGoodAppVOByPage(@RequestBody AppQueryRequest appQueryRequest) {
         ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR);
         // 限制每页最多 20 个
-        long pageSize = appQueryRequest.getPageSize();
-        ThrowUtils.throwIf(pageSize > 20, ErrorCode.PARAMS_ERROR, "每页最多查询 20 个应用");
+        long pageSize = normalizeUserPageSize(appQueryRequest.getPageSize());
         long pageNum = appQueryRequest.getPageNum();
         // 只查询精选的应用
         appQueryRequest.setPriority(AppConstant.GOOD_APP_PRIORITY);
@@ -394,6 +494,151 @@ public class AppController {
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR);
         // 获取封装类
         return ResultUtils.success(appService.getAppVO(app));
+    }
+
+    private long normalizeUserPageSize(long requestedPageSize) {
+        ThrowUtils.throwIf(requestedPageSize <= 0, ErrorCode.PARAMS_ERROR, "分页参数错误");
+        return Math.min(requestedPageSize, USER_PAGE_SIZE_LIMIT);
+    }
+
+    private Flux<ServerSentEvent<String>> duplicateSse(String status) {
+        String type = "duplicate_completed".equals(status) ? "done" : "error";
+        return Flux.just(
+                ServerSentEvent.<String>builder()
+                        .data(JSONUtil.toJsonStr(Map.of("d", JSONUtil.toJsonStr(Map.of(
+                                "type", type,
+                                "status", status
+                        )))))
+                        .build(),
+                ServerSentEvent.<String>builder()
+                        .event("done")
+                        .data("")
+                        .build()
+        );
+    }
+
+    private Flux<ServerSentEvent<String>> failedReplaySse(IdempotencyRecord record) {
+        int errorCode = record != null && record.getErrorCode() != null
+                ? record.getErrorCode()
+                : ErrorCode.SYSTEM_ERROR.getCode();
+        String message = record != null && StrUtil.isNotBlank(record.getErrorMessage())
+                ? record.getErrorMessage()
+                : ErrorCode.SYSTEM_ERROR.getMessage();
+        return Flux.just(
+                ServerSentEvent.<String>builder()
+                        .data(JSONUtil.toJsonStr(Map.of("d", JSONUtil.toJsonStr(Map.of(
+                                "type", "error",
+                                "status", "failed",
+                                "code", errorCode,
+                                "message", message
+                        )))))
+                        .build(),
+                ServerSentEvent.<String>builder()
+                        .event("done")
+                        .data("")
+                        .build()
+        );
+    }
+
+    private <T> BaseResponse<T> replayResponse(IdempotencyDecision decision, Class<T> dataType) {
+        if (decision.type() != IdempotencyDecision.Type.REPLAY_SUCCESS || decision.record() == null) {
+            return null;
+        }
+        JSONObject responseJson = JSONUtil.parseObj(decision.record().getResultJson());
+        T data = Convert.convert(dataType, responseJson.get("data"));
+        return new BaseResponse<>(
+                responseJson.getInt("code", ErrorCode.SUCCESS.getCode()),
+                data,
+                responseJson.getStr("message", "")
+        );
+    }
+
+    private void replayFailed(IdempotencyDecision decision) {
+        if (decision.type() != IdempotencyDecision.Type.REPLAY_FAILED) {
+            return;
+        }
+        IdempotencyRecord record = decision.record();
+        int errorCode = record != null && record.getErrorCode() != null
+                ? record.getErrorCode()
+                : ErrorCode.SYSTEM_ERROR.getCode();
+        String message = record != null && StrUtil.isNotBlank(record.getErrorMessage())
+                ? record.getErrorMessage()
+                : ErrorCode.SYSTEM_ERROR.getMessage();
+        throw new BusinessException(errorCode, message);
+    }
+
+    private void rejectActiveOrConflictingReplay(IdempotencyDecision decision) {
+        if (decision.type() == IdempotencyDecision.Type.FINGERPRINT_MISMATCH) {
+            throw new BusinessException(ErrorCode.REQUEST_REPLAY_CONFLICT);
+        }
+        if (decision.type() == IdempotencyDecision.Type.IN_PROGRESS) {
+            throw new BusinessException(ErrorCode.REQUEST_IN_PROGRESS);
+        }
+    }
+
+    private SseFailure detectSemanticFailure(String chunk) {
+        JSONObject payload = parseSsePayload(chunk);
+        if (payload == null) {
+            return null;
+        }
+        String type = payload.getStr("type");
+        String status = payload.getStr("status");
+        if ("error".equals(type)) {
+            return new SseFailure(errorCodeForStatus(status), semanticFailureMessage(payload, status));
+        }
+        if ("done".equals(type) && StrUtil.isNotBlank(status) && !"success".equals(status)) {
+            if ("partial_success".equals(status) || "degraded_success".equals(status)) {
+                return null;
+            }
+            return new SseFailure(errorCodeForStatus(status), semanticFailureMessage(payload, status));
+        }
+        return null;
+    }
+
+    private JSONObject parseSsePayload(String chunk) {
+        if (StrUtil.isBlank(chunk)) {
+            return null;
+        }
+        String json = chunk.trim();
+        if (json.startsWith("data:")) {
+            json = json.substring(5).trim();
+        }
+        if (!json.startsWith("{")) {
+            return null;
+        }
+        try {
+            return JSONUtil.parseObj(json);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private int errorCodeForStatus(String status) {
+        if ("overloaded".equals(status)) {
+            return ErrorCode.AI_GENERATION_OVERLOADED.getCode();
+        }
+        if ("partial_success".equals(status) || "degraded_success".equals(status)) {
+            return ErrorCode.SUCCESS.getCode();
+        }
+        return ErrorCode.SYSTEM_ERROR.getCode();
+    }
+
+    private String semanticFailureMessage(JSONObject payload, String status) {
+        if ("partial_success".equals(status) || "degraded_success".equals(status)) {
+            return null;
+        }
+        String message = payload.getStr("message");
+        if (StrUtil.isNotBlank(message)) {
+            return message;
+        }
+        return StrUtil.isNotBlank(status) ? status : ErrorCode.SYSTEM_ERROR.getMessage();
+    }
+
+    private String systemErrorMessage(RuntimeException e) {
+        return StrUtil.isNotBlank(e.getMessage()) ? e.getMessage() : ErrorCode.SYSTEM_ERROR.getMessage();
+    }
+
+    private record SseFailure(int errorCode, String message) {
     }
 
 }

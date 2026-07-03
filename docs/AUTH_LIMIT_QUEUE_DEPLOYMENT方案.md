@@ -332,7 +332,7 @@ PostgreSQL：配额流水、审计日志、任务记录
   "knowledge_base_id": "kb_id",
   "collection": "collection_name",
   "top_k": 8,
-  "embedding_model": "qwen-emb",
+  "embedding_model": "BAAI/bge-small-zh-v1.5",
   "index_version": "20260203153000",
   "items": [
     {

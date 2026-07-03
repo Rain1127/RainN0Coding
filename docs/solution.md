@@ -271,7 +271,7 @@ link-mode = "copy"
 from config import config                    # PASS
 from llm_factory import create_llm, ...      # PASS
 from state.code_gen_state import CodeGenState # PASS
-config.DEEPSEEK_MODEL                        # deepseek-chat
+config.DEEPSEEK_MODEL                        # deepseek-v4-pro
 config.LOCAL_EMBEDDING_ENABLED              # False
 llm = create_llm()                           # ChatOpenAI 实例
 llm_struct = create_llm_with_structured_output(TestOutput)  # 结构化 LLM

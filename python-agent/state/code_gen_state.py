@@ -70,3 +70,11 @@ class CodeGenState(TypedDict, total=False):
     messages: Annotated[list, add_messages]  # 对话历史（LangGraph 自动累加）
     final_result: dict | None  # 最终结果（返回给 Java 端）
     error: str | None          # 错误信息
+    degraded: bool
+    degraded_reasons: list[str]
+    failed_phase: str | None
+    last_good_phase: str | None
+    partial_code_available: bool
+    final_status: str | None
+    recovery_hint: str | None
+    phase_failures: list[dict]

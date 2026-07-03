@@ -55,9 +55,9 @@ MODEL_GROUPS: dict[str, ModelGroup] = {
             ModelCandidate(name="deepseek-chat", model=config.CHAT_MODEL,
                            api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL,
                            timeout=config.LLM_FALLBACK_TIMEOUT, circuit_breaker=_make_cb("deepseek-chat-r")),
-            ModelCandidate(name="Qwen3.6-Flash", model=config.QWEN_FLASH_MODEL,
-                           api_key=config.QWEN_API_KEY, base_url=config.QWEN_BASE_URL,
-                           timeout=config.LLM_FALLBACK_TIMEOUT, circuit_breaker=_make_cb("qwen-flash-r")),
+            ModelCandidate(name="GLM-4.7-Flash", model=config.ZHIPU_FLASH_MODEL,
+                           api_key=config.ZHIPU_API_KEY, base_url=config.ZHIPU_BASE_URL,
+                           timeout=config.LLM_FALLBACK_TIMEOUT, circuit_breaker=_make_cb("glm-4.7-flash-r")),
         ]
     ),
     "structured": ModelGroup(
@@ -66,9 +66,9 @@ MODEL_GROUPS: dict[str, ModelGroup] = {
             ModelCandidate(name="deepseek-chat", model=config.CHAT_MODEL,
                            api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL,
                            timeout=config.LLM_TIMEOUT, circuit_breaker=_make_cb("deepseek-chat-s")),
-            ModelCandidate(name="Qwen3.6-Flash", model=config.QWEN_FLASH_MODEL,
-                           api_key=config.QWEN_API_KEY, base_url=config.QWEN_BASE_URL,
-                           timeout=config.LLM_FALLBACK_TIMEOUT, circuit_breaker=_make_cb("qwen-flash-s")),
+            ModelCandidate(name="GLM-4.7-Flash", model=config.ZHIPU_FLASH_MODEL,
+                           api_key=config.ZHIPU_API_KEY, base_url=config.ZHIPU_BASE_URL,
+                           timeout=config.LLM_FALLBACK_TIMEOUT, circuit_breaker=_make_cb("glm-4.7-flash-s")),
         ]
     ),
     "lightweight": ModelGroup(
@@ -77,9 +77,9 @@ MODEL_GROUPS: dict[str, ModelGroup] = {
             ModelCandidate(name="deepseek-chat", model=config.CHAT_MODEL,
                            api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL,
                            timeout=config.LLM_TIMEOUT, circuit_breaker=_make_cb("deepseek-chat-l")),
-            ModelCandidate(name="Qwen3.6-Flash", model=config.QWEN_FLASH_MODEL,
-                           api_key=config.QWEN_API_KEY, base_url=config.QWEN_BASE_URL,
-                           timeout=config.LLM_FALLBACK_TIMEOUT, circuit_breaker=_make_cb("qwen-flash-l")),
+            ModelCandidate(name="GLM-4.7-Flash", model=config.ZHIPU_FLASH_MODEL,
+                           api_key=config.ZHIPU_API_KEY, base_url=config.ZHIPU_BASE_URL,
+                           timeout=config.LLM_FALLBACK_TIMEOUT, circuit_breaker=_make_cb("glm-4.7-flash-l")),
         ]
     ),
 }

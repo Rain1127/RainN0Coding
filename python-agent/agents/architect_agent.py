@@ -10,6 +10,7 @@ import json
 import os
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
+from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from llm_factory import create_json_parser
 from state.code_gen_state import CodeGenState
 from config import LANGUAGE_CONFIGS, get_lang_config
@@ -139,9 +140,16 @@ def architect_agent(state: CodeGenState) -> CodeGenState:
     parser = create_json_parser(Architecture, ARCH_FIELD_SPEC, group="structured", agent_name="architect_agent")
 
     prd = state.get("prd")
+    log_agent_start(
+        "Architect Agent",
+        f"正在设计项目结构，page_name={(prd or {}).get('page_name', '-')} "
+        f"feature_count={len((prd or {}).get('features', []))}",
+    )
+
     if not prd:
         state["error"] = "PRD 为空，Architect Agent 无法设计架构"
         state["phase"] = "error"
+        log_agent_fail("Architect Agent", "缺少 PRD，无法设计项目结构")
         return state
 
     code_gen_type = state.get("code_gen_type", "vue_project")
@@ -175,11 +183,13 @@ def architect_agent(state: CodeGenState) -> CodeGenState:
     except Exception as e:
         state["error"] = f"Architect Agent LLM 调用失败: {e}"
         state["phase"] = "error"
+        log_agent_fail("Architect Agent", f"设计项目结构失败，原因={e}")
         return state
 
     if arch is None:
         state["error"] = "Architect Agent 失败：所有模型候选不可用（全部已熔断或调用失败）"
         state["phase"] = "error"
+        log_agent_fail("Architect Agent", "设计项目结构失败，可用模型候选为空")
         return state
 
     # 写入 State
@@ -191,10 +201,11 @@ def architect_agent(state: CodeGenState) -> CodeGenState:
     state["phase"] = "arch_done"
 
     component_names = [c.name for c in arch.component_tree]
-    print(f"[Architect Agent] 完成: {len(arch.component_tree)} 组件, "
-          f"{len(arch.file_list)} 文件, "
-          f"{len(arch.data_flow)} 条数据流, "
-          f"根组件: {component_names[0] if component_names else 'N/A'}")
+    log_agent_ok(
+        "Architect Agent",
+        f"项目结构已生成，components={len(arch.component_tree)} files={len(arch.file_list)} "
+        f"data_flows={len(arch.data_flow)} root={component_names[0] if component_names else 'N/A'}",
+    )
 
     return state
 

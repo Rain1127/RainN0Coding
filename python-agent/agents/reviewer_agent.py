@@ -9,6 +9,7 @@ Reviewer Agent —— 代码审查员
 """
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
+from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from llm_factory import create_json_parser
 from state.code_gen_state import CodeGenState
 from config import config, get_lang_config
@@ -163,9 +164,17 @@ def reviewer_agent(state: CodeGenState) -> CodeGenState:
     parser = create_json_parser(ReviewResult, REVIEW_FIELD_SPEC, group="structured", agent_name="reviewer_agent")
 
     code_files = state.get("code_files", [])
+    expected_files = len((state.get("architecture") or {}).get("file_list", []))
+    log_agent_start(
+        "Reviewer Agent",
+        f"正在审查代码，generated_files={len(code_files)} expected_files={expected_files} "
+        f"retry_count={state.get('retry_count', 0)}",
+    )
+
     if not code_files:
         state["error"] = "code_files 为空，Reviewer Agent 无法审查"
         state["phase"] = "error"
+        log_agent_fail("Reviewer Agent", "缺少 code_files，无法审查代码")
         return state
 
     prd = state.get("prd") or {}
@@ -199,11 +208,13 @@ def reviewer_agent(state: CodeGenState) -> CodeGenState:
     except Exception as e:
         state["error"] = f"Reviewer Agent LLM 调用失败: {e}"
         state["phase"] = "error"
+        log_agent_fail("Reviewer Agent", f"审查代码失败，原因={e}")
         return state
 
     if result is None:
         state["error"] = "Reviewer Agent 失败：所有模型候选不可用（全部已熔断或调用失败）"
         state["phase"] = "error"
+        log_agent_fail("Reviewer Agent", "审查代码失败，可用模型候选为空")
         return state
 
     # 写入 State
@@ -217,8 +228,10 @@ def reviewer_agent(state: CodeGenState) -> CodeGenState:
 
     state["phase"] = "review_done"
 
-    status = "PASS" if result.passed else f"FAIL ({len(result.issues)} issues)"
-    print(f"[Reviewer Agent] 评分 {result.score}/100, {status}, "
-          f"retry_count={state['retry_count']}/{state.get('max_retries', config.MAX_RETRIES)}")
+    log_agent_ok(
+        "Reviewer Agent",
+        f"审查完成，score={result.score} passed={'yes' if result.passed else 'no'} "
+        f"issues={len(result.issues)} retry_count={state['retry_count']}/{state.get('max_retries', config.MAX_RETRIES)}",
+    )
 
     return state
