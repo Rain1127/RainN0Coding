@@ -67,9 +67,9 @@ All LLM agents use `llm_factory.create_json_parser()` with Pydantic output schem
 ### LLM Infrastructure (core/ + llm_factory.py)
 
 Three-tier model routing with circuit breaker protection:
-- **model_registry.py** defines 3 model groups: `reasoning` (Coder, 3 candidates), `structured` (PM/Architect/Reviewer, 2 candidates), `lightweight` (Intent, 2 candidates). Primary: DeepSeek; fallback: Qwen.
+- **model_registry.py** defines 3 model groups: `reasoning` (Coder, 3 candidates, primary `deepseek-v4-pro`), `structured` (PM/Architect/Reviewer, 2 candidates), `lightweight` (Intent, 2 candidates). Fallback: GLM-4.7-Flash.
 - **circuit_breaker.py** implements CLOSED→OPEN→HALF_OPEN state machine per candidate. 3 consecutive failures triggers OPEN; 30s cooldown before HALF_OPEN probe.
-- **model_router.py** tries candidates by priority within a group, auto-switching on failure or breaker trip. Special handling: Qwen/DashScope on Windows uses `curl` subprocess to bypass TLS issues.
+- **model_router.py** tries candidates by priority within a group, auto-switching on failure or breaker trip. Special handling: compatible OpenAI endpoints can use `curl` subprocess on Windows when needed.
 - **llm_factory.py** provides `create_json_parser(schema, field_spec, group)` — the primary interface for agents. Returns a callable that routes through model_router and parses JSON output into Pydantic models.
 
 ### RAG System (rag/)
@@ -100,7 +100,7 @@ Java backend calls `POST /api/generate-code` and transparently proxies SSE byte 
 
 ### External Dependencies
 
-- **LLM**: DeepSeek (primary), Qwen/DashScope (fallback) — API keys in `.env`
+- **LLM**: DeepSeek (primary), GLM-4.7-Flash (fallback) — API keys in `.env`
 - **Vector DB**: Milvus (Lite mode default, no Docker required)
 - **Cache**: Redis (optional, in-memory fallback)
 - **Embedding**: sentence-transformers with BAAI/bge-small-zh-v1.5 (local)

@@ -9,14 +9,14 @@ class Config:
     # ===== DeepSeek API =====
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
     CHAT_MODEL: str = os.getenv("CHAT_MODEL", "deepseek-chat")  # 结构化输出用（v4-pro 不支持 json_mode）
-    REASONING_MODEL: str = os.getenv("REASONING_MODEL", "deepseek-reasoner")
+    REASONING_MODEL: str = os.getenv("REASONING_MODEL", "deepseek-v4-pro")
 
-    # ===== Qwen 备用模型 =====
-    QWEN_API_KEY: str = os.getenv("QWEN_API_KEY", "sk-62e5f123db9049d190063134072ec3ff")
-    QWEN_BASE_URL: str = os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    QWEN_FLASH_MODEL: str = os.getenv("QWEN_FLASH_MODEL", "qwen3.6-flash")
+    # ===== GLM 备用模型 =====
+    ZHIPU_API_KEY: str = os.getenv("ZHIPU_API_KEY", "")
+    ZHIPU_BASE_URL: str = os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+    ZHIPU_FLASH_MODEL: str = os.getenv("ZHIPU_FLASH_MODEL", "glm-4.7-flash")
 
     # ===== LLM 通用参数 =====
     LLM_TEMPERATURE: float = 0.1          # 代码生成需要低温度
@@ -49,6 +49,28 @@ class Config:
 
     # ===== 服务 =====
     SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
+    APP_ENV: str = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
+    INTERNAL_API_TOKEN: str = os.getenv("INTERNAL_API_TOKEN", "")
+    INTERNAL_API_ALLOW_MISSING_TOKEN: bool = os.getenv(
+        "INTERNAL_API_ALLOW_MISSING_TOKEN",
+        "true" if APP_ENV in {"dev", "development", "local", "test"} else "false",
+    ).lower() == "true"
+    AGENT_MAX_CONCURRENT_REQUESTS: int = int(os.getenv("AGENT_MAX_CONCURRENT_REQUESTS", "4"))
+    AGENT_OVERLOAD_STATUS_CODE: int = int(os.getenv("AGENT_OVERLOAD_STATUS_CODE", "429"))
+    AGENT_RESILIENCE_ENABLED: bool = os.getenv("AGENT_RESILIENCE_ENABLED", "true").lower() == "true"
+    AGENT_PHASE_TIMEOUT_SHORT_SECONDS: int = int(os.getenv("AGENT_PHASE_TIMEOUT_SHORT_SECONDS", "30"))
+    AGENT_PHASE_TIMEOUT_MEDIUM_SECONDS: int = int(os.getenv("AGENT_PHASE_TIMEOUT_MEDIUM_SECONDS", "90"))
+    AGENT_PHASE_TIMEOUT_LONG_SECONDS: int = int(os.getenv("AGENT_PHASE_TIMEOUT_LONG_SECONDS", "240"))
+
+    # ===== Guardrails =====
+    GUARDRAILS_ENABLED: bool = os.getenv("GUARDRAILS_ENABLED", "true").lower() == "true"
+    GUARDRAILS_AUDIT_LOW_RISK: bool = os.getenv("GUARDRAILS_AUDIT_LOW_RISK", "false").lower() == "true"
+    GUARDRAILS_MAX_PROMPT_CHARS: int = int(os.getenv("GUARDRAILS_MAX_PROMPT_CHARS", "12000"))
+    GUARDRAILS_MAX_FILE_WRITE_BYTES: int = int(os.getenv("GUARDRAILS_MAX_FILE_WRITE_BYTES", "200000"))
+    GUARDRAILS_MAX_MODIFY_REPLACEMENT_BYTES: int = int(
+        os.getenv("GUARDRAILS_MAX_MODIFY_REPLACEMENT_BYTES", "120000")
+    )
+    GUARDRAILS_MAX_LIST_FILES_DEPTH: int = int(os.getenv("GUARDRAILS_MAX_LIST_FILES_DEPTH", "6"))
 
     # ===== RAGAS 离线评估 =====
     RAGAS_JUDGE_MODEL: str = os.getenv("RAGAS_JUDGE_MODEL", DEEPSEEK_MODEL)  # Judge LLM 模型名，默认用 DEEPSEEK_MODEL

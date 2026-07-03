@@ -10,6 +10,7 @@
 from rag.embedding_service import embedding_service
 from rag.milvus_client import milvus_store
 from rag.sqlite_store import sqlite_store
+from rag.seed_chunking import expand_seed_record
 from rag.seed_data import (
     FRAMEWORK_API_SEEDS,
     COMPONENT_LIBRARY_SEEDS,
@@ -30,29 +31,40 @@ def seed_collection(collection_name: str, data: list[dict], text_field: str):
     milvus_store.connect()
     milvus_store.ensure_collection(collection_name)
 
-    success = 0
+    inserted_count = 0
     for item in data:
-        text = item.get(text_field, "")
-        if not text:
-            continue
+        if collection_name == "component_library":
+            records = expand_seed_record(
+                item,
+                name_field="component_name",
+                content_field=text_field,
+                max_chars=1200,
+            )
+        else:
+            records = [dict(item)]
 
-        try:
-            vec = embedding_service.embed(text)
-        except Exception as e:
-            print(f"  [SKIP] embed 失败: {item.get('api_name', item.get('component_name', item.get('pattern_name', '?')))}: {e}")
-            continue
+        for record in records:
+            text = record.get(text_field, "")
+            if not text:
+                continue
 
-        try:
-            milvus_store.insert_one(collection_name, {
-                "vector": vec,
-                **{k: v for k, v in item.items() if k not in ("vector",)},
-            })
-            success += 1
-        except Exception as e:
-            name = item.get('api_name') or item.get('component_name') or item.get('pattern_name') or item.get('error_signature') or '?'
-            print(f"  [FAIL] {name}: {e}")
+            try:
+                vec = embedding_service.embed(text)
+            except Exception as e:
+                print(f"  [SKIP] embed 失败: {record.get('api_name', record.get('component_name', record.get('pattern_name', '?')))}: {e}")
+                continue
 
-    print(f"  {collection_name}: {success}/{len(data)} 条入库")
+            try:
+                milvus_store.insert_one(collection_name, {
+                    "vector": vec,
+                    **{k: v for k, v in record.items() if k not in ("vector",)},
+                })
+                inserted_count += 1
+            except Exception as e:
+                name = record.get('api_name') or record.get('component_name') or record.get('pattern_name') or record.get('error_signature') or '?'
+                print(f"  [FAIL] {name}: {e}")
+
+    print(f"  {collection_name}: {inserted_count} 条向量 / {len(data)} 个原始条目")
 
 
 def main():
@@ -88,9 +100,11 @@ def main():
     from config import config
     if config.MILVUS_MODE == "lite":
         import os
+        from pymilvus import MilvusClient
         db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "milvus_data", "milvus_lite.db")
         client = MilvusClient(db_path)
     else:
+        from pymilvus import MilvusClient
         client = MilvusClient(uri=f"http://{config.MILVUS_HOST}:{config.MILVUS_PORT}")
     for col in ["framework_api", "component_library", "design_pattern", "error_pattern"]:
         try:

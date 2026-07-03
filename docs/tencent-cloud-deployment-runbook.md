@@ -101,7 +101,7 @@ Nginx :80/:443
 
 当前仓库的 `src/main/resources/application-local.yml` 和 `python-agent/.env` 存在 API Key、COS Secret 等敏感配置。部署前必须：
 
-1. 在 DeepSeek、DashScope、腾讯云 COS、Pexels 等平台轮换已出现过的密钥。
+1. 在 DeepSeek、智谱 AI、腾讯云 COS、Pexels 等平台轮换已出现过的密钥。
 2. 生产服务器只通过环境变量或 `EnvironmentFile` 注入密钥。
 3. 不要把生产密钥提交到 Git。
 
@@ -391,13 +391,13 @@ python3.12 -m venv .venv
 cat > /opt/yu-ai-code-mother/python-agent/.env.prod <<'EOF'
 DEEPSEEK_API_KEY=replace-with-real-key
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-pro
 CHAT_MODEL=deepseek-chat
-REASONING_MODEL=deepseek-reasoner
+REASONING_MODEL=deepseek-v4-pro
 
-QWEN_API_KEY=replace-with-real-key
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-QWEN_FLASH_MODEL=qwen3.6-flash
+ZHIPU_API_KEY=replace-with-real-key
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+ZHIPU_FLASH_MODEL=glm-4.7-flash
 
 SERVER_PORT=8000
 LLM_TIMEOUT=120
@@ -590,10 +590,6 @@ cos:
 
 pexels:
   api-key: ${PEXELS_API_KEY}
-
-dashscope:
-  api-key: ${DASHSCOPE_API_KEY}
-  image-model: wan2.2-t2i-flash
 ```
 
 设置权限：
@@ -626,7 +622,6 @@ cat > /opt/yu-ai-code-mother/config/java.env <<'EOF'
 COS_SECRET_ID=replace-with-real-secret-id
 COS_SECRET_KEY=replace-with-real-secret-key
 PEXELS_API_KEY=replace-with-real-key
-DASHSCOPE_API_KEY=replace-with-real-key
 EOF
 
 chmod 600 /opt/yu-ai-code-mother/config/java.env

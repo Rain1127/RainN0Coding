@@ -186,7 +186,7 @@ com.yupi.yuaicodemother
 | **API 文档** | Knife4j + SpringDoc OpenAPI 3 | 4.4.0 |
 | **工具库** | Lombok、Hutool | 1.18.36 / 5.8.38 |
 | **LLM 框架** | LangChain4j + LangGraph4j | 1.1.0 / 1.6.0-rc2 |
-| **模型接入** | DashScope SDK、DeepSeek API | 2.21.1 |
+| **模型接入** | OpenAI-compatible API、DeepSeek API | 2.21.1 |
 | **对象存储** | 腾讯云 COS | 5.6.227 |
 | **截图** | Selenium + WebDriverManager | 4.33.0 / 6.1.0 |
 | **监控** | Micrometer + Prometheus + Grafana | — |
@@ -508,7 +508,7 @@ RLocalCachedMap<String, User> sessionCache = redissonClient
 | **新增** | `spring-boot-starter-webflux` (WebClient) | Reactive HTTP 客户端，透传 Python SSE 流 |
 | **删除** | `langchain4j` 全家桶 | 不再直接调用 LLM |
 | **删除** | `langgraph4j` | 工作流编排移到 Python |
-| **删除** | `DashScope SDK` | 模型调用在 Python |
+| **删除** | 外部旧图像 SDK | 模型调用在 Python |
 
 #### Python 侧
 
@@ -564,7 +564,7 @@ RLocalCachedMap<String, User> sessionCache = redissonClient
 │                 │   │ - Pexels         │   │ 纯 Shell 执行    │
 │                 │   │ - UnDraw         │   │ npm install/build│
 │                 │   │ - Mermaid        │   │                  │
-│                 │   │ - DashScope 文生图│   │                  │
+│                 │   │ - 外部图像生成 API│   │                  │
 └─────────────────┘   └──────────────────┘   └──────────────────┘
 ```
 
@@ -617,7 +617,7 @@ def supervisor_decision(state):
 **Image Collector Agent（素材收集）**
 - 输入：架构方案 + PRD 中的视觉需求
 - 输出：`[{url, category}]` 图片列表
-- 主要操作：HTTP API 调用（Pexels、UnDraw、Mermaid CLI、DashScope 文生图）
+- 主要操作：HTTP API 调用（Pexels、UnDraw、Mermaid CLI、外部图像生成 API）
 - **零 LLM 调用**（除了最开始的搜索计划，可用规则引擎替代）
 
 **Builder Agent（构建验证）**

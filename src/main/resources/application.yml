@@ -45,6 +45,20 @@ knife4j:
 python:
   ai:
     base-url: ${PYTHON_AI_BASE_URL:http://localhost:8000}
+    internal-token: ${PYTHON_AI_INTERNAL_TOKEN:}
+    connect-timeout-ms: ${PYTHON_AI_CONNECT_TIMEOUT_MS:3000}
+    response-timeout-seconds: ${PYTHON_AI_RESPONSE_TIMEOUT_SECONDS:1800}
+    route-timeout-seconds: ${PYTHON_AI_ROUTE_TIMEOUT_SECONDS:30}
+ai:
+  codegen:
+    max-concurrent-requests: ${AI_CODEGEN_MAX_CONCURRENT_REQUESTS:8}
+    permit-lease-minutes: ${AI_CODEGEN_PERMIT_LEASE_MINUTES:30}
+idempotency:
+  enabled: ${IDEMPOTENCY_ENABLED:true}
+  processing-ttl-minutes: ${IDEMPOTENCY_PROCESSING_TTL_MINUTES:10}
+  ai-processing-ttl-minutes: ${IDEMPOTENCY_AI_PROCESSING_TTL_MINUTES:30}
+  success-ttl-hours: ${IDEMPOTENCY_SUCCESS_TTL_HOURS:24}
+  failure-ttl-minutes: ${IDEMPOTENCY_FAILURE_TTL_MINUTES:5}
 app:
   cors:
     allowed-origin-patterns: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
@@ -68,4 +82,21 @@ management:
   endpoint:
     health:
       show-details: always
+  tracing:
+    sampling:
+      probability: 1.0
+    propagation:
+      type: w3c
+otel:
+  file_format: '1.0'
+  resource:
+    attributes:
+      - name: service.name
+        value: yu-ai-code-mother-backend
+  tracer_provider:
+    processors:
+      - batch:
+          exporter:
+            otlp_http:
+              endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
 

@@ -6,6 +6,7 @@ Image Collector Agent —— 素材收集
 行为：零 LLM 调用 —— 根据页面类型和功能清单按规则判断需要的图片类型，
       从模拟图片库返回素材（真实环境替换为 Pexels/Unsplash API）。
 """
+from agents.agent_logging import log_agent_ok, log_agent_start
 from state.code_gen_state import CodeGenState
 
 
@@ -67,6 +68,10 @@ def _determine_image_needs(prd: dict) -> list[str]:
 def image_collector_agent(state: CodeGenState) -> CodeGenState:
     """Image Collector Agent 主逻辑 —— 零 LLM 调用"""
     prd = state.get("prd") or state.get("existing_prd") or {}
+    log_agent_start(
+        "Image Collector",
+        f"正在收集素材，page_type={prd.get('page_type', '-')} feature_count={len(prd.get('features', []))}",
+    )
     needed_types = _determine_image_needs(prd)
 
     collected: list[dict] = []
@@ -75,5 +80,8 @@ def image_collector_agent(state: CodeGenState) -> CodeGenState:
             collected.extend(MOCK_IMAGES[img_type])
 
     state["images"] = collected
-    print(f"[Image Collector] {len(collected)} 张图片 (类型: {needed_types})")
+    log_agent_ok(
+        "Image Collector",
+        f"素材收集完成，image_count={len(collected)} categories={','.join(sorted(needed_types))}",
+    )
     return state

@@ -1,24 +1,41 @@
-"""创建文件 —— 对标 Java FileWriteTool"""
+"""Create file tool."""
 
 import os
+
+from guardrails.audit import audit_from_decision
+from guardrails.engine import evaluate_tool_action
+from guardrails.models import ToolAction
 from langchain_core.tools import tool
-from tools.context import get_project_dir
+from tools.context import get_app_id, get_project_dir, get_user_role
 from tools.path_guard import resolve_project_path
 
 
 @tool
 def create_file(path: str, content: str) -> str:
-    """写入文件到指定路径。路径相对于项目根目录。会自动创建父目录，如果文件已存在则覆盖。
-
-    Args:
-        path: 文件的相对路径，例如 "src/components/Header.vue"
-        content: 要写入文件的内容
-    """
+    """Write content into a project file."""
     project_dir = get_project_dir()
     if not project_dir:
-        return "错误：工作目录未设置，无法写入文件"
+        return "错误：未设置工作目录，无法写入文件"
 
     try:
+        decision = evaluate_tool_action(
+            ToolAction(
+                tool_name="create_file",
+                project_dir=project_dir,
+                relative_path=path,
+                content=content,
+                user_role=get_user_role(),
+            )
+        )
+        audit_from_decision(
+            decision,
+            app_id=get_app_id(),
+            tool_name="create_file",
+            path=path,
+        )
+        if decision.action == "block":
+            return f"guardrail_blocked:{decision.rule_id}:{decision.message}"
+
         full_path = resolve_project_path(project_dir, path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as f:

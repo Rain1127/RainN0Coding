@@ -16,14 +16,20 @@ import java.util.Set;
 public class SpaFallbackFilter implements Filter {
 
     private static final Set<String> SPA_ROUTES = Set.of(
+            "/",
+            "/api/",
+            "/login",
+            "/register",
             "/api/login",
             "/api/register",
-            "/api/403"
-    );
-
-    private static final Set<String> SPA_PREFIXES = Set.of(
-            "/api/chat/",
-            "/api/admin/"
+            "/projects",
+            "/history",
+            "/templates",
+            "/settings",
+            "/api/projects",
+            "/api/history",
+            "/api/templates",
+            "/api/settings"
     );
 
     @Override
@@ -32,7 +38,7 @@ public class SpaFallbackFilter implements Filter {
         HttpServletRequest request = (HttpServletRequest) req;
 
         if ("GET".equalsIgnoreCase(request.getMethod()) && isSpaRoute(request.getRequestURI())) {
-            request.getRequestDispatcher("/").forward(request, res);
+            request.getRequestDispatcher("/index.html").forward(request, res);
             return;
         }
 
@@ -40,14 +46,6 @@ public class SpaFallbackFilter implements Filter {
     }
 
     private boolean isSpaRoute(String path) {
-        if (SPA_ROUTES.contains(path)) {
-            return true;
-        }
-        for (String prefix : SPA_PREFIXES) {
-            if (path.startsWith(prefix)) {
-                return true;
-            }
-        }
-        return false;
+        return SPA_ROUTES.contains(path);
     }
 }

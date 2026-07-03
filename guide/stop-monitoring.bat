@@ -1,14 +1,18 @@
 @echo off
 chcp 65001 >nul
-title 停止监控栈
+setlocal
+title Stop Monitoring Stack
 
-echo 停止 AI Code Mother 监控栈...
+set ROOT=%~dp0
+
+echo Stopping monitoring stack...
 echo.
 
-taskkill /FI "WINDOWTITLE eq AI-Python-Agent" /F 2>nul && echo   ✓ Python 已停止 || echo   - Python 未运行
-taskkill /FI "WINDOWTITLE eq Prometheus" /F 2>nul     && echo   ✓ Prometheus 已停止 || echo   - Prometheus 未运行
-taskkill /FI "WINDOWTITLE eq Grafana" /F 2>nul        && echo   ✓ Grafana 已停止 || echo   - Grafana 未运行
+docker compose -f "%ROOT%docker-compose.monitoring.yml" down
+
+taskkill /FI "WINDOWTITLE eq AI-Python-Agent" /F >nul 2>&1 && echo   Python stopped || echo   Python was not running
+taskkill /FI "WINDOWTITLE eq Prometheus" /F >nul 2>&1 && echo   Prometheus stopped || echo   Prometheus was not running
 
 echo.
-echo 全部停止完毕
+echo Monitoring stack stopped
 pause

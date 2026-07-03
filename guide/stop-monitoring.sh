@@ -1,15 +1,14 @@
 #!/bin/bash
-# AI Code Mother — 监控栈一键停止
 
-echo "停止监控栈..."
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Python FastAPI
-taskkill /FI "WINDOWTITLE eq AI-Python-Agent" /F 2>/dev/null && echo "  ✓ Python 已停止" || echo "  - Python 未运行"
+echo "Stopping monitoring stack..."
+echo
 
-# Prometheus
-taskkill /FI "WINDOWTITLE eq Prometheus" /F 2>/dev/null && echo "  ✓ Prometheus 已停止" || echo "  - Prometheus 未运行"
+docker compose -f "$ROOT_DIR/docker-compose.monitoring.yml" down
 
-# Grafana
-taskkill /FI "WINDOWTITLE eq Grafana" /F 2>/dev/null && echo "  ✓ Grafana 已停止" || echo "  - Grafana 未运行"
+taskkill /FI "WINDOWTITLE eq AI-Python-Agent" /F >/dev/null 2>&1 && echo "  Python stopped" || echo "  Python was not running"
+taskkill /FI "WINDOWTITLE eq Prometheus" /F >/dev/null 2>&1 && echo "  Prometheus stopped" || echo "  Prometheus was not running"
 
-echo "全部停止"
+echo
+echo "Monitoring stack stopped"
