@@ -6,7 +6,7 @@ Embedding 次数从 5-10 次降到 1 次，Milvus 只搜 2 个 Collection。
 
 from rag.embedding_service import embedding_service
 from rag.milvus_client import milvus_store
-from rag.retrieval_engine import RetrievalResult  # 复用数据模型
+from rag.retrieval_common import RetrievalResult
 
 
 class SemanticRetriever:
