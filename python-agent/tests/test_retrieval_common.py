@@ -1,4 +1,7 @@
 import importlib
+from contextlib import contextmanager
+import sys
+import types
 
 import pytest
 
@@ -6,17 +9,56 @@ import pytest
 pytestmark = pytest.mark.harness
 
 
-def _load_retrieval_modules():
-    retrieval_common = importlib.import_module("rag.retrieval_common")
-    retrieval_engine = importlib.import_module("rag.retrieval_engine")
-    return retrieval_common, retrieval_engine
+def _stub_retrieval_import_deps():
+    milvus_module = types.ModuleType("rag.milvus_client")
+    milvus_module.milvus_store = types.SimpleNamespace(search_multi=lambda queries: [])
+    return {"rag.milvus_client": milvus_module}
+
+
+@contextmanager
+def _isolated_retrieval_imports(include_hybrid=False):
+    stubbed_modules = _stub_retrieval_import_deps()
+    module_names = [
+        "rag.milvus_client",
+        "rag.retrieval_engine",
+        "rag.retrieval_common",
+    ]
+    if include_hybrid:
+        module_names.append("rag.hybrid_engine")
+
+    original_modules = {
+        name: sys.modules.get(name)
+        for name in module_names
+    }
+
+    try:
+        for name in module_names:
+            sys.modules.pop(name, None)
+        sys.modules.update(stubbed_modules)
+        retrieval_common = importlib.import_module("rag.retrieval_common")
+        retrieval_engine = importlib.import_module("rag.retrieval_engine")
+        if include_hybrid:
+            hybrid_engine = importlib.import_module("rag.hybrid_engine")
+            yield retrieval_common, retrieval_engine, hybrid_engine
+        else:
+            yield retrieval_common, retrieval_engine
+    finally:
+        for name in reversed(module_names):
+            module = original_modules[name]
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
 
 def _load_hybrid_modules():
-    retrieval_common = importlib.import_module("rag.retrieval_common")
-    retrieval_engine = importlib.import_module("rag.retrieval_engine")
-    hybrid_engine = importlib.import_module("rag.hybrid_engine")
-    return retrieval_common, retrieval_engine, hybrid_engine
+    with _isolated_retrieval_imports(include_hybrid=True) as modules:
+        return modules
+
+
+def _load_retrieval_modules():
+    with _isolated_retrieval_imports() as modules:
+        return modules
 
 
 def _sample_result(result_cls):
