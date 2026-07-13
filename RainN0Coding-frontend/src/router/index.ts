@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { decideRouteAccess } from './guards'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -18,7 +19,7 @@ const router = createRouter({
     },
     {
       path: '/',
-      name: 'ChatHome',
+      name: 'Home',
       component: () => import('@/pages/chat/ChatHome.vue'),
       meta: { requiresAuth: true },
     },
@@ -65,22 +66,13 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach(async (to, _from, next) => {
+router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.initialized) {
     await auth.fetchCurrentUser()
   }
 
-  if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    return next({ name: 'Login', query: { redirect: to.fullPath } })
-  }
-  if (to.meta.guest && auth.isAuthenticated) {
-    return next({ name: 'ChatHome' })
-  }
-  if (to.meta.requiresAdmin && !auth.isAdmin) {
-    return next({ name: 'Forbidden' })
-  }
-  next()
+  return decideRouteAccess(to.meta, auth.isAuthenticated, auth.isAdmin, to.fullPath)
 })
 
 export default router

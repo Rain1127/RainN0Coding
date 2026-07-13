@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { message } from 'ant-design-vue'
 import type { BaseResponse } from '@/types/api'
+import { buildLoginRedirect, shouldRedirectToLogin } from '@/router/guards'
 
 const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE,
@@ -20,9 +21,9 @@ apiClient.interceptors.response.use(
   },
   (err) => {
     if (err.response?.status === 401) {
-      const currentPath = window.location.pathname
-      if (currentPath !== '/login' && currentPath !== '/register') {
-        window.location.href = '/login'
+      const { pathname, search } = window.location
+      if (shouldRedirectToLogin(pathname)) {
+        window.location.assign(buildLoginRedirect(pathname, search))
       }
     } else if (err.code === 'ECONNABORTED') {
       message.error('请求超时，请稍后重试')
