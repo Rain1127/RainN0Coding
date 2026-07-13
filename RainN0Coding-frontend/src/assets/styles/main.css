@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --color-gpt-sidebar: #171717;
+  --color-gpt-sidebar-hover: #262626;
+  --color-gpt-sidebar-active: #333333;
+  --color-gpt-accent: #10a37f;
+  --color-gpt-accent-hover: #0d8c6d;
+  --color-gpt-bg: #ffffff;
+  --color-gpt-bg-alt: #f7f7f8;
+  --color-gpt-text: #343541;
+  --color-gpt-text-sidebar: #ececec;
+  --color-gpt-text-muted: #8e8ea0;
+  --color-gpt-border: #e5e5e5;
+  --color-gpt-user-bubble: #f0f0f0;
+  --color-admin-sidebar: #1a1a2e;
+  --color-admin-sidebar-hover: #16213e;
+  --color-admin-accent: #7c3aed;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  font-family: "SFRounded", "ui-rounded", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-size: 16px;
+  color: var(--color-gpt-text);
+  background: var(--color-gpt-bg);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}
+
+/* Ant Design overrides for ChatGPT feel */
+.ant-btn-primary {
+  background-color: var(--color-gpt-accent) !important;
+  border-color: var(--color-gpt-accent) !important;
+}
+.ant-btn-primary:hover {
+  background-color: var(--color-gpt-accent-hover) !important;
+  border-color: var(--color-gpt-accent-hover) !important;
+}
+.ant-tag {
+  border-radius: 4px;
+}
+.ant-table {
+  font-size: 14px;
+}
+.ant-modal-header {
+  border-radius: 8px 8px 0 0;
+}
