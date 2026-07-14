@@ -50,8 +50,3 @@ export interface AppQueryRequest {
   codeGenType?: string
   userId?: number
 }
-
-export interface DeployResult {
-  url: string
-  deployKey: string
-}

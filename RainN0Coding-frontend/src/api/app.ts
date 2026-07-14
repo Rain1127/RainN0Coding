@@ -1,7 +1,7 @@
 import apiClient from './client'
 import type {
   AppVO, AppAddRequest, AppUpdateRequest,
-  AppAdminUpdateRequest, AppQueryRequest, DeployResult,
+  AppAdminUpdateRequest, AppQueryRequest,
 } from '@/types/app'
 import type { PageResult, DeleteRequest } from '@/types/api'
 
@@ -24,7 +24,7 @@ export const listGoodApps = (body: AppQueryRequest) =>
   apiClient.post<any, PageResult<AppVO>>('/app/good/list/page/vo', body)
 
 export const deployApp = (appId: number) =>
-  apiClient.post<any, DeployResult>('/app/deploy', { appId })
+  apiClient.post<any, string>('/app/deploy', { appId })
 
 export const downloadApp = (appId: number) =>
   `/api/app/download/${appId}`

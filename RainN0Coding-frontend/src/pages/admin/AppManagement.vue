@@ -117,7 +117,7 @@ async function handleDelete(id: number) {
 async function handleDeploy(record: AppVO) {
   try {
     const result = await deployApp(record.id)
-    message.success(`部署成功: ${result.url}`)
+    message.success(`部署成功: ${result}`)
   } catch { /* handled */ }
 }
 
