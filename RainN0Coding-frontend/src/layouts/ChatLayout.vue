@@ -1,112 +1,231 @@
-<template>
-  <div class="flex h-full">
-    <!-- Sidebar -->
-    <div class="w-[260px] bg-gpt-sidebar flex flex-col shrink-0">
-      <div class="p-3">
-        <div class="flex items-center gap-2 px-2 py-3">
-          <div class="w-8 h-8 bg-gpt-accent rounded-lg flex items-center justify-center">
-            <span class="text-white font-bold text-sm">AI</span>
-          </div>
-          <div>
-            <div class="text-gpt-text-sidebar text-sm font-medium">AI 代码生成</div>
-            <div class="text-gpt-text-muted text-xs">Powered by AI</div>
-          </div>
-        </div>
-        <button class="w-full mt-2 flex items-center gap-2 px-3 py-2.5 rounded-lg border border-white/15 text-gpt-text-sidebar text-sm hover:bg-gpt-sidebar-hover transition-colors" @click="handleNewChat">
-          <PlusOutlined class="text-gpt-accent" />
-          <span>新建对话</span>
-        </button>
-      </div>
-      <div class="px-3 pb-3">
-        <a-input v-model:value="appsStore.searchKeyword" placeholder="搜索对话" size="small" class="search-input" @update:model-value="appsStore.setSearchKeyword($event)">
-          <template #prefix><SearchOutlined class="text-gpt-text-muted" /></template>
-          <template #suffix><span class="text-gpt-text-muted text-xs">Ctrl K</span></template>
-        </a-input>
-      </div>
-      <div class="flex-1 overflow-y-auto px-2">
-        <div v-for="group in appsStore.groupedApps" :key="group.label" class="mb-4">
-          <div class="text-xs text-gpt-text-muted px-2 py-1.5 font-medium">{{ group.label }}</div>
-          <div v-for="app in group.items" :key="app.id"
-            class="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-colors hover:bg-gpt-sidebar-hover"
-            :class="currentAppId === app.id ? 'bg-gpt-sidebar-active text-gpt-text-sidebar' : 'text-gpt-text-sidebar'"
-            @click="$router.push(`/chat/${app.id}`)">
-            <span class="truncate flex-1">{{ app.appName || '新对话' }}</span>
-          </div>
-        </div>
-        <div v-if="appsStore.filteredApps.length === 0 && !appsStore.loading" class="text-sm text-gpt-text-muted text-center py-8">
-          暂无对话记录
-        </div>
-      </div>
-      <div class="p-3 border-t border-white/10">
-        <div class="flex items-center gap-2 px-2 py-2">
-          <a-avatar :size="28" class="shrink-0">{{ auth.userName?.charAt(0) }}</a-avatar>
-          <span class="text-sm text-gpt-text-sidebar truncate flex-1">{{ auth.userName }}</span>
-          <a-dropdown>
-            <MoreOutlined class="text-gpt-text-muted cursor-pointer" />
-            <template #overlay>
-              <a-menu>
-                <a-menu-item v-if="auth.isAdmin" @click="$router.push('/admin/apps')">
-                  <SettingOutlined /> 管理后台
-                </a-menu-item>
-                <a-menu-item @click="handleLogout">
-                  <LogoutOutlined /> 退出登录
-                </a-menu-item>
-              </a-menu>
-            </template>
-          </a-dropdown>
-        </div>
-      </div>
-    </div>
-    <!-- Main -->
-    <div class="flex-1 flex flex-col min-w-0">
-      <slot />
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PlusOutlined, SearchOutlined, MoreOutlined, SettingOutlined, LogoutOutlined } from '@ant-design/icons-vue'
-import { useAuthStore } from '@/stores/auth'
-import { useAppsStore } from '@/stores/apps'
+import {
+  CloseOutlined,
+  DownOutlined,
+  HomeOutlined,
+  LogoutOutlined,
+  MenuOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  SettingOutlined,
+} from '@ant-design/icons-vue'
+import BrandMark from '@/components/shared/BrandMark.vue'
+import { useModalDrawer } from '@/composables/useModalDrawer'
 import { createApp } from '@/api/app'
+import { useAppsStore } from '@/stores/apps'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const appsStore = useAppsStore()
 
+const creating = ref(false)
+const mobileNavOpen = ref(false)
+const mobileTrigger = ref<HTMLButtonElement | null>(null)
+const mobileDialog = ref<HTMLElement | null>(null)
+const desktopSidebar = ref<HTMLElement | null>(null)
+const mainColumn = ref<HTMLElement | null>(null)
+
 const currentAppId = computed(() => {
-  const id = route.params.appId
-  return id ? Number(id) : null
+  const appId = route.params.appId
+  return appId ? Number(appId) : null
 })
 
-onMounted(() => {
-  appsStore.fetchMyApps()
+const {
+  closeDrawer: closeMobileNavigation,
+  handleDrawerKeydown: handleWindowKeydown,
+  openDrawer: openMobileNavigation,
+} = useModalDrawer({
+  open: mobileNavOpen,
+  trigger: mobileTrigger,
+  dialog: mobileDialog,
+  background: () => [desktopSidebar.value, mainColumn.value],
 })
 
 async function handleNewChat() {
+  if (creating.value) return
+  creating.value = true
   try {
     const appId = await createApp({ initPrompt: '' })
-    appsStore.fetchMyApps()
-    router.push(`/chat/${appId}`)
-  } catch { /* error handled by interceptor */ }
+    await router.push(`/chat/${appId}`)
+    void appsStore.fetchMyApps().catch(() => undefined)
+  } catch {
+    // The shared API client presents the request error.
+  } finally {
+    creating.value = false
+  }
 }
 
 async function handleLogout() {
   await auth.logout()
-  router.push('/login')
+  await router.push('/login')
 }
+
+onMounted(() => {
+  window.addEventListener('keydown', handleWindowKeydown)
+  appsStore.fetchMyApps()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleWindowKeydown)
+})
+
+watch(() => route.fullPath, closeMobileNavigation)
 </script>
 
-<style scoped>
-.search-input :deep(.ant-input) {
-  background: #2a2a2a;
-  border-color: transparent;
-  color: #ececec;
-}
-.search-input :deep(.ant-input)::placeholder {
-  color: #8e8ea0;
-}
-</style>
+<template>
+  <div class="app-shell">
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+    <aside ref="desktopSidebar" class="desktop-sidebar" aria-label="工作台侧栏">
+      <div class="sidebar-top">
+        <router-link to="/" aria-label="返回生成首页">
+          <BrandMark tone="dark" />
+        </router-link>
+        <button
+          type="button"
+          class="shell-primary-button shell-primary-button--sidebar"
+          :disabled="creating"
+          :aria-busy="creating"
+          @click="handleNewChat"
+        >
+          <PlusOutlined aria-hidden="true" />
+          {{ creating ? '创建中…' : '新建项目' }}
+        </button>
+      </div>
+
+      <div class="sidebar-search">
+        <label for="desktop-project-search" class="sr-only">搜索项目</label>
+        <a-input
+          id="desktop-project-search"
+          v-model:value="appsStore.searchKeyword"
+          placeholder="搜索项目"
+          allow-clear
+        >
+          <template #prefix><SearchOutlined aria-hidden="true" /></template>
+        </a-input>
+      </div>
+
+      <nav class="shell-nav" aria-label="主导航">
+        <router-link to="/" class="shell-nav__link">
+          <HomeOutlined aria-hidden="true" />
+          <span>生成首页</span>
+        </router-link>
+        <p class="shell-nav__label">最近项目</p>
+        <router-link
+          v-for="app in appsStore.filteredApps"
+          :key="app.id"
+          :to="`/chat/${app.id}`"
+          class="shell-nav__link"
+          :class="{ 'router-link-active': currentAppId === app.id }"
+        >
+          <span class="shell-user-name">{{ app.appName || '未命名项目' }}</span>
+        </router-link>
+        <p v-if="appsStore.filteredApps.length === 0 && !appsStore.loading" class="shell-nav__label">
+          暂无项目
+        </p>
+      </nav>
+
+      <div class="sidebar-footer">
+        <a-dropdown placement="topLeft" :trigger="['click']">
+          <button type="button" class="shell-user-trigger" aria-label="打开用户菜单">
+            <a-avatar :size="32">{{ auth.userName?.charAt(0) || 'U' }}</a-avatar>
+            <span class="shell-user-name">{{ auth.userName || '当前用户' }}</span>
+            <DownOutlined aria-hidden="true" />
+          </button>
+          <template #overlay>
+            <a-menu>
+              <a-menu-item v-if="auth.isAdmin" @click="router.push('/admin/apps')">
+                <SettingOutlined aria-hidden="true" />
+                管理后台
+              </a-menu-item>
+              <a-menu-item @click="handleLogout">
+                <LogoutOutlined aria-hidden="true" />
+                退出登录
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
+      </div>
+    </aside>
+
+    <div ref="mainColumn" class="shell-main-column">
+      <header class="mobile-header">
+        <button
+          ref="mobileTrigger"
+          type="button"
+          class="icon-button"
+          aria-label="打开主导航"
+          aria-controls="chat-mobile-navigation"
+          :aria-expanded="mobileNavOpen"
+          @click="openMobileNavigation"
+        >
+          <MenuOutlined aria-hidden="true" />
+        </button>
+        <router-link to="/" class="mobile-brand-link" aria-label="返回生成首页">
+          <BrandMark compact />
+        </router-link>
+        <a-avatar :size="36" :aria-label="`当前用户：${auth.userName || '用户'}`">
+          {{ auth.userName?.charAt(0) || 'U' }}
+        </a-avatar>
+      </header>
+
+      <main id="main-content" class="page-content" tabindex="-1">
+        <slot />
+      </main>
+    </div>
+
+    <div v-if="mobileNavOpen" class="mobile-drawer-layer">
+      <button
+        type="button"
+        class="mobile-drawer__backdrop"
+        aria-label="关闭主导航"
+        @click="closeMobileNavigation"
+      />
+      <aside
+        ref="mobileDialog"
+        id="chat-mobile-navigation"
+        class="mobile-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="移动端主导航"
+      >
+        <div class="mobile-drawer__header">
+          <BrandMark tone="dark" />
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="关闭主导航"
+            @click="closeMobileNavigation"
+          >
+            <CloseOutlined aria-hidden="true" />
+          </button>
+        </div>
+        <nav class="shell-nav" aria-label="主导航">
+          <router-link to="/" class="shell-nav__link">
+            <HomeOutlined aria-hidden="true" />
+            <span>生成首页</span>
+          </router-link>
+          <p class="shell-nav__label">最近项目</p>
+          <router-link
+            v-for="app in appsStore.filteredApps"
+            :key="app.id"
+            :to="`/chat/${app.id}`"
+            class="shell-nav__link"
+          >
+            <span class="shell-user-name">{{ app.appName || '未命名项目' }}</span>
+          </router-link>
+        </nav>
+        <div class="sidebar-footer">
+          <button type="button" class="shell-user-trigger" @click="handleLogout">
+            <LogoutOutlined aria-hidden="true" />
+            <span>退出登录</span>
+          </button>
+        </div>
+      </aside>
+    </div>
+  </div>
+</template>

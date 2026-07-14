@@ -1,19 +1,24 @@
-<template>
-  <div class="flex flex-col items-center justify-center py-12 text-center">
-    <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-      <InboxOutlined class="text-2xl text-gpt-text-muted" />
-    </div>
-    <h3 class="text-base font-medium text-gpt-text mb-1">{{ title }}</h3>
-    <p class="text-sm text-gpt-text-muted max-w-xs">{{ description }}</p>
-    <slot />
-  </div>
-</template>
-
 <script setup lang="ts">
+import { useId } from 'vue'
 import { InboxOutlined } from '@ant-design/icons-vue'
 
 defineProps<{
   title: string
   description?: string
 }>()
+
+const titleId = useId()
 </script>
+
+<template>
+  <section class="state-panel" :aria-labelledby="titleId">
+    <div class="state-panel__icon" aria-hidden="true">
+      <InboxOutlined />
+    </div>
+    <h2 :id="titleId" class="state-panel__title">{{ title }}</h2>
+    <p v-if="description" class="state-panel__description">{{ description }}</p>
+    <div v-if="$slots.default" class="state-panel__actions">
+      <slot />
+    </div>
+  </section>
+</template>
