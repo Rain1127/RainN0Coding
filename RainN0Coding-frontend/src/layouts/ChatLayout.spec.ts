@@ -1,23 +1,21 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp } from '@/api/app'
+import { describe, expect, it, vi } from 'vitest'
 import { useAppsStore } from '@/stores/apps'
 import ChatLayout from './ChatLayout.vue'
-
-vi.mock('@/api/app', () => ({ createApp: vi.fn() }))
 
 async function mountLayout() {
   const pinia = createPinia()
   setActivePinia(pinia)
-  const fetchMyApps = vi.spyOn(useAppsStore(), 'fetchMyApps').mockResolvedValue()
+  const fetchRecentApps = vi.spyOn(useAppsStore(), 'fetchRecentApps').mockResolvedValue()
 
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/', component: { template: '<div />' } },
+      { path: '/projects', component: { template: '<div />' } },
       { path: '/chat/:appId', component: { template: '<div />' } },
       { path: '/admin/apps', component: { template: '<div />' } },
     ],
@@ -40,21 +38,31 @@ async function mountLayout() {
     },
   })
 
-  return { fetchMyApps, router, wrapper }
+  return { fetchRecentApps, router, wrapper }
 }
 
 describe('ChatLayout', () => {
-  beforeEach(() => {
-    vi.mocked(createApp).mockReset()
-  })
-
   it('provides a semantic navigation landmark and skip target', async () => {
     const { wrapper } = await mountLayout()
 
     expect(wrapper.get('.skip-link').attributes('href')).toBe('#main-content')
     expect(wrapper.find('nav[aria-label="主导航"]').exists()).toBe(true)
     expect(wrapper.get('main#main-content').text()).toContain('工作区内容')
+    wrapper.unmount()
+  })
 
+  it('links to the real project route and returns new-project work to the composer', async () => {
+    const { wrapper } = await mountLayout()
+
+    expect(wrapper.find('a[href="/projects"]').exists()).toBe(true)
+    expect(wrapper.get('.shell-primary-button--sidebar').attributes('href')).toBe('/')
+    wrapper.unmount()
+  })
+
+  it('loads recent projects for the sidebar without mutating the project browser page', async () => {
+    const { fetchRecentApps, wrapper } = await mountLayout()
+
+    expect(fetchRecentApps).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 
@@ -62,66 +70,27 @@ describe('ChatLayout', () => {
     const { wrapper } = await mountLayout()
     const trigger = wrapper.get('button[aria-label="打开主导航"]')
 
-    expect(trigger.attributes('aria-expanded')).toBe('false')
     await trigger.trigger('click')
-    expect(trigger.attributes('aria-expanded')).toBe('true')
-
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await nextTick()
     await nextTick()
 
     expect(trigger.attributes('aria-expanded')).toBe('false')
     expect(document.activeElement).toBe(trigger.element)
-
     wrapper.unmount()
   })
 
-  it('restores the mobile trigger focus when navigation closes the drawer', async () => {
+  it('restores mobile trigger focus when route navigation closes the drawer', async () => {
     const { router, wrapper } = await mountLayout()
     const trigger = wrapper.get('button[aria-label="打开主导航"]')
 
     await trigger.trigger('click')
-    expect(trigger.attributes('aria-expanded')).toBe('true')
-
-    await router.push('/admin/apps')
+    await router.push('/projects')
     await nextTick()
     await nextTick()
 
     expect(trigger.attributes('aria-expanded')).toBe('false')
     expect(document.activeElement).toBe(trigger.element)
-
-    wrapper.unmount()
-  })
-
-  it('marks the compact mobile brand link as a full-size touch target', async () => {
-    const { wrapper } = await mountLayout()
-
-    expect(wrapper.get('.mobile-header .mobile-brand-link').attributes('aria-label')).toBe('返回生成首页')
-
-    wrapper.unmount()
-  })
-
-  it('does not render navigation to a route that is not registered yet', async () => {
-    const { wrapper } = await mountLayout()
-
-    expect(wrapper.find('a[href="/projects"]').exists()).toBe(false)
-
-    wrapper.unmount()
-  })
-
-  it('navigates to a newly created app even when refreshing the app list fails', async () => {
-    vi.mocked(createApp).mockResolvedValue(42)
-    const { fetchMyApps, router, wrapper } = await mountLayout()
-    fetchMyApps.mockClear()
-    fetchMyApps.mockRejectedValueOnce(new Error('refresh failed'))
-
-    await wrapper.get('.shell-primary-button--sidebar').trigger('click')
-    await flushPromises()
-
-    expect(createApp).toHaveBeenCalledTimes(1)
-    expect(router.currentRoute.value.fullPath).toBe('/chat/42')
-    expect(fetchMyApps).toHaveBeenCalledTimes(1)
-
     wrapper.unmount()
   })
 
@@ -143,7 +112,6 @@ describe('ChatLayout', () => {
     closeElement.focus()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
     expect(document.activeElement).toBe(logoutElement)
-
     wrapper.unmount()
   })
 

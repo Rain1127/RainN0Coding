@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  AppstoreOutlined,
   CloseOutlined,
   DownOutlined,
   HomeOutlined,
@@ -13,7 +14,6 @@ import {
 } from '@ant-design/icons-vue'
 import BrandMark from '@/components/shared/BrandMark.vue'
 import { useModalDrawer } from '@/composables/useModalDrawer'
-import { createApp } from '@/api/app'
 import { useAppsStore } from '@/stores/apps'
 import { useAuthStore } from '@/stores/auth'
 
@@ -22,7 +22,6 @@ const router = useRouter()
 const auth = useAuthStore()
 const appsStore = useAppsStore()
 
-const creating = ref(false)
 const mobileNavOpen = ref(false)
 const mobileTrigger = ref<HTMLButtonElement | null>(null)
 const mobileDialog = ref<HTMLElement | null>(null)
@@ -45,20 +44,6 @@ const {
   background: () => [desktopSidebar.value, mainColumn.value],
 })
 
-async function handleNewChat() {
-  if (creating.value) return
-  creating.value = true
-  try {
-    const appId = await createApp({ initPrompt: '' })
-    await router.push(`/chat/${appId}`)
-    void appsStore.fetchMyApps().catch(() => undefined)
-  } catch {
-    // The shared API client presents the request error.
-  } finally {
-    creating.value = false
-  }
-}
-
 async function handleLogout() {
   await auth.logout()
   await router.push('/login')
@@ -66,7 +51,7 @@ async function handleLogout() {
 
 onMounted(() => {
   window.addEventListener('keydown', handleWindowKeydown)
-  appsStore.fetchMyApps()
+  void appsStore.fetchRecentApps().catch(() => undefined)
 })
 
 onBeforeUnmount(() => {
@@ -85,24 +70,18 @@ watch(() => route.fullPath, closeMobileNavigation)
         <router-link to="/" aria-label="返回生成首页">
           <BrandMark tone="dark" />
         </router-link>
-        <button
-          type="button"
-          class="shell-primary-button shell-primary-button--sidebar"
-          :disabled="creating"
-          :aria-busy="creating"
-          @click="handleNewChat"
-        >
+        <router-link to="/" class="shell-primary-button shell-primary-button--sidebar">
           <PlusOutlined aria-hidden="true" />
-          {{ creating ? '创建中…' : '新建项目' }}
-        </button>
+          新建项目
+        </router-link>
       </div>
 
       <div class="sidebar-search">
-        <label for="desktop-project-search" class="sr-only">搜索项目</label>
+        <label for="desktop-project-search" class="sr-only">搜索最近项目</label>
         <a-input
           id="desktop-project-search"
           v-model:value="appsStore.searchKeyword"
-          placeholder="搜索项目"
+          placeholder="搜索最近项目…"
           allow-clear
         >
           <template #prefix><SearchOutlined aria-hidden="true" /></template>
@@ -114,6 +93,10 @@ watch(() => route.fullPath, closeMobileNavigation)
           <HomeOutlined aria-hidden="true" />
           <span>生成首页</span>
         </router-link>
+        <router-link to="/projects" class="shell-nav__link">
+          <AppstoreOutlined aria-hidden="true" />
+          <span>我的项目</span>
+        </router-link>
         <p class="shell-nav__label">最近项目</p>
         <router-link
           v-for="app in appsStore.filteredApps"
@@ -124,8 +107,9 @@ watch(() => route.fullPath, closeMobileNavigation)
         >
           <span class="shell-user-name">{{ app.appName || '未命名项目' }}</span>
         </router-link>
-        <p v-if="appsStore.filteredApps.length === 0 && !appsStore.loading" class="shell-nav__label">
-          暂无项目
+        <p v-if="appsStore.recentError" class="shell-nav__label">最近项目暂不可用</p>
+        <p v-else-if="appsStore.filteredApps.length === 0 && !appsStore.recentLoading" class="shell-nav__label">
+          暂无最近项目
         </p>
       </nav>
 
@@ -195,12 +179,7 @@ watch(() => route.fullPath, closeMobileNavigation)
       >
         <div class="mobile-drawer__header">
           <BrandMark tone="dark" />
-          <button
-            type="button"
-            class="icon-button"
-            aria-label="关闭主导航"
-            @click="closeMobileNavigation"
-          >
+          <button type="button" class="icon-button" aria-label="关闭主导航" @click="closeMobileNavigation">
             <CloseOutlined aria-hidden="true" />
           </button>
         </div>
@@ -208,6 +187,10 @@ watch(() => route.fullPath, closeMobileNavigation)
           <router-link to="/" class="shell-nav__link">
             <HomeOutlined aria-hidden="true" />
             <span>生成首页</span>
+          </router-link>
+          <router-link to="/projects" class="shell-nav__link">
+            <AppstoreOutlined aria-hidden="true" />
+            <span>我的项目</span>
           </router-link>
           <p class="shell-nav__label">最近项目</p>
           <router-link

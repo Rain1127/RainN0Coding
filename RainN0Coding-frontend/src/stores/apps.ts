@@ -1,18 +1,68 @@
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import type { AppVO } from '@/types/app'
-import { listMyApps } from '@/api/app'
+import { deleteApp, listMyApps } from '@/api/app'
+import type { AppVO, CodeGenType } from '@/types/app'
+
+export type DeploymentFilter = 'all' | 'deployed' | 'undeployed'
+export type CodeGenTypeFilter = 'all' | CodeGenType
+
+export const SUPPORTED_CODE_GEN_TYPES: CodeGenType[] = [
+  'html',
+  'multi_file',
+  'vue_project',
+  'python',
+  'java',
+  'go',
+  'rust',
+  'nodejs',
+  'generic',
+]
+
+export interface AppsQueryState {
+  pageNum: number
+  keyword: string
+  codeGenType: CodeGenTypeFilter
+  status: DeploymentFilter
+}
+
+interface FetchAppsOptions extends Partial<AppsQueryState> {
+  pageSize?: number
+}
+
+const DEFAULT_PAGE_SIZE = 12
+const RECENT_PAGE_SIZE = 5
+
+function matchesDeploymentFilter(app: AppVO, status: DeploymentFilter) {
+  if (status === 'all') return true
+  const deployed = Boolean(app.deployKey?.trim())
+  return status === 'deployed' ? deployed : !deployed
+}
 
 export const useAppsStore = defineStore('apps', () => {
   const appList = ref<AppVO[]>([])
+  const recentApps = ref<AppVO[]>([])
   const total = ref(0)
+  const pageNum = ref(1)
+  const pageSize = ref(DEFAULT_PAGE_SIZE)
+  const keyword = ref('')
+  const codeGenType = ref<CodeGenTypeFilter>('all')
+  const status = ref<DeploymentFilter>('all')
   const loading = ref(false)
+  const recentLoading = ref(false)
+  const error = ref('')
+  const recentError = ref('')
   const searchKeyword = ref('')
+  let listRequestSequence = 0
+  let recentRequestSequence = 0
+
+  const visibleApps = computed(() => (
+    appList.value.filter(app => matchesDeploymentFilter(app, status.value))
+  ))
 
   const filteredApps = computed(() => {
-    if (!searchKeyword.value) return appList.value
-    const kw = searchKeyword.value.toLowerCase()
-    return appList.value.filter(a => a.appName.toLowerCase().includes(kw))
+    const query = searchKeyword.value.trim().toLowerCase()
+    if (!query) return recentApps.value
+    return recentApps.value.filter(app => (app.appName || '').toLowerCase().includes(query))
   })
 
   const groupedApps = computed(() => {
@@ -22,60 +72,137 @@ export const useAppsStore = defineStore('apps', () => {
     const older: AppVO[] = []
 
     for (const app of filteredApps.value) {
-      const ts = app.editTime ? new Date(app.editTime).getTime() : new Date(app.createTime).getTime()
-      const diff = now - ts
-      if (diff < 24 * 60 * 60 * 1000) {
-        today.push(app)
-      } else if (diff < 7 * 24 * 60 * 60 * 1000) {
-        week.push(app)
-      } else {
-        older.push(app)
-      }
+      const source = app.editTime || app.updateTime || app.createTime
+      const timestamp = source ? new Date(source).getTime() : 0
+      const age = now - timestamp
+      if (age < 24 * 60 * 60 * 1000) today.push(app)
+      else if (age < 7 * 24 * 60 * 60 * 1000) week.push(app)
+      else older.push(app)
     }
 
-    const groups: { label: string; items: AppVO[] }[] = []
-    if (today.length) groups.push({ label: '今天', items: today })
-    if (week.length) groups.push({ label: '7天内', items: week })
-    if (older.length) groups.push({ label: '更早', items: older })
-    return groups
+    return [
+      { label: '今天', items: today },
+      { label: '7 天内', items: week },
+      { label: '更早', items: older },
+    ].filter(group => group.items.length > 0)
   })
 
-  async function fetchMyApps(pageNum = 1, pageSize = 100) {
+  function applyQueryState(next: Partial<AppsQueryState>) {
+    if (next.pageNum !== undefined) pageNum.value = next.pageNum
+    if (next.keyword !== undefined) keyword.value = next.keyword
+    if (next.codeGenType !== undefined) codeGenType.value = next.codeGenType
+    if (next.status !== undefined) status.value = next.status
+  }
+
+  async function fetchMyApps(options: FetchAppsOptions = {}) {
+    const requestSequence = ++listRequestSequence
+    applyQueryState(options)
+    if (options.pageSize !== undefined) pageSize.value = options.pageSize
+
+    const requestPage = pageNum.value
+    const requestSize = pageSize.value
+    const requestKeyword = keyword.value.trim()
+    const requestCodeGenType = codeGenType.value
     loading.value = true
+    error.value = ''
+
     try {
-      const res = await listMyApps({
-        pageNum,
-        pageSize,
+      const result = await listMyApps({
+        pageNum: requestPage,
+        pageSize: requestSize,
+        sortField: 'editTime',
+        sortOrder: 'descend',
+        ...(requestKeyword ? { appName: requestKeyword } : {}),
+        ...(requestCodeGenType !== 'all' ? { codeGenType: requestCodeGenType } : {}),
+      })
+      if (requestSequence !== listRequestSequence) return
+      const javaPage = result as typeof result & {
+        pageNumber?: number
+        pageSize?: number
+        totalRow?: number
+      }
+      appList.value = result.records
+      total.value = javaPage.totalRow ?? result.total ?? result.records.length
+      pageNum.value = javaPage.pageNumber ?? result.current ?? requestPage
+      pageSize.value = javaPage.pageSize ?? result.size ?? requestSize
+    } catch (cause) {
+      if (requestSequence === listRequestSequence) {
+        error.value = '项目加载失败，请稍后重试。'
+      }
+      throw cause
+    } finally {
+      if (requestSequence === listRequestSequence) {
+        loading.value = false
+      }
+    }
+  }
+
+  async function fetchRecentApps() {
+    const requestSequence = ++recentRequestSequence
+    recentLoading.value = true
+    recentError.value = ''
+    try {
+      const result = await listMyApps({
+        pageNum: 1,
+        pageSize: RECENT_PAGE_SIZE,
         sortField: 'editTime',
         sortOrder: 'descend',
       })
-      appList.value = res.records
-      total.value = res.total
+      if (requestSequence !== recentRequestSequence) return
+      recentApps.value = result.records
+    } catch (cause) {
+      if (requestSequence === recentRequestSequence) {
+        recentError.value = '最近项目暂时无法加载。'
+      }
+      throw cause
     } finally {
-      loading.value = false
+      if (requestSequence === recentRequestSequence) {
+        recentLoading.value = false
+      }
     }
   }
 
-  function setSearchKeyword(kw: string) {
-    searchKeyword.value = kw
+  async function deleteProject(appId: number) {
+    await deleteApp({ id: appId })
+    appList.value = appList.value.filter(app => app.id !== appId)
+    recentApps.value = recentApps.value.filter(app => app.id !== appId)
+    total.value = Math.max(0, total.value - 1)
+  }
+
+  function setSearchKeyword(value: string) {
+    searchKeyword.value = value
   }
 
   function removeApp(appId: number) {
-    appList.value = appList.value.filter(a => a.id !== appId)
+    appList.value = appList.value.filter(app => app.id !== appId)
+    recentApps.value = recentApps.value.filter(app => app.id !== appId)
   }
 
   function addApp(app: AppVO) {
-    appList.value.unshift(app)
+    recentApps.value = [app, ...recentApps.value.filter(item => item.id !== app.id)].slice(0, RECENT_PAGE_SIZE)
   }
 
   return {
     appList,
+    recentApps,
     total,
+    pageNum,
+    pageSize,
+    keyword,
+    codeGenType,
+    status,
     loading,
+    recentLoading,
+    error,
+    recentError,
     searchKeyword,
+    visibleApps,
     filteredApps,
     groupedApps,
+    applyQueryState,
     fetchMyApps,
+    fetchRecentApps,
+    deleteProject,
     setSearchKeyword,
     removeApp,
     addApp,
