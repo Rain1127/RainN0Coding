@@ -6,7 +6,7 @@ export interface IntentNode {
   enabled?: boolean
   description?: string
   examples?: string[]
-  parentKey?: string
+  parentKey?: string | null
   sortOrder?: number
   collection?: string
   children?: IntentNode[]

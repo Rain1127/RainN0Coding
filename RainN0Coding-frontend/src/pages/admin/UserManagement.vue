@@ -1,130 +1,178 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import AdminLayout from '@/layouts/AdminLayout.vue'
+import PageHeader from '@/components/shared/PageHeader.vue'
+import { listUsers, updateUser } from '@/api/user'
+import { useAuthStore } from '@/stores/auth'
+import type { UserVO } from '@/types/user'
+
+const auth = useAuthStore()
+const users = ref<UserVO[]>([])
+const searchAccount = ref('')
+const currentPage = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
+const serverPages = ref(1)
+const loading = ref(false)
+const loadError = ref('')
+const actionError = ref('')
+const feedback = ref('')
+const updatingRoles = ref(new Set<number>())
+const roleOverrides = ref(new Map<number, UserVO['userRole']>())
+const roleSequences = new Map<number, number>()
+let requestSequence = 0
+
+const totalPages = computed(() => Math.max(1, serverPages.value || Math.ceil(total.value / pageSize.value)))
+
+onMounted(() => void fetchUsers())
+
+async function fetchUsers() {
+  const sequence = ++requestSequence
+  const requestedPage = currentPage.value
+  loading.value = true
+  loadError.value = ''
+  try {
+    const result = await listUsers({
+      pageNum: requestedPage,
+      pageSize: pageSize.value,
+      userAccount: searchAccount.value.trim() || undefined,
+      sortField: 'createTime',
+      sortOrder: 'descend',
+    })
+    if (sequence !== requestSequence) return
+    const records = result.records ?? []
+    const resultTotal = result.total ?? 0
+    const pages = Math.max(1, Number(result.pages) || Math.ceil(resultTotal / pageSize.value) || 1)
+    total.value = resultTotal
+    serverPages.value = pages
+    if (records.length === 0 && resultTotal > 0 && requestedPage > pages) {
+      currentPage.value = pages
+      void fetchUsers()
+      return
+    }
+    users.value = records
+    currentPage.value = Math.min(pages, Math.max(1, Number(result.current) || requestedPage))
+  } catch {
+    if (sequence !== requestSequence) return
+    users.value = []
+    total.value = 0
+    serverPages.value = 1
+    loadError.value = '用户列表加载失败，请检查网络后重试。'
+  } finally {
+    if (sequence === requestSequence) loading.value = false
+  }
+}
+
+function searchUsers() {
+  currentPage.value = 1
+  void fetchUsers()
+}
+
+function changePage(next: number) {
+  if (next < 1 || next > totalPages.value || next === currentPage.value) return
+  currentPage.value = next
+  void fetchUsers()
+}
+
+async function changeRole(user: UserVO, event: Event) {
+  const role = (event.target as HTMLSelectElement).value as UserVO['userRole']
+  const userId = user.id
+  if (userId === auth.userId || role === displayRole(user) || updatingRoles.value.has(userId)) return
+  const sequence = (roleSequences.get(userId) ?? 0) + 1
+  roleSequences.set(userId, sequence)
+  updatingRoles.value = new Set(updatingRoles.value).add(user.id)
+  roleOverrides.value = new Map(roleOverrides.value).set(userId, role)
+  actionError.value = ''
+  feedback.value = ''
+  try {
+    const updated = await updateUser({ id: userId, userRole: role })
+    if (sequence !== roleSequences.get(userId)) return
+    if (!updated) throw new Error('update rejected')
+    const currentUser = users.value.find(item => item.id === userId)
+    if (currentUser) currentUser.userRole = role
+    feedback.value = `已将 ${currentUser?.userName || currentUser?.userAccount || `用户 #${userId}`} 的角色更新为 ${role}。`
+  } catch {
+    if (sequence !== roleSequences.get(userId)) return
+    actionError.value = '角色更新失败，账号信息未被移除，请稍后重试。'
+  } finally {
+    if (sequence !== roleSequences.get(userId)) return
+    const next = new Set(updatingRoles.value)
+    next.delete(userId)
+    updatingRoles.value = next
+    const overrides = new Map(roleOverrides.value)
+    overrides.delete(userId)
+    roleOverrides.value = overrides
+  }
+}
+
+function displayRole(user: UserVO) {
+  return roleOverrides.value.get(user.id) ?? user.userRole
+}
+</script>
+
 <template>
   <AdminLayout>
-    <a-breadcrumb class="mb-4">
-      <a-breadcrumb-item>首页</a-breadcrumb-item>
-      <a-breadcrumb-item>用户管理</a-breadcrumb-item>
-    </a-breadcrumb>
-    <div class="flex items-center justify-between mb-4">
-      <div>
-        <h1 class="text-xl font-semibold text-gpt-text">用户管理</h1>
-        <p class="text-sm text-gpt-text-muted">管理系统用户</p>
+    <PageHeader title="用户管理" description="查看平台账号并安全调整访问角色。" eyebrow="Administration">
+      <template #actions><button type="button" class="secondary-button" :disabled="loading" @click="fetchUsers">刷新</button></template>
+    </PageHeader>
+
+    <section class="admin-card admin-toolbar" aria-label="用户筛选">
+      <label class="field-label" for="user-account-search">用户账号</label>
+      <div class="search-row">
+        <input id="user-account-search" v-model="searchAccount" aria-label="搜索用户账号" type="search" placeholder="输入完整或部分账号" @keyup.enter="searchUsers">
+        <button type="button" class="primary-button" data-action="search-users" @click="searchUsers">搜索</button>
       </div>
-      <a-button type="primary" @click="showModal = true">新建用户</a-button>
-    </div>
+    </section>
 
-    <div class="bg-white rounded-lg border border-gray-200">
-      <a-table :columns="columns" :data-source="userList" :loading="loading" :pagination="pagination" row-key="id" @change="handleTableChange">
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'userRole'">
-            <a-tag :color="record.userRole === 'admin' ? 'purple' : 'blue'">{{ record.userRole }}</a-tag>
-          </template>
-          <template v-if="column.key === 'action'">
-            <a-button type="link" size="small" @click="handleEdit(record)">编辑</a-button>
-            <a-popconfirm title="确认删除?" @confirm="handleDelete(record.id)">
-              <a-button type="link" size="small" danger>删除</a-button>
-            </a-popconfirm>
-          </template>
-        </template>
-      </a-table>
-    </div>
+    <p v-if="feedback" class="inline-feedback" role="status">{{ feedback }}</p>
+    <p v-if="actionError" class="inline-alert" role="alert">{{ actionError }}</p>
 
-    <!-- Add/Edit Modal -->
-    <a-modal v-model:open="showModal" :title="editingUser ? '编辑用户' : '新建用户'" @ok="handleSave" :confirm-loading="saving">
-      <a-form layout="vertical">
-        <a-form-item label="账号" required>
-          <a-input v-model:value="form.userAccount" :disabled="!!editingUser" />
-        </a-form-item>
-        <a-form-item label="姓名" required>
-          <a-input v-model:value="form.userName" />
-        </a-form-item>
-        <a-form-item label="角色" required>
-          <a-select v-model:value="form.userRole">
-            <a-select-option value="user">user</a-select-option>
-            <a-select-option value="admin">admin</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="简介">
-          <a-textarea v-model:value="form.userProfile" :rows="2" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
+    <section class="admin-card" aria-labelledby="users-title">
+      <div class="section-heading"><div><h2 id="users-title">平台用户</h2><p>共 {{ total }} 个账号</p></div></div>
+      <div v-if="loading" class="admin-state" role="status">正在加载用户…</div>
+      <div v-else-if="loadError" class="admin-state" role="alert">
+        <strong>加载失败</strong><span>{{ loadError }}</span>
+        <button type="button" class="secondary-button" data-action="retry-users" @click="fetchUsers">重新加载</button>
+      </div>
+      <div v-else-if="users.length === 0" class="admin-state"><strong>没有找到用户</strong><span>尝试更换账号关键词。</span></div>
+      <template v-else-if="users.length > 0">
+        <div class="admin-table-scroll" tabindex="0" aria-label="用户表格，可横向滚动">
+          <table>
+            <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>简介</th><th>创建时间</th></tr></thead>
+            <tbody>
+              <tr v-for="user in users" :key="user.id" :data-user-id="user.id">
+                <td><strong>{{ user.userAccount }}</strong><span v-if="user.id === auth.userId" class="current-badge">当前账号</span></td>
+                <td>{{ user.userName || '未设置' }}</td>
+                <td>
+                  <select
+                    :value="displayRole(user)"
+                    :aria-label="`调整 ${user.userAccount} 的角色`"
+                    data-action="change-role"
+                    :disabled="user.id === auth.userId || updatingRoles.has(user.id)"
+                    @change="changeRole(user, $event)"
+                  >
+                    <option value="user">普通用户</option><option value="admin">管理员</option>
+                  </select>
+                </td>
+                <td>{{ user.userProfile || '—' }}</td><td>{{ user.createTime || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+        <div v-if="!loading && !loadError && total > 0" class="pagination" aria-label="用户分页">
+          <button type="button" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">上一页</button>
+          <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+          <button type="button" :disabled="currentPage >= totalPages" @click="changePage(currentPage + 1)">下一页</button>
+        </div>
+    </section>
   </AdminLayout>
 </template>
 
-<script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
-import AdminLayout from '@/layouts/AdminLayout.vue'
-import { listUsers, addUser, updateUser, deleteUser } from '@/api/user'
-import type { UserVO } from '@/types/user'
-
-const userList = ref<UserVO[]>([])
-const loading = ref(false)
-const pagination = reactive({ current: 1, pageSize: 10, total: 0 })
-
-const showModal = ref(false)
-const saving = ref(false)
-const editingUser = ref<UserVO | null>(null)
-const form = reactive({ userAccount: '', userName: '', userRole: 'user', userProfile: '' })
-
-const columns = [
-  { title: '账号', dataIndex: 'userAccount' },
-  { title: '姓名', dataIndex: 'userName' },
-  { title: '角色', key: 'userRole', dataIndex: 'userRole', width: 100 },
-  { title: '简介', dataIndex: 'userProfile', ellipsis: true },
-  { title: '创建时间', dataIndex: 'createTime', width: 180 },
-  { title: '操作', key: 'action', width: 150 },
-]
-
-onMounted(() => fetchData())
-
-async function fetchData() {
-  loading.value = true
-  try {
-    const res = await listUsers({ pageNum: pagination.current, pageSize: pagination.pageSize, sortField: 'createTime', sortOrder: 'descend' })
-    userList.value = res.records
-    pagination.total = res.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleTableChange(pag: { current: number; pageSize: number }) {
-  pagination.current = pag.current
-  pagination.pageSize = pag.pageSize
-  fetchData()
-}
-
-function handleEdit(record: UserVO) {
-  editingUser.value = record
-  form.userAccount = record.userAccount
-  form.userName = record.userName
-  form.userRole = record.userRole
-  form.userProfile = record.userProfile || ''
-  showModal.value = true
-}
-
-async function handleSave() {
-  saving.value = true
-  try {
-    if (editingUser.value) {
-      await updateUser({ id: editingUser.value.id, userName: form.userName, userRole: form.userRole, userProfile: form.userProfile })
-    } else {
-      await addUser({ userAccount: form.userAccount, userName: form.userName, userRole: form.userRole, userProfile: form.userProfile })
-    }
-    showModal.value = false
-    editingUser.value = null
-    form.userAccount = form.userName = form.userProfile = ''
-    form.userRole = 'user'
-    fetchData()
-  } finally {
-    saving.value = false
-  }
-}
-
-async function handleDelete(id: number) {
-  await deleteUser({ id })
-  message.success('已删除')
-  fetchData()
-}
-</script>
+<style scoped>
+.admin-card{margin-bottom:var(--space-5);border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface);box-shadow:var(--shadow-card)}.admin-toolbar{padding:var(--space-5)}.field-label{display:block;margin-bottom:var(--space-2);font-weight:700}.search-row{display:flex;max-width:620px;gap:var(--space-2)}
+input,select{min-height:44px;border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:0 var(--space-3);color:var(--color-text);background:#fff}input{min-width:0;flex:1}.primary-button,.secondary-button{min-height:44px;border-radius:var(--radius-sm);padding:0 var(--space-4);font-weight:700}.primary-button{border:1px solid var(--color-primary);color:#fff;background:var(--color-primary)}.secondary-button{border:1px solid var(--color-border);background:#fff}
+.inline-feedback,.inline-alert{margin:0 0 var(--space-4);border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4)}.inline-feedback{color:#166534;background:#ecfdf3}.inline-alert{color:#991b1b;background:var(--color-danger-soft)}.section-heading{padding:var(--space-5);border-bottom:1px solid var(--color-border)}.section-heading h2,.section-heading p{margin:0}.section-heading p{margin-top:var(--space-1);color:var(--color-text-muted)}
+.admin-state{display:flex;min-height:240px;align-items:center;justify-content:center;flex-direction:column;gap:var(--space-2);padding:var(--space-6);text-align:center}.admin-state span{color:var(--color-text-muted)}.admin-table-scroll{max-width:100%;overflow-x:auto}table{width:100%;min-width:780px;border-collapse:collapse}th,td{padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-border);text-align:left;vertical-align:middle}th{color:var(--color-text-muted);background:var(--color-surface-subtle);font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}.current-badge{margin-left:var(--space-2);border-radius:999px;padding:.2rem .5rem;color:var(--color-primary);background:var(--color-primary-soft);font-size:.75rem;font-weight:700}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);padding:var(--space-4)}.pagination button{min-height:40px;border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:0 var(--space-3);background:#fff}
+@media(max-width:640px){.search-row{flex-direction:column}.pagination{justify-content:flex-start}}
+</style>
