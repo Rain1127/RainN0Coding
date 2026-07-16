@@ -2,6 +2,8 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { deleteApp, listMyApps } from '@/api/app'
 import type { AppVO, CodeGenType } from '@/types/app'
+import { normalizePageResult } from '@/utils/pageResult'
+import type { EntityId } from '@/types/entity'
 
 export type DeploymentFilter = 'all' | 'deployed' | 'undeployed'
 export type CodeGenTypeFilter = 'all' | CodeGenType
@@ -116,15 +118,11 @@ export const useAppsStore = defineStore('apps', () => {
         ...(requestCodeGenType !== 'all' ? { codeGenType: requestCodeGenType } : {}),
       })
       if (requestSequence !== listRequestSequence) return
-      const javaPage = result as typeof result & {
-        pageNumber?: number
-        pageSize?: number
-        totalRow?: number
-      }
-      appList.value = result.records
-      total.value = javaPage.totalRow ?? result.total ?? result.records.length
-      pageNum.value = javaPage.pageNumber ?? result.current ?? requestPage
-      pageSize.value = javaPage.pageSize ?? result.size ?? requestSize
+      const page = normalizePageResult(result, requestPage, requestSize)
+      appList.value = page.records
+      total.value = page.total
+      pageNum.value = page.current
+      pageSize.value = page.size
     } catch (cause) {
       if (requestSequence === listRequestSequence) {
         error.value = '项目加载失败，请稍后重试。'
@@ -162,7 +160,7 @@ export const useAppsStore = defineStore('apps', () => {
     }
   }
 
-  async function deleteProject(appId: number) {
+  async function deleteProject(appId: EntityId) {
     await deleteApp({ id: appId })
     appList.value = appList.value.filter(app => app.id !== appId)
     recentApps.value = recentApps.value.filter(app => app.id !== appId)
@@ -173,7 +171,7 @@ export const useAppsStore = defineStore('apps', () => {
     searchKeyword.value = value
   }
 
-  function removeApp(appId: number) {
+  function removeApp(appId: EntityId) {
     appList.value = appList.value.filter(app => app.id !== appId)
     recentApps.value = recentApps.value.filter(app => app.id !== appId)
   }

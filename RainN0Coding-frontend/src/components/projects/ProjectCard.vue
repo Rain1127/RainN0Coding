@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, useId } from 'vue'
 import { DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons-vue'
 import type { AppVO, CodeGenType } from '@/types/app'
+import type { EntityId } from '@/types/entity'
 
 const props = withDefaults(defineProps<{
   project: AppVO
@@ -11,7 +12,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  delete: [appId: number]
+  delete: [appId: EntityId]
 }>()
 
 const confirmOpen = ref(false)

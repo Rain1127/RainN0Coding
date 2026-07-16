@@ -1,0 +1,1 @@
+function e(n){if(typeof n=="number")return Number.isSafeInteger(n)&&n>0?n:null;if(typeof n!="string")return null;const r=n.trim();if(!/^\d+$/.test(r))return null;try{if(BigInt(r)<=0n)return null}catch{return null}const t=Number(r);return Number.isSafeInteger(t)?t:r}function i(n,r){return n!=null&&r!=null&&String(n)===String(r)}export{e as n,i as s};

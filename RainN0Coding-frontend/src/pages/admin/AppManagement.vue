@@ -9,6 +9,9 @@ import { useAccessibleDialog } from '@/composables/useAccessibleDialog'
 import { useAuthStore } from '@/stores/auth'
 import { buildAdminListQuery, isCanonicalAdminListQuery, parseAdminListQuery } from '@/utils/adminListQuery'
 import { formatDateTime, formatInteger } from '@/utils/formatters'
+import { normalizePageResult } from '@/utils/pageResult'
+import { sameEntityId } from '@/utils/entityId'
+import type { EntityId } from '@/types/entity'
 
 const apps = ref<AppVO[]>([])
 const route = useRoute()
@@ -26,7 +29,7 @@ const feedback = ref('')
 const deploymentUrl = ref('')
 const deletingApp = ref<AppVO | null>(null)
 const deleting = ref(false)
-const deployingIds = ref(new Set<number>())
+const deployingIds = ref(new Set<EntityId>())
 const appsTableTitle = ref<HTMLElement | null>(null)
 const {
   isOpen: deleteDialogOpen,
@@ -37,7 +40,7 @@ const {
 } = useAccessibleDialog(() => !deleting.value)
 let requestSequence = 0
 let operationEpoch = 0
-const deploySequences = new Map<number, number>()
+const deploySequences = new Map<EntityId, number>()
 
 const totalPages = computed(() => Math.max(1, serverPages.value || Math.ceil(total.value / pageSize.value)))
 
@@ -77,9 +80,10 @@ async function fetchApps() {
       sortOrder: 'descend',
     })
     if (sequence !== requestSequence) return
-    const records = result.records ?? []
-    const resultTotal = result.total ?? 0
-    const pages = Math.max(1, Number(result.pages) || Math.ceil(resultTotal / pageSize.value) || 1)
+    const page = normalizePageResult(result, requestedPage, pageSize.value)
+    const records = page.records
+    const resultTotal = page.total
+    const pages = page.pages
     total.value = resultTotal
     serverPages.value = pages
     if (records.length === 0 && resultTotal > 0 && requestedPage > pages) {
@@ -87,7 +91,7 @@ async function fetchApps() {
       return
     }
     apps.value = records
-    currentPage.value = Math.min(pages, Math.max(1, Number(result.current) || requestedPage))
+    currentPage.value = Math.min(pages, page.current)
   } catch {
     if (sequence !== requestSequence) return
     apps.value = []
@@ -189,7 +193,7 @@ function handleDownload(app: AppVO) {
 }
 
 function isOwner(app: AppVO) {
-  return auth.userId === app.userId
+  return sameEntityId(auth.userId, app.userId)
 }
 
 function invalidateDeployments() {

@@ -91,6 +91,23 @@ class TestCheckReviewQualityGate:
         assert result["passed"] is False
         assert result["score"] == 0
 
+    def test_unscored_degraded_review_fails_without_crashing(self):
+        """Reviewer 降级时 score=None → 门禁失败，但 Builder 不应抛异常。"""
+        state = {
+            "review": {
+                "passed": True,
+                "score": None,
+                "issues": [],
+                "summary": "Reviewer unavailable",
+            }
+        }
+
+        result = _check_review_quality_gate(state, threshold=80)
+
+        assert result["passed"] is False
+        assert result["score"] is None
+        assert result["reason"] == "review score unavailable"
+
     def test_no_issues_field(self):
         """review 有 passed+score 但无 issues 字段 → 通过"""
         state = {

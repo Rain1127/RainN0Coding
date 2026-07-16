@@ -15,11 +15,12 @@ import {
   type DeploymentFilter,
   useAppsStore,
 } from '@/stores/apps'
+import type { EntityId } from '@/types/entity'
 
 const apps = useAppsStore()
 const route = useRoute()
 const router = useRouter()
-const deletingId = ref<number | null>(null)
+const deletingId = ref<EntityId | null>(null)
 const actionError = ref('')
 const totalPages = computed(() => Math.max(1, Math.ceil(apps.total / apps.pageSize)))
 const hasServerFilters = computed(() => Boolean(apps.keyword.trim()) || apps.codeGenType !== 'all')
@@ -142,7 +143,7 @@ function changePage(page: number) {
   void syncQuery({ pageNum: page })
 }
 
-async function deleteProject(appId: number) {
+async function deleteProject(appId: EntityId) {
   if (deletingId.value !== null) return
   deletingId.value = appId
   actionError.value = ''

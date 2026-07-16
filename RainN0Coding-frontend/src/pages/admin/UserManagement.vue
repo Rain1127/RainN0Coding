@@ -8,6 +8,9 @@ import { useAuthStore } from '@/stores/auth'
 import type { UserVO } from '@/types/user'
 import { buildAdminListQuery, isCanonicalAdminListQuery, parseAdminListQuery } from '@/utils/adminListQuery'
 import { formatDateTime, formatInteger } from '@/utils/formatters'
+import { normalizePageResult } from '@/utils/pageResult'
+import type { EntityId } from '@/types/entity'
+import { sameEntityId } from '@/utils/entityId'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -23,9 +26,9 @@ const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
 const feedback = ref('')
-const updatingRoles = ref(new Set<number>())
-const roleOverrides = ref(new Map<number, UserVO['userRole']>())
-const roleSequences = new Map<number, number>()
+const updatingRoles = ref(new Set<EntityId>())
+const roleOverrides = ref(new Map<EntityId, UserVO['userRole']>())
+const roleSequences = new Map<EntityId, number>()
 let requestSequence = 0
 
 const totalPages = computed(() => Math.max(1, serverPages.value || Math.ceil(total.value / pageSize.value)))
@@ -63,9 +66,10 @@ async function fetchUsers() {
       sortOrder: 'descend',
     })
     if (sequence !== requestSequence) return
-    const records = result.records ?? []
-    const resultTotal = result.total ?? 0
-    const pages = Math.max(1, Number(result.pages) || Math.ceil(resultTotal / pageSize.value) || 1)
+    const page = normalizePageResult(result, requestedPage, pageSize.value)
+    const records = page.records
+    const resultTotal = page.total
+    const pages = page.pages
     total.value = resultTotal
     serverPages.value = pages
     if (records.length === 0 && resultTotal > 0 && requestedPage > pages) {
@@ -73,7 +77,7 @@ async function fetchUsers() {
       return
     }
     users.value = records
-    currentPage.value = Math.min(pages, Math.max(1, Number(result.current) || requestedPage))
+    currentPage.value = Math.min(pages, page.current)
   } catch {
     if (sequence !== requestSequence) return
     users.value = []
@@ -117,7 +121,7 @@ function updateRoute(patch: Partial<{ page: number; pageSize: number; search: st
 async function changeRole(user: UserVO, event: Event) {
   const role = (event.target as HTMLSelectElement).value as UserVO['userRole']
   const userId = user.id
-  if (userId === auth.userId || role === displayRole(user) || updatingRoles.value.has(userId)) return
+  if (sameEntityId(userId, auth.userId) || role === displayRole(user) || updatingRoles.value.has(userId)) return
   const sequence = (roleSequences.get(userId) ?? 0) + 1
   roleSequences.set(userId, sequence)
   updatingRoles.value = new Set(updatingRoles.value).add(user.id)
@@ -128,7 +132,7 @@ async function changeRole(user: UserVO, event: Event) {
     const updated = await updateUser({ id: userId, userRole: role })
     if (sequence !== roleSequences.get(userId)) return
     if (!updated) throw new Error('update rejected')
-    const currentUser = users.value.find(item => item.id === userId)
+    const currentUser = users.value.find(item => sameEntityId(item.id, userId))
     if (currentUser) currentUser.userRole = role
     feedback.value = `已将 ${currentUser?.userName || currentUser?.userAccount || `用户 #${userId}`} 的角色更新为 ${role}。`
   } catch {
@@ -184,7 +188,7 @@ function displayRole(user: UserVO) {
             <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>简介</th><th>创建时间</th></tr></thead>
             <tbody>
               <tr v-for="user in users" :key="user.id" :data-user-id="user.id">
-                <td><strong>{{ user.userAccount }}</strong><span v-if="user.id === auth.userId" class="current-badge">当前账号</span></td>
+                <td><strong>{{ user.userAccount }}</strong><span v-if="sameEntityId(user.id, auth.userId)" class="current-badge">当前账号</span></td>
                 <td>{{ user.userName || '未设置' }}</td>
                 <td>
                   <select
@@ -193,7 +197,7 @@ function displayRole(user: UserVO) {
                     :value="displayRole(user)"
                     :aria-label="`调整 ${user.userAccount} 的角色`"
                     data-action="change-role"
-                    :disabled="user.id === auth.userId || updatingRoles.has(user.id)"
+                    :disabled="sameEntityId(user.id, auth.userId) || updatingRoles.has(user.id)"
                     @change="changeRole(user, $event)"
                   >
                     <option value="user">普通用户</option><option value="admin">管理员</option>

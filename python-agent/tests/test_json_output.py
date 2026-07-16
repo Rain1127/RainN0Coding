@@ -1,6 +1,11 @@
 """测试 deepseek-chat JSON 输出的可靠性"""
 import sys, os
+import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+if __name__ != "__main__" and os.getenv("RUN_LIVE_LLM_TESTS") != "1":
+    pytest.skip("manual live LLM script; set RUN_LIVE_LLM_TESTS=1 to collect", allow_module_level=True)
+
 import json
 from llm_factory import create_llm
 

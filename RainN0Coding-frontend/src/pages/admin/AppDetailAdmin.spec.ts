@@ -72,6 +72,19 @@ describe('AppDetailAdmin', () => {
     expect(wrapper.text()).toContain('初始需求')
   })
 
+  it('loads Snowflake route IDs without losing precision', async () => {
+    const snowflake = '429149380495425536'
+    routerMocks.route.params.appId = snowflake
+    vi.mocked(adminGetAppVO).mockResolvedValueOnce({ ...app, id: snowflake })
+
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(adminGetAppVO).toHaveBeenCalledWith(snowflake)
+    expect(wrapper.text().replace(/\D/g, '')).toContain(snowflake)
+    expect(wrapper.text()).not.toContain('应用编号无效')
+  })
+
   it('shows the deployment URL returned by the string API contract', async () => {
     vi.mocked(deployApp).mockResolvedValue('https://deploy.example/board')
     wrapper = mountPage()

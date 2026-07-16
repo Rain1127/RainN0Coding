@@ -12,6 +12,8 @@ from tracing import start_span
 
 EMPTY_CANDIDATE_RETRY_COUNT = 3
 EMPTY_CANDIDATE_RETRY_DELAY_SECONDS = 1.0
+TRANSIENT_RETRY_COUNT = 1
+TRANSIENT_RETRY_DELAY_SECONDS = 0.5
 
 
 class ModelRouter:
@@ -55,46 +57,76 @@ class ModelRouter:
                 cb = candidate.circuit_breaker
                 cb_name = candidate.name
 
-                attempt_extra = dict(langsmith_extra) if langsmith_extra else {}
-                attempt_extra.setdefault("metadata", {})
-                attempt_extra["metadata"].update(
-                    {
-                        "attempt": i + 1,
-                        "fallback": i > 0,
-                        "model_candidate": cb_name,
-                    }
-                )
-                tags = list(attempt_extra.get("tags", []))
-                if i > 0:
-                    tags.append(f"fallback_attempt_{i+1}")
-                attempt_extra["tags"] = tags
-
-                print(f"[Router] {group_name}: trying [{i+1}/{len(candidates)}] {cb_name} ({candidate.model})")
-
-                try:
-                    with start_span(
-                        "llm.attempt",
+                for candidate_attempt in range(1, TRANSIENT_RETRY_COUNT + 2):
+                    attempt_extra = dict(langsmith_extra) if langsmith_extra else {}
+                    attempt_extra["metadata"] = dict(attempt_extra.get("metadata", {}))
+                    attempt_extra["metadata"].update(
                         {
-                            "llm.group": group_name,
-                            "llm.model_candidate": cb_name,
-                            "llm.model": candidate.model,
-                            "llm.attempt": i + 1,
-                            "llm.fallback": i > 0,
-                        },
-                    ):
-                        result = self._call_llm(candidate, messages, parser, langsmith_extra=attempt_extra)
-                    if result is not None:
+                            "attempt": i + 1,
+                            "candidate_attempt": candidate_attempt,
+                            "fallback": i > 0,
+                            "model_candidate": cb_name,
+                        }
+                    )
+                    tags = list(attempt_extra.get("tags", []))
+                    if i > 0:
+                        tags.append(f"fallback_attempt_{i+1}")
+                    if candidate_attempt > 1:
+                        tags.append(f"transient_retry_{candidate_attempt-1}")
+                    attempt_extra["tags"] = tags
+
+                    print(
+                        f"[Router] {group_name}: trying [{i+1}/{len(candidates)}] "
+                        f"{cb_name} ({candidate.model}), candidate_attempt={candidate_attempt}"
+                    )
+
+                    try:
+                        with start_span(
+                            "llm.attempt",
+                            {
+                                "llm.group": group_name,
+                                "llm.model_candidate": cb_name,
+                                "llm.model": candidate.model,
+                                "llm.attempt": i + 1,
+                                "llm.candidate_attempt": candidate_attempt,
+                                "llm.fallback": i > 0,
+                            },
+                        ):
+                            result = self._call_llm(
+                                candidate,
+                                messages,
+                                parser,
+                                langsmith_extra=attempt_extra,
+                            )
+                        if result is not None:
+                            if cb:
+                                cb.record_success()
+                            print(f"[Router] {group_name}: {cb_name} success")
+                            record_llm_call(candidate.model, status="success")
+                            return result
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        can_retry = (
+                            candidate_attempt <= TRANSIENT_RETRY_COUNT
+                            and self._is_transient_error(exc)
+                        )
+                        if can_retry:
+                            print(
+                                f"[Router] {group_name}: {cb_name} transient failure, "
+                                f"retrying -> {type(exc).__name__}: {str(exc)[:120]}"
+                            )
+                            time.sleep(TRANSIENT_RETRY_DELAY_SECONDS)
+                            continue
+
                         if cb:
-                            cb.record_success()
-                        print(f"[Router] {group_name}: {cb_name} success")
-                        record_llm_call(candidate.model, status="success")
-                        return result
-                except Exception as exc:
-                    last_error = exc
-                    if cb:
-                        cb.record_failure()
-                    print(f"[Router] {group_name}: {cb_name} failed -> {type(exc).__name__}: {str(exc)[:120]}")
-                    record_llm_call(candidate.model, status="error")
+                            cb.record_failure()
+                        print(
+                            f"[Router] {group_name}: {cb_name} failed -> "
+                            f"{type(exc).__name__}: {str(exc)[:120]}"
+                        )
+                        record_llm_call(candidate.model, status="error")
+                        break
 
             print(f"[Router] {group_name}: all {len(candidates)} candidates failed, last_error={last_error}")
 
@@ -135,6 +167,24 @@ class ModelRouter:
     def _is_glm_candidate(candidate: ModelCandidate) -> bool:
         candidate_text = f"{candidate.name} {candidate.model}".lower()
         return "glm" in candidate_text
+
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        """Return whether a provider/network failure is safe to retry once."""
+        if isinstance(exc, (TimeoutError, ConnectionError)):
+            return True
+
+        if type(exc).__name__ in {
+            "APITimeoutError",
+            "APIConnectionError",
+            "RateLimitError",
+        }:
+            return True
+
+        status_code = getattr(exc, "status_code", None)
+        return status_code in {408, 409, 429} or (
+            isinstance(status_code, int) and status_code >= 500
+        )
 
     def _call_llm(self, candidate: ModelCandidate, messages: list, parser=None, langsmith_extra: dict = None) -> object:
         """Call the actual LLM provider."""

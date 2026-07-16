@@ -10,9 +10,9 @@ Run:
   or uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
 """
 import asyncio
+import importlib
 import logging
 
-import config as config_module
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -33,7 +33,7 @@ from workflow.sse_stream import stream_workflow
 
 
 def _config():
-    return config_module.config
+    return importlib.import_module("config").config
 
 
 class ReloadableSemaphore:

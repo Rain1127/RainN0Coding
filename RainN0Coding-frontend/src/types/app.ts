@@ -1,7 +1,9 @@
+import type { EntityId } from './entity'
+
 export type CodeGenType = 'html' | 'multi_file' | 'vue_project' | 'python' | 'java' | 'go' | 'rust' | 'nodejs' | 'generic'
 
 export interface AppVO {
-  id: number
+  id: EntityId
   appName: string
   cover: string
   initPrompt: string
@@ -9,13 +11,13 @@ export interface AppVO {
   deployKey: string
   deployedTime: string
   priority: number
-  userId: number
+  userId: EntityId
   currentVersion: number
   createTime: string
   updateTime: string
   editTime: string
   userVO?: {
-    id: number
+    id: EntityId
     userName: string
   }
 }
@@ -25,19 +27,19 @@ export interface AppAddRequest {
 }
 
 export interface AppUpdateRequest {
-  id: number
+  id: EntityId
   appName: string
 }
 
 export interface AppAdminUpdateRequest {
-  id: number
+  id: EntityId
   appName?: string
   cover?: string
   priority?: number
 }
 
 export interface AppDeployRequest {
-  appId: number
+  appId: EntityId
 }
 
 export interface AppQueryRequest {
@@ -45,8 +47,8 @@ export interface AppQueryRequest {
   pageSize: number
   sortField?: string
   sortOrder?: string
-  id?: number
+  id?: EntityId
   appName?: string
   codeGenType?: string
-  userId?: number
+  userId?: EntityId
 }

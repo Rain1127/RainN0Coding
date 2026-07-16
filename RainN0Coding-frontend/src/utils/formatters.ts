@@ -13,5 +13,13 @@ export function formatDateTime(value: unknown): string {
 }
 
 export function formatInteger(value: unknown): string {
-  return typeof value === 'number' && Number.isFinite(value) ? integerFormatter.format(value) : '—'
+  if (typeof value === 'number' && Number.isFinite(value)) return integerFormatter.format(value)
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+    try {
+      return integerFormatter.format(BigInt(value.trim()))
+    } catch {
+      return '—'
+    }
+  }
+  return '—'
 }

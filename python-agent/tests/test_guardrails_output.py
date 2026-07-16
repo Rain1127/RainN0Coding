@@ -23,6 +23,25 @@ def test_output_guard_blocks_protected_path_code_file():
     assert decision.rule_id == "output.protected_path_blocked"
 
 
+@pytest.mark.parametrize("path", ["src/js/main.js", "src/main.ts", "src/App.vue"])
+def test_output_guard_allows_generated_project_entrypoints(path):
+    from guardrails.engine import evaluate_output_event
+    from guardrails.models import OutputEvent
+
+    decision = evaluate_output_event(
+        OutputEvent(
+            event_type="code_file",
+            path=path,
+            content="export default {}",
+            request_id="req-entry",
+            trace_id="trace-entry",
+        )
+    )
+
+    assert decision.action == "allow"
+    assert decision.rule_id == "output.ok"
+
+
 def test_output_guard_blocks_oversize_code_file():
     from guardrails.engine import evaluate_output_event
     from guardrails.models import OutputEvent

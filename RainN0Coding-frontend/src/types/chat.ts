@@ -1,9 +1,11 @@
+import type { EntityId } from './entity'
+
 export interface ChatHistory {
-  id: number
+  id: EntityId
   message: string
   messageType: 'user' | 'ai'
-  appId: number
-  userId: number
+  appId: EntityId
+  userId: EntityId
   createTime: string
 }
 

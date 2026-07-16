@@ -126,6 +126,11 @@ def _check_review_quality_gate(state: CodeGenState, threshold: int = 80) -> dict
             "passed": False, "score": score, "has_critical": has_critical,
             "reason": f"review.passed=False (score={score})",
         }
+    if not isinstance(score, (int, float)):
+        return {
+            "passed": False, "score": score, "has_critical": has_critical,
+            "reason": "review score unavailable",
+        }
     if score < threshold:
         return {
             "passed": False, "score": score, "has_critical": has_critical,

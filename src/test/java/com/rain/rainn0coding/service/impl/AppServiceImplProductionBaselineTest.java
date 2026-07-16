@@ -4,9 +4,11 @@ import com.rain.rainn0coding.concurrency.AiGenerationPermitService;
 import com.rain.rainn0coding.core.AiCodeGeneratorFacade;
 import com.rain.rainn0coding.model.entity.App;
 import com.rain.rainn0coding.model.entity.User;
+import com.rain.rainn0coding.model.enums.CodeGenTypeEnum;
 import com.rain.rainn0coding.monitor.TraceIdResolver;
 import com.rain.rainn0coding.service.ChatHistoryService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.redisson.api.RLock;
 import org.redisson.api.RFuture;
 import org.redisson.api.RedissonClient;
@@ -15,6 +17,8 @@ import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,6 +33,28 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AppServiceImplProductionBaselineTest {
+
+    @Test
+    void buildDeployUrlUsesConfiguredStaticEndpointAndTrailingSlash() {
+        AppServiceImpl appService = new AppServiceImpl();
+        ReflectionTestUtils.setField(appService, "codeDeployHost", "http://localhost:8123/api/static/");
+
+        String deployUrl = appService.buildDeployUrl("123456");
+
+        assertThat(deployUrl).isEqualTo("http://localhost:8123/api/static/123456/");
+    }
+
+    @Test
+    void resolveStaticDeploySourceUsesNestedSrcDirectoryForGeneratedHtml(@TempDir Path tempDir) throws Exception {
+        AppServiceImpl appService = new AppServiceImpl();
+        Path sourceRoot = Files.createDirectories(tempDir.resolve("html_1"));
+        Path nestedSource = Files.createDirectories(sourceRoot.resolve("src"));
+        Files.writeString(nestedSource.resolve("index.html"), "<html></html>");
+
+        var resolved = appService.resolveStaticDeploySource(sourceRoot.toFile(), CodeGenTypeEnum.HTML);
+
+        assertThat(resolved).isEqualTo(nestedSource.toFile());
+    }
 
     @Test
     void chatToGenCodeReturnsOverloadedEventsWhenPermitUnavailable() throws Exception {

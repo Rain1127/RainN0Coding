@@ -49,6 +49,7 @@ class Config:
 
     # ===== 服务 =====
     SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000"))
+    JAVA_BASE_URL: str = os.getenv("JAVA_BASE_URL", "http://localhost:8123").rstrip("/")
     APP_ENV: str = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
     INTERNAL_API_TOKEN: str = os.getenv("INTERNAL_API_TOKEN", "")
     INTERNAL_API_ALLOW_MISSING_TOKEN: bool = os.getenv(

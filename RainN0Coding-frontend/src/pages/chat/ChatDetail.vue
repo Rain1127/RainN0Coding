@@ -14,6 +14,8 @@ import ChatLayout from '@/layouts/ChatLayout.vue'
 import { useAppsStore } from '@/stores/apps'
 import { useChatStore } from '@/stores/chat'
 import { useGenerationStore } from '@/stores/generation'
+import type { EntityId } from '@/types/entity'
+import { normalizeEntityId, sameEntityId } from '@/utils/entityId'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,7 +23,10 @@ const chat = useChatStore()
 const apps = useAppsStore()
 const generation = useGenerationStore()
 
-const appId = computed(() => Number(route.params.appId))
+const appId = computed(() => {
+  const raw = Array.isArray(route.params.appId) ? route.params.appId[0] : route.params.appId
+  return normalizeEntityId(raw)
+})
 const input = ref('')
 const messageFeed = ref<HTMLElement | null>(null)
 const deployPending = ref(false)
@@ -37,7 +42,7 @@ let deployOperationSequence = 0
 let downloadOperationSequence = 0
 
 const hasCurrentApp = computed(() => (
-  Number.isInteger(appId.value) && chat.currentApp?.id === appId.value
+  appId.value !== null && sameEntityId(chat.currentApp?.id, appId.value)
 ))
 
 const isGenerating = computed(() => (
@@ -86,12 +91,12 @@ function routeInitialPrompt() {
   return typeof state.initialPrompt === 'string' ? state.initialPrompt.trim() : ''
 }
 
-async function consumeInitialPrompt(targetAppId: number, requestSequence: number) {
+async function consumeInitialPrompt(targetAppId: EntityId, requestSequence: number) {
   if (
     consumedPromptNavigation === requestSequence ||
     requestSequence !== navigationSequence ||
-    appId.value !== targetAppId ||
-    chat.currentApp?.id !== targetAppId
+    !sameEntityId(appId.value, targetAppId) ||
+    !sameEntityId(chat.currentApp?.id, targetAppId)
   ) return ''
   const prompt = routeInitialPrompt()
   consumedPromptNavigation = requestSequence
@@ -110,7 +115,7 @@ function scrollToBottom() {
   })
 }
 
-async function maybeConsumeInitialPrompt(targetAppId: number, requestSequence: number) {
+async function maybeConsumeInitialPrompt(targetAppId: EntityId, requestSequence: number) {
   const prompt = await consumeInitialPrompt(targetAppId, requestSequence)
   if (prompt && viewActive && requestSequence === navigationSequence) {
     void startGeneration(prompt, false, true, targetAppId, requestSequence)
@@ -118,16 +123,17 @@ async function maybeConsumeInitialPrompt(targetAppId: number, requestSequence: n
 }
 
 async function loadApp(
-  targetAppId = appId.value,
+  targetAppId: EntityId | null = appId.value,
   requestSequence = navigationSequence,
 ) {
+  if (targetAppId === null) return false
   try {
     await chat.loadAppDetail(targetAppId)
     if (
       viewActive &&
       requestSequence === navigationSequence &&
-      appId.value === targetAppId &&
-      chat.currentApp?.id === targetAppId
+      sameEntityId(appId.value, targetAppId) &&
+      sameEntityId(chat.currentApp?.id, targetAppId)
     ) {
       await maybeConsumeInitialPrompt(targetAppId, requestSequence)
     }
@@ -137,7 +143,8 @@ async function loadApp(
   }
 }
 
-async function loadHistory(targetAppId = appId.value) {
+async function loadHistory(targetAppId: EntityId | null = appId.value) {
+  if (targetAppId === null) return
   try {
     await chat.loadHistory(targetAppId)
   } catch {
@@ -145,7 +152,7 @@ async function loadHistory(targetAppId = appId.value) {
   }
 }
 
-async function refreshAfterSuccess(targetAppId: number) {
+async function refreshAfterSuccess(targetAppId: EntityId) {
   await Promise.allSettled([
     chat.loadAppDetail(targetAppId),
     chat.loadHistory(targetAppId),
@@ -157,14 +164,15 @@ async function startGeneration(
   prompt: string,
   preserve: boolean,
   addUserMessage: boolean,
-  targetAppId = appId.value,
+  targetAppId: EntityId | null = appId.value,
   requestSequence = navigationSequence,
 ) {
   const normalized = prompt.trim()
   if (
     !normalized ||
-    chat.currentApp?.id !== targetAppId ||
-    appId.value !== targetAppId ||
+    targetAppId === null ||
+    !sameEntityId(chat.currentApp?.id, targetAppId) ||
+    !sameEntityId(appId.value, targetAppId) ||
     requestSequence !== navigationSequence ||
     isGenerating.value
   ) return
@@ -184,8 +192,8 @@ async function startGeneration(
   if (
     !viewActive ||
     requestSequence !== navigationSequence ||
-    appId.value !== targetAppId ||
-    chat.currentApp?.id !== targetAppId
+    !sameEntityId(appId.value, targetAppId) ||
+    !sameEntityId(chat.currentApp?.id, targetAppId)
   ) return
   if (generation.status === 'success') {
     await refreshAfterSuccess(targetAppId)
@@ -216,15 +224,15 @@ function retryGeneration() {
 
 async function handleDeploy() {
   const targetAppId = appId.value
-  if (chat.currentApp?.id !== targetAppId || deployPending.value) return
+  if (targetAppId === null || !sameEntityId(chat.currentApp?.id, targetAppId) || deployPending.value) return
   const requestNavigation = navigationSequence
   const operationSequence = ++deployOperationSequence
   const isCurrentOperation = () => (
     viewActive &&
     operationSequence === deployOperationSequence &&
     requestNavigation === navigationSequence &&
-    appId.value === targetAppId &&
-    chat.currentApp?.id === targetAppId
+    sameEntityId(appId.value, targetAppId) &&
+    sameEntityId(chat.currentApp?.id, targetAppId)
   )
   deployPending.value = true
   deployError.value = ''
@@ -248,7 +256,8 @@ async function handleDeploy() {
 
 async function handleDownload() {
   const targetAppId = appId.value
-  const currentApp = chat.currentApp?.id === targetAppId ? chat.currentApp : null
+  if (targetAppId === null) return
+  const currentApp = sameEntityId(chat.currentApp?.id, targetAppId) ? chat.currentApp : null
   if (!currentApp || downloadPending.value) return
   const requestNavigation = navigationSequence
   const operationSequence = ++downloadOperationSequence
@@ -256,8 +265,8 @@ async function handleDownload() {
     viewActive &&
     operationSequence === downloadOperationSequence &&
     requestNavigation === navigationSequence &&
-    appId.value === targetAppId &&
-    chat.currentApp?.id === targetAppId
+    sameEntityId(appId.value, targetAppId) &&
+    sameEntityId(chat.currentApp?.id, targetAppId)
   )
   const appName = currentApp.appName
   downloadPending.value = true
@@ -291,7 +300,7 @@ async function handleDownload() {
   }
 }
 
-async function loadRouteApp(targetAppId: number) {
+async function loadRouteApp(targetAppId: EntityId | null) {
   const requestSequence = ++navigationSequence
   consumedPromptNavigation = -1
   deployOperationSequence += 1
@@ -307,7 +316,7 @@ async function loadRouteApp(targetAppId: number) {
   if (isGenerating.value) generation.cancel()
   generation.reset()
 
-  if (!Number.isInteger(targetAppId) || targetAppId <= 0) {
+  if (targetAppId === null) {
     await router.replace('/404')
     return
   }

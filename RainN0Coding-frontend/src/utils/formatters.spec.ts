@@ -11,6 +11,7 @@ describe('shared localized formatters', () => {
 
   it('formats finite integers with Intl and handles invalid values safely', () => {
     expect(formatInteger(1234567)).toMatch(/1.*234.*567/)
+    expect(formatInteger('429149380495425536').replace(/\D/g, '')).toBe('429149380495425536')
     expect(formatInteger(Number.NaN)).toBe('—')
     expect(formatInteger(null)).toBe('—')
   })

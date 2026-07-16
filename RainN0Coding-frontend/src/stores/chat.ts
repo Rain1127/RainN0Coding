@@ -4,9 +4,11 @@ import type { ChatMessage } from '@/types/chat'
 import { getChatHistory } from '@/api/chatHistory'
 import { getAppVO } from '@/api/app'
 import type { AppVO } from '@/types/app'
+import type { EntityId } from '@/types/entity'
+import { sameEntityId } from '@/utils/entityId'
 
 export const useChatStore = defineStore('chat', () => {
-  const currentAppId = ref<number | null>(null)
+  const currentAppId = ref<EntityId | null>(null)
   const currentApp = ref<AppVO | null>(null)
   const messages = ref<ChatMessage[]>([])
   const isStreaming = ref(false)
@@ -22,8 +24,8 @@ export const useChatStore = defineStore('chat', () => {
     return error instanceof Error && error.message ? error.message : fallback
   }
 
-  function resetForApp(appId: number) {
-    if (currentAppId.value === appId) return
+  function resetForApp(appId: EntityId) {
+    if (sameEntityId(currentAppId.value, appId)) return
     appRequestSequence += 1
     historyRequestSequence += 1
     currentAppId.value = appId
@@ -37,11 +39,11 @@ export const useChatStore = defineStore('chat', () => {
     historyError.value = null
   }
 
-  function setAppId(appId: number) {
+  function setAppId(appId: EntityId) {
     resetForApp(appId)
   }
 
-  function ensureAppContext(appId: number) {
+  function ensureAppContext(appId: EntityId) {
     if (currentAppId.value === null) {
       currentAppId.value = appId
     } else {
@@ -49,35 +51,35 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function loadAppDetail(appId: number) {
+  async function loadAppDetail(appId: EntityId) {
     ensureAppContext(appId)
     const requestSequence = ++appRequestSequence
     appLoading.value = true
     appError.value = null
     try {
       const app = await getAppVO(appId)
-      if (requestSequence !== appRequestSequence || currentAppId.value !== appId) return
+      if (requestSequence !== appRequestSequence || !sameEntityId(currentAppId.value, appId)) return
       currentApp.value = app
     } catch (error) {
-      if (requestSequence === appRequestSequence && currentAppId.value === appId) {
+      if (requestSequence === appRequestSequence && sameEntityId(currentAppId.value, appId)) {
         appError.value = errorMessage(error, '应用详情加载失败')
       }
       throw error
     } finally {
-      if (requestSequence === appRequestSequence && currentAppId.value === appId) {
+      if (requestSequence === appRequestSequence && sameEntityId(currentAppId.value, appId)) {
         appLoading.value = false
       }
     }
   }
 
-  async function loadHistory(appId: number) {
+  async function loadHistory(appId: EntityId) {
     ensureAppContext(appId)
     const requestSequence = ++historyRequestSequence
     const messageIdsAtRequestStart = new Set(messages.value.map(message => message.id))
     historyLoading.value = true
     historyError.value = null
     try {
-      const res = await getChatHistory(appId, 100)
+      const res = await getChatHistory(appId, 50)
       const msgs: ChatMessage[] = (res.records || [])
         .sort((a, b) => new Date(a.createTime).getTime() - new Date(b.createTime).getTime())
         .map(h => ({
@@ -86,18 +88,18 @@ export const useChatStore = defineStore('chat', () => {
           content: h.message,
           timestamp: new Date(h.createTime).getTime(),
         }))
-      if (requestSequence !== historyRequestSequence || currentAppId.value !== appId) return
+      if (requestSequence !== historyRequestSequence || !sameEntityId(currentAppId.value, appId)) return
       const messagesAddedDuringRequest = messages.value.filter(
         message => !messageIdsAtRequestStart.has(message.id),
       )
       messages.value = [...msgs, ...messagesAddedDuringRequest]
     } catch (error) {
-      if (requestSequence === historyRequestSequence && currentAppId.value === appId) {
+      if (requestSequence === historyRequestSequence && sameEntityId(currentAppId.value, appId)) {
         historyError.value = errorMessage(error, '对话历史加载失败')
       }
       throw error
     } finally {
-      if (requestSequence === historyRequestSequence && currentAppId.value === appId) {
+      if (requestSequence === historyRequestSequence && sameEntityId(currentAppId.value, appId)) {
         historyLoading.value = false
       }
     }

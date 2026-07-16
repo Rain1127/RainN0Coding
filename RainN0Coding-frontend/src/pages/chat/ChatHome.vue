@@ -11,6 +11,7 @@ import { createApp } from '@/api/app'
 import PromptComposer, { type PromptExample } from '@/components/generation/PromptComposer.vue'
 import ChatLayout from '@/layouts/ChatLayout.vue'
 import { useAppsStore } from '@/stores/apps'
+import type { EntityId } from '@/types/entity'
 
 type HealthStatus = 'checking' | 'online' | 'offline'
 
@@ -19,7 +20,7 @@ const apps = useAppsStore()
 const creating = ref(false)
 const createError = ref('')
 const lastPrompt = ref('')
-const pendingNavigation = ref<{ appId: number; prompt: string } | null>(null)
+const pendingNavigation = ref<{ appId: EntityId; prompt: string } | null>(null)
 const javaStatus = ref<HealthStatus>('checking')
 const pythonStatus = ref<HealthStatus>('checking')
 let serviceCheckSequence = 0
@@ -71,7 +72,7 @@ async function checkServices() {
   pythonStatus.value = python
 }
 
-async function navigateToProject(appId: number, prompt: string) {
+async function navigateToProject(appId: EntityId, prompt: string) {
   await router.push({
     name: 'ChatDetail',
     params: { appId },
@@ -89,7 +90,7 @@ async function handleSubmit(prompt: string) {
   let createdThisAttempt = false
 
   try {
-    let appId: number
+    let appId: EntityId
     if (pendingNavigation.value?.prompt === normalized) {
       appId = pendingNavigation.value.appId
     } else {

@@ -1,6 +1,10 @@
 """完整测试：Coder → Reviewer 链路"""
 import sys, os
+import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+if __name__ != "__main__" and os.getenv("RUN_LIVE_LLM_TESTS") != "1":
+    pytest.skip("manual live LLM test; set RUN_LIVE_LLM_TESTS=1 to collect", allow_module_level=True)
 
 def test_reviewer_real():
     from agents.coder_agent import coder_agent

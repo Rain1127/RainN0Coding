@@ -57,12 +57,15 @@ CREATE TABLE IF NOT EXISTS chat_history (
 
 CREATE TABLE IF NOT EXISTS intent_config (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  configName VARCHAR(64) DEFAULT NULL,
-  treeJson LONGTEXT DEFAULT NULL,
-  updatedBy BIGINT DEFAULT NULL,
-  createTime DATETIME DEFAULT NULL,
-  updateTime DATETIME DEFAULT NULL
+  `config_name` VARCHAR(64) DEFAULT NULL,
+  `tree_json` LONGTEXT DEFAULT NULL,
+  `updated_by` BIGINT DEFAULT NULL,
+  `create_time` DATETIME DEFAULT NULL,
+  `update_time` DATETIME DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Existing installations created with camelCase intent_config columns must run
+-- sql/migrate_intent_config_snake_case.sql once before starting the upgraded service.
 
 CREATE TABLE IF NOT EXISTS app_version (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

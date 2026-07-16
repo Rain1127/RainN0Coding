@@ -17,6 +17,7 @@ LangGraph 工作流 - 将 8 个 Agent 组装为状态图
               failed ---------------> Coder (带上 issue 列表重试)
               retry>=3 -------------> HumanIntervention -> END
 """
+import asyncio
 import os
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -202,7 +203,7 @@ def run_workflow(
     workflow = create_code_gen_workflow()
     compiled = workflow.compile(checkpointer=MemorySaver())
     config_dict = {"configurable": {"thread_id": f"{user_id}_{app_id}"}}
-    return compiled.invoke(initial, config_dict)
+    return asyncio.run(compiled.ainvoke(initial, config_dict))
 
 
 async def run_workflow_async(

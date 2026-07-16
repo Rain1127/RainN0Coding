@@ -55,8 +55,7 @@ def _get_custom_tree() -> str | None:
         return _cached_custom_tree
     _cache_loaded = True
     try:
-        java_base = f"http://localhost:{config.SERVER_PORT}"
-        response = httpx.get(f"{java_base}/api/intent-config/tree", timeout=5)
+        response = httpx.get(f"{config.JAVA_BASE_URL}/api/intent-config/tree", timeout=5)
         if response.status_code == 200:
             data = response.json().get("data", {})
             if data.get("customized") and data.get("treeJson"):

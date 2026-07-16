@@ -1,6 +1,11 @@
 """SSE 流式输出验证"""
 import sys, os, json, asyncio
+import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+if __name__ != "__main__" and os.getenv("RUN_LIVE_LLM_TESTS") != "1":
+    pytest.skip("manual live LLM test; set RUN_LIVE_LLM_TESTS=1 to collect", allow_module_level=True)
+
 from workflow.sse_stream import stream_workflow
 
 async def test():

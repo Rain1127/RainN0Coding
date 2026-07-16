@@ -4,6 +4,7 @@ import {
   type StartGenerationOptions,
 } from '@/stores/generation'
 import type { GenerationEvent } from '@/types/generation'
+import type { EntityId } from '@/types/entity'
 
 const DISPLAY_DELTA_TYPES = new Set([
   'text_delta',
@@ -61,7 +62,7 @@ export function useSSE() {
   )
 
   async function startStream(
-    appId: number,
+    appId: EntityId,
     message: string,
     onChunk: (text: string) => void,
     onDone: () => void,

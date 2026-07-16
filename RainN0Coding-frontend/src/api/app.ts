@@ -4,11 +4,12 @@ import type {
   AppAdminUpdateRequest, AppQueryRequest,
 } from '@/types/app'
 import type { PageResult, DeleteRequest } from '@/types/api'
+import type { EntityId } from '@/types/entity'
 
 export const createApp = (body: AppAddRequest) =>
-  apiClient.post<any, number>('/app/add', body)
+  apiClient.post<any, EntityId>('/app/add', body)
 
-export const getAppVO = (id: number) =>
+export const getAppVO = (id: EntityId) =>
   apiClient.get<any, AppVO>('/app/get/vo', { params: { id } })
 
 export const updateApp = (body: AppUpdateRequest) =>
@@ -23,10 +24,10 @@ export const listMyApps = (body: AppQueryRequest) =>
 export const listGoodApps = (body: AppQueryRequest) =>
   apiClient.post<any, PageResult<AppVO>>('/app/good/list/page/vo', body)
 
-export const deployApp = (appId: number) =>
+export const deployApp = (appId: EntityId) =>
   apiClient.post<any, string>('/app/deploy', { appId })
 
-export const downloadApp = (appId: number) =>
+export const downloadApp = (appId: EntityId) =>
   `/api/app/download/${appId}`
 
 // Admin
@@ -39,5 +40,5 @@ export const adminDeleteApp = (body: DeleteRequest) =>
 export const adminUpdateApp = (body: AppAdminUpdateRequest) =>
   apiClient.post<any, boolean>('/app/admin/update', body)
 
-export const adminGetAppVO = (id: number) =>
+export const adminGetAppVO = (id: EntityId) =>
   apiClient.get<any, AppVO>('/app/admin/get/vo', { params: { id } })

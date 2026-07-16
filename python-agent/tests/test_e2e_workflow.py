@@ -1,6 +1,11 @@
 """端到端测试：完整 7 Agent 工作流"""
 import sys, os
+import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+if __name__ != "__main__" and os.getenv("RUN_LIVE_LLM_TESTS") != "1":
+    pytest.skip("manual live LLM script; set RUN_LIVE_LLM_TESTS=1 to collect", allow_module_level=True)
+
 from workflow.code_gen_workflow import run_workflow
 
 print("=" * 60)

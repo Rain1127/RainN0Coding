@@ -124,7 +124,7 @@ describe('ChatDetail', () => {
 
     const { router, wrapper } = await mountPage('  生成销售看板  ')
     expect(getAppVO).toHaveBeenCalledWith(7)
-    expect(getChatHistory).toHaveBeenCalledWith(7, 100)
+    expect(getChatHistory).toHaveBeenCalledWith(7, 50)
     expect(generationState.start).not.toHaveBeenCalled()
 
     resolveApp(app)
@@ -220,7 +220,7 @@ describe('ChatDetail', () => {
     expect(generationState.cancel).toHaveBeenCalledTimes(1)
     expect(generationState.reset).toHaveBeenCalledTimes(1)
     expect(getAppVO).toHaveBeenCalledWith(8)
-    expect(getChatHistory).toHaveBeenCalledWith(8, 100)
+    expect(getChatHistory).toHaveBeenCalledWith(8, 50)
     expect(wrapper.text()).toContain('项目 B')
     expect(wrapper.text()).not.toContain('销售看板')
     expect(generationState.start).toHaveBeenCalledWith(8, 'build project B', { preserve: false })

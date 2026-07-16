@@ -8,6 +8,7 @@ import type { AppVO } from '@/types/app'
 import { useAccessibleDialog } from '@/composables/useAccessibleDialog'
 import { useAuthStore } from '@/stores/auth'
 import { formatDateTime, formatInteger } from '@/utils/formatters'
+import { normalizeEntityId, sameEntityId } from '@/utils/entityId'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,10 +35,9 @@ let viewActive = true
 
 const appId = computed(() => {
   const raw = Array.isArray(route.params.appId) ? route.params.appId[0] : route.params.appId
-  const id = Number(raw)
-  return Number.isSafeInteger(id) && id > 0 ? id : null
+  return normalizeEntityId(raw)
 })
-const isOwner = computed(() => Boolean(app.value && auth.userId === app.value.userId))
+const isOwner = computed(() => Boolean(app.value && sameEntityId(auth.userId, app.value.userId)))
 
 watch(appId, (id) => {
   deploySequence += 1
@@ -66,27 +66,27 @@ async function fetchApp(id = appId.value) {
   loading.value = true
   try {
     const result = await adminGetAppVO(id)
-    if (viewActive && sequence === requestSequence && id === appId.value) app.value = result
+    if (viewActive && sequence === requestSequence && sameEntityId(id, appId.value)) app.value = result
   } catch {
-    if (viewActive && sequence === requestSequence && id === appId.value) error.value = '应用详情加载失败，请稍后重试。'
+    if (viewActive && sequence === requestSequence && sameEntityId(id, appId.value)) error.value = '应用详情加载失败，请稍后重试。'
   } finally {
-    if (viewActive && sequence === requestSequence && id === appId.value) loading.value = false
+    if (viewActive && sequence === requestSequence && sameEntityId(id, appId.value)) loading.value = false
   }
 }
 
 async function handleDeploy() {
   const currentApp = app.value
-  if (!currentApp || !isOwner.value || deploying.value || currentApp.id !== appId.value) return
+  if (!currentApp || !isOwner.value || deploying.value || !sameEntityId(currentApp.id, appId.value)) return
   const sequence = ++deploySequence
   deploying.value = true
   actionError.value = ''
   deploymentUrl.value = ''
   try {
     const url = await deployApp(currentApp.id)
-    if (!viewActive || sequence !== deploySequence || currentApp.id !== appId.value) return
+    if (!viewActive || sequence !== deploySequence || !sameEntityId(currentApp.id, appId.value)) return
     deploymentUrl.value = normalizeHttpUrl(url)
   } catch {
-    if (!viewActive || sequence !== deploySequence || currentApp.id !== appId.value) return
+    if (!viewActive || sequence !== deploySequence || !sameEntityId(currentApp.id, appId.value)) return
     actionError.value = '部署失败，请稍后重试。'
   } finally {
     if (viewActive && sequence === deploySequence) deploying.value = false
@@ -94,7 +94,7 @@ async function handleDeploy() {
 }
 
 function handleDownload() {
-  if (app.value && isOwner.value && app.value.id === appId.value) {
+  if (app.value && isOwner.value && sameEntityId(app.value.id, appId.value)) {
     window.open(downloadApp(app.value.id), '_blank', 'noopener,noreferrer')
   }
 }
@@ -107,23 +107,23 @@ function normalizeHttpUrl(value: unknown) {
 }
 
 async function requestDelete(event: Event) {
-  if (!app.value || deleting.value || deploying.value || app.value.id !== appId.value) return
+  if (!app.value || deleting.value || deploying.value || !sameEntityId(app.value.id, appId.value)) return
   actionError.value = ''
   await openDeleteDialog(event.currentTarget)
 }
 
 async function confirmDelete() {
   const currentApp = app.value
-  if (!currentApp || deleting.value || currentApp.id !== appId.value) return
+  if (!currentApp || deleting.value || !sameEntityId(currentApp.id, appId.value)) return
   const sequence = ++deleteSequence
   deleting.value = true
   actionError.value = ''
   try {
     const deleted = await adminDeleteApp({ id: currentApp.id })
-    if (!viewActive || sequence !== deleteSequence || currentApp.id !== appId.value) return
+    if (!viewActive || sequence !== deleteSequence || !sameEntityId(currentApp.id, appId.value)) return
     if (!deleted) throw new Error('delete rejected')
   } catch {
-    if (!viewActive || sequence !== deleteSequence || currentApp.id !== appId.value) return
+    if (!viewActive || sequence !== deleteSequence || !sameEntityId(currentApp.id, appId.value)) return
     actionError.value = '删除失败，应用详情仍然保留，请稍后重试。'
     deleting.value = false
     await closeDeleteDialog()
@@ -132,11 +132,11 @@ async function confirmDelete() {
   actionFeedback.value = '应用已删除，正在返回应用列表…'
   deleting.value = false
   await closeDeleteDialog()
-  if (!viewActive || sequence !== deleteSequence || currentApp.id !== appId.value) return
+  if (!viewActive || sequence !== deleteSequence || !sameEntityId(currentApp.id, appId.value)) return
   try {
     await router.replace('/admin/apps')
   } catch {
-    if (viewActive && sequence === deleteSequence && currentApp.id === appId.value) {
+    if (viewActive && sequence === deleteSequence && sameEntityId(currentApp.id, appId.value)) {
       actionError.value = '应用已删除，但自动返回失败，请使用“返回应用列表”。'
     }
   }

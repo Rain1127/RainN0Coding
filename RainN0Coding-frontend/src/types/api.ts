@@ -6,10 +6,14 @@ export interface BaseResponse<T = unknown> {
 
 export interface PageResult<T> {
   records: T[]
-  total: number
-  size: number
-  current: number
-  pages: number
+  total?: number
+  size?: number
+  current?: number
+  pages?: number
+  pageNumber?: number
+  pageSize?: number
+  totalRow?: number
+  totalPage?: number
 }
 
 export interface PageRequest {
@@ -20,5 +24,6 @@ export interface PageRequest {
 }
 
 export interface DeleteRequest {
-  id: number
+  id: EntityId
 }
+import type { EntityId } from './entity'

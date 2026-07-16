@@ -1,5 +1,7 @@
+import type { EntityId } from './entity'
+
 export interface LoginUserVO {
-  id: number
+  id: EntityId
   userAccount: string
   userName: string
   userAvatar: string
@@ -10,7 +12,7 @@ export interface LoginUserVO {
 }
 
 export interface UserVO {
-  id: number
+  id: EntityId
   userAccount: string
   userName: string
   userAvatar: string
@@ -39,7 +41,7 @@ export interface UserAddRequest {
 }
 
 export interface UserUpdateRequest {
-  id: number
+  id: EntityId
   userName?: string
   userAvatar?: string
   userProfile?: string
@@ -51,7 +53,7 @@ export interface UserQueryRequest {
   pageSize: number
   sortField?: string
   sortOrder?: string
-  id?: number
+  id?: EntityId
   userName?: string
   userAccount?: string
   userProfile?: string

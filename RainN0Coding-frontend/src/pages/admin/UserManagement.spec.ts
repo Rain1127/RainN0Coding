@@ -115,6 +115,26 @@ describe('UserManagement', () => {
     expect(wrapper.get('[data-user-id="7"] [data-action="change-role"]').attributes('disabled')).toBeDefined()
   })
 
+  it('updates a Snowflake user id without numeric conversion', async () => {
+    const snowflake = '430474206606770176'
+    vi.mocked(listUsers).mockResolvedValueOnce({
+      records: [{ id: snowflake, userAccount: 'snowflake', userName: 'Snowflake', userAvatar: '', userProfile: '', userRole: 'user', createTime: '' }],
+      pageNumber: 1,
+      pageSize: 10,
+      totalPage: 1,
+      totalRow: 1,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const role = wrapper.get(`[data-user-id="${snowflake}"] [data-action="change-role"]`)
+    await role.setValue('admin')
+    await role.trigger('change')
+    await flushPromises()
+
+    expect(updateUser).toHaveBeenCalledWith({ id: snowflake, userRole: 'admin' })
+  })
+
   it('prevents duplicate role mutations and keeps the row after an error', async () => {
     let reject!: (reason: unknown) => void
     vi.mocked(updateUser).mockReturnValue(new Promise((_resolve, rejectPromise) => { reject = rejectPromise }))

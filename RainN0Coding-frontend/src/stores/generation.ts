@@ -7,6 +7,8 @@ import type {
   GenerationState,
   GenerationStatus,
 } from '@/types/generation'
+import type { EntityId } from '@/types/entity'
+import { sameEntityId } from '@/utils/entityId'
 
 export const MAX_GENERATION_EVENTS = 200
 const SUCCESSFUL_DONE_STATUSES = new Set([
@@ -174,7 +176,7 @@ export const useGenerationStore = defineStore('generation', () => {
   const runId = ref(0)
 
   let activeController: AbortController | null = null
-  let currentAppId: number | null = null
+  let currentAppId: EntityId | null = null
 
   function snapshot(): GenerationState {
     return {
@@ -195,7 +197,7 @@ export const useGenerationStore = defineStore('generation', () => {
   }
 
   async function start(
-    appId: number,
+    appId: EntityId,
     prompt: string,
     options: StartGenerationOptions = {},
   ): Promise<void> {
@@ -205,7 +207,7 @@ export const useGenerationStore = defineStore('generation', () => {
     const controller = new AbortController()
     activeController = controller
 
-    const preserve = options.preserve === true && currentAppId === appId
+    const preserve = options.preserve === true && sameEntityId(currentAppId, appId)
     currentAppId = appId
     replaceState({
       ...initialState(),

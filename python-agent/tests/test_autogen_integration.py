@@ -1,7 +1,11 @@
 """AutoGen 三方讨论链路测试"""
 import os, sys, json, asyncio
+import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from dotenv import load_dotenv; load_dotenv()
+
+if __name__ != "__main__" and os.getenv("RUN_LIVE_LLM_TESTS") != "1":
+    pytest.skip("manual live LLM script; set RUN_LIVE_LLM_TESTS=1 to collect", allow_module_level=True)
 
 # === 1. 测试 Supervisor 路由 ===
 print("=" * 50)
