@@ -1,3 +1,8 @@
+import os
+import pytest
+
+if __name__ != "__main__" and os.getenv("RUN_LIVE_LLM_TESTS") != "1":
+    pytest.skip("manual live LLM script; set RUN_LIVE_LLM_TESTS=1 to collect", allow_module_level=True)
 
 from workflow.code_gen_workflow import run_workflow
 

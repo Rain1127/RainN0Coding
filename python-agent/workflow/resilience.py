@@ -13,8 +13,8 @@ FINAL_PARTIAL_SUCCESS = "partial_success"
 FINAL_FAILED = "failed"
 DEGRADABLE_PHASES = {"intent", "pm", "image_collector", "reviewer", "memory", "rag"}
 PARTIAL_SAFE_PHASES = {"reviewer", "builder", "coder"}
-SHORT_TIMEOUT_PHASES = {"intent", "pm", "reviewer", "image_collector", "memory", "rag"}
-MEDIUM_TIMEOUT_PHASES = {"architect"}
+SHORT_TIMEOUT_PHASES = {"intent", "image_collector", "memory", "rag"}
+MEDIUM_TIMEOUT_PHASES = {"pm", "architect", "reviewer"}
 LONG_TIMEOUT_PHASES = {"coder", "builder"}
 INTENT_FALLBACK_MAP = {
     "vue_project": "代码生成 / 前端代码生成 / 生成 Vue 项目",

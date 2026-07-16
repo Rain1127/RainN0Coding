@@ -60,6 +60,7 @@ idempotency:
   success-ttl-hours: ${IDEMPOTENCY_SUCCESS_TTL_HOURS:24}
   failure-ttl-minutes: ${IDEMPOTENCY_FAILURE_TTL_MINUTES:5}
 app:
+  deploy-host: ${APP_DEPLOY_HOST:http://localhost:8123/api/static}
   cors:
     allowed-origin-patterns: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
 ############## Sa-Token 配置 ##############

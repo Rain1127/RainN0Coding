@@ -36,6 +36,13 @@ public class IntentConfigServiceImpl
                 .eq("config_name", "admin_custom");
         IntentConfig existing = intentConfigMapper.selectOneByQuery(qw);
 
+        if (treeJson == null || treeJson.isBlank()) {
+            if (existing != null) {
+                intentConfigMapper.deleteById(existing.getId());
+            }
+            return;
+        }
+
         if (existing != null) {
             existing.setTreeJson(treeJson);
             existing.setUpdatedBy(userId);

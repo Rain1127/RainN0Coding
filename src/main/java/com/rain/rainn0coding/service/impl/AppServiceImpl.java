@@ -39,6 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RFuture;
 import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -67,6 +68,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
             "id", "appName", "codeGenType", "priority", "createTime", "editTime", "deployedTime"
     );
     private static final CodeGenTypeEnum DEFAULT_CODE_GEN_TYPE = CodeGenTypeEnum.VUE_PROJECT;
+
+    @Value("${app.deploy-host:http://localhost:8123/api/static}")
+    private String codeDeployHost = "http://localhost:8123/api/static";
 
     @Resource
     private UserService userService;
@@ -344,6 +348,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
             //7.3 复制dist目录到部署目录
             sourceDir = distDir;
         }
+        sourceDir = resolveStaticDeploySource(sourceDir, codeGenTypeEnum);
         //8.复制文件到部署目录
         String deployDirPath = AppConstant.CODE_DEPLOY_ROOT_DIR+ File.separator +deployKey;
         try{
@@ -359,10 +364,25 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
         boolean updateResult = this.updateById(updateApp);
         ThrowUtils.throwIf(!updateResult, ErrorCode.OPERATION_ERROR, "更新应用部署信息失败");
         //10.返回可访问的URL地址
-        String appDeployUrl = String.format("%s/%s", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        String appDeployUrl = buildDeployUrl(deployKey);
         //11.异步执行截图并且更新封面
         generateAppScreenshotAsync(appId,appDeployUrl);
         return appDeployUrl;
+    }
+
+    String buildDeployUrl(String deployKey) {
+        return String.format("%s/%s/", StrUtil.removeSuffix(codeDeployHost, "/"), deployKey);
+    }
+
+    File resolveStaticDeploySource(File sourceDir, CodeGenTypeEnum codeGenType) {
+        if (codeGenType == CodeGenTypeEnum.HTML || codeGenType == CodeGenTypeEnum.MULTI_FILE) {
+            File nestedSourceDir = new File(sourceDir, "src");
+            File nestedIndex = new File(nestedSourceDir, "index.html");
+            if (!new File(sourceDir, "index.html").isFile() && nestedIndex.isFile()) {
+                return nestedSourceDir;
+            }
+        }
+        return sourceDir;
     }
 
     private CodeGenTypeEnum resolveCodeGenType(String prompt) {

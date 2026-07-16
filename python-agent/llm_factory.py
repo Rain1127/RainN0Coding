@@ -146,49 +146,43 @@ def create_llm_router(group: str = "lightweight", agent_name: str = None):
     return invoke
 
 
+class _ToolEnabledRouter:
+    """LangChain-like adapter that keeps tool calls on the shared fallback router."""
+
+    def __init__(self, tools: list, group: str):
+        self.tools = tools
+        self.group = group
+
+    def invoke(self, messages: list, config: dict | None = None):
+        def invoke_with_tools(msgs, _client=None, _config=None):
+            if _client is None:
+                raise RuntimeError("tool-enabled routing requires a model client")
+            return _client.bind_tools(self.tools).invoke(msgs, config=_config)
+
+        return model_router.route(
+            group_name=self.group,
+            messages=messages,
+            parser=invoke_with_tools,
+            allow_degraded=False,
+            langsmith_extra=config,
+        )
+
+
 def create_tool_enabled_llm(tools: list, group: str = "reasoning"):
     """
     创建带工具绑定的 LLM（供 Coder Agent 的 ReAct 循环使用）。
 
-    从 model router 的指定 group 中取优先级最高的活跃候选模型。
-    reasoning_content 已由 coder_agent._sanitize_ai_message() 在消息
-    回传前清除，因此 v4-pro 可安全用于工具调用场景。
-
-    如果所有候选均已熔断，降级使用 config.CHAT_MODEL。
+    每轮调用都经过 ModelRouter，因此主模型失败或熔断时仍可切换到
+    同组后续候选。reasoning_content 由 coder_agent 在消息回传前清除。
 
     Args:
         tools: LangChain @tool 装饰器创建的 Tool 对象列表
         group: 模型组: "reasoning" | "structured" | "lightweight"
 
     Returns:
-        绑定了工具的 ChatOpenAI 实例
+        兼容 ``invoke(messages, config=...)`` 的路由适配器
     """
-    from core.model_registry import get_group
-
-    model_group = get_group(group)
-    candidates = model_group.get_active()
-
-    if candidates:
-        primary = candidates[0]
-        llm = ChatOpenAI(
-            model=primary.model,
-            api_key=primary.api_key,
-            base_url=primary.base_url,
-            temperature=config.LLM_TEMPERATURE_STRUCTURED,
-            max_tokens=config.LLM_MAX_TOKENS,
-            timeout=primary.timeout,
-        )
-    else:
-        # 所有候选均已熔断，降级使用默认模型
-        llm = ChatOpenAI(
-            model=config.CHAT_MODEL,
-            api_key=config.DEEPSEEK_API_KEY,
-            base_url=config.DEEPSEEK_BASE_URL,
-            temperature=config.LLM_TEMPERATURE_STRUCTURED,
-            max_tokens=config.LLM_MAX_TOKENS,
-        )
-
-    return llm.bind_tools(tools)
+    return _ToolEnabledRouter(tools, group)
 
 
 def _strip_code_fences(content: str) -> str:

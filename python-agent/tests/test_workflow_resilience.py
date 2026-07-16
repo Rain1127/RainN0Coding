@@ -285,7 +285,8 @@ def test_phase_timeout_budget_mapping():
         AGENT_PHASE_TIMEOUT_MEDIUM_SECONDS = 22
         AGENT_PHASE_TIMEOUT_LONG_SECONDS = 33
 
-    assert phase_timeout_seconds("pm", _Cfg()) == 11
+    assert phase_timeout_seconds("pm", _Cfg()) == 22
+    assert phase_timeout_seconds("reviewer", _Cfg()) == 22
     assert phase_timeout_seconds("architect", _Cfg()) == 22
     assert phase_timeout_seconds("coder", _Cfg()) == 33
 

@@ -86,3 +86,38 @@ def test_route_probes_glm_first_when_all_candidates_are_still_open(monkeypatch):
 
     assert result == "ok:GLM-4.7-Flash"
     assert seen == ["GLM-4.7-Flash"]
+
+
+def test_route_retries_transient_candidate_failure_once(monkeypatch):
+    router = ModelRouter()
+    glm = _make_candidate("GLM-4.7-Flash", "glm-4.7-flash")
+    attempts = []
+    sleep_calls = []
+
+    class DummyGroup:
+        candidates = [glm]
+
+        def get_active(self):
+            return [glm]
+
+    def flaky_call(candidate, messages, parser=None, langsmith_extra=None):
+        attempts.append(candidate.name)
+        if len(attempts) == 1:
+            raise TimeoutError("temporary provider timeout")
+        return "recovered"
+
+    monkeypatch.setattr(model_router_module, "get_group", lambda group_name: DummyGroup())
+    monkeypatch.setattr(model_router_module, "start_span", _noop_span)
+    monkeypatch.setattr(model_router_module, "record_llm_call", lambda *args, **kwargs: None)
+    monkeypatch.setattr(model_router_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(router, "_call_llm", flaky_call)
+
+    result = router.route(
+        "reasoning",
+        [{"role": "user", "content": "prompt"}],
+        allow_degraded=False,
+    )
+
+    assert result == "recovered"
+    assert attempts == ["GLM-4.7-Flash", "GLM-4.7-Flash"]
+    assert sleep_calls == [model_router_module.TRANSIENT_RETRY_DELAY_SECONDS]

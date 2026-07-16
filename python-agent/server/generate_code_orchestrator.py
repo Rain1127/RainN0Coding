@@ -1,10 +1,10 @@
 import json
+import importlib
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from logging import Logger
 from typing import Any
 
-import config as config_module
 from guardrails.audit import audit_from_decision
 from guardrails.engine import evaluate_prompt
 from guardrails.models import PromptContext
@@ -24,7 +24,7 @@ class GenerateCodeOrchestrationResult:
 
 
 def _config():
-    return config_module.config
+    return importlib.import_module("config").config
 
 
 def __getattr__(name: str):

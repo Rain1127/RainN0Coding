@@ -1,7 +1,5 @@
-import os
-
 from guardrails.models import GuardrailDecision, OutputEvent
-from guardrails.policy import PROTECTED_FILE_NAMES, SENSITIVE_FILE_MARKERS, max_file_write_bytes
+from guardrails.policy import SENSITIVE_FILE_MARKERS, max_file_write_bytes
 
 
 def evaluate_output_event_context(event: OutputEvent) -> GuardrailDecision:
@@ -10,9 +8,8 @@ def evaluate_output_event_context(event: OutputEvent) -> GuardrailDecision:
 
     path = event.path or ""
     path_lower = path.lower()
-    target_name = os.path.basename(path)
 
-    if any(marker in path_lower for marker in SENSITIVE_FILE_MARKERS) or target_name in PROTECTED_FILE_NAMES:
+    if any(marker in path_lower for marker in SENSITIVE_FILE_MARKERS):
         return GuardrailDecision.block(
             "output.protected_path_blocked",
             "generated output targeted a protected or sensitive path",
