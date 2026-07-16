@@ -56,7 +56,16 @@ button,
 [role="button"],
 a {
   touch-action: manipulation;
+  transition: transform var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
 }
+
+button:not(:disabled):hover,
+[role="button"]:not([aria-disabled="true"]):hover,
+a[href]:hover { opacity: 0.88; }
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active,
+a[href]:active { transform: scale(0.98); }
 
 button:not(:disabled),
 [role="button"]:not([aria-disabled="true"]),
@@ -430,8 +439,8 @@ svg {
 
 .brand-mark__symbol {
   display: inline-grid;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: var(--radius-md);

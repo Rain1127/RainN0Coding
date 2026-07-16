@@ -10,6 +10,16 @@ const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+type BrowserLocation = Pick<Location, 'pathname' | 'search' | 'hash'>
+
+export function unauthorizedRedirectForLocation(
+  location: BrowserLocation,
+  baseUrl: string,
+): string | null {
+  if (!shouldRedirectToLogin(location.pathname, baseUrl)) return null
+  return buildLoginRedirect(location.pathname, location.search, location.hash, baseUrl)
+}
+
 apiClient.interceptors.response.use(
   (res) => {
     const body = res.data as BaseResponse
@@ -21,10 +31,8 @@ apiClient.interceptors.response.use(
   },
   (err) => {
     if (err.response?.status === 401) {
-      const { pathname, search } = window.location
-      if (shouldRedirectToLogin(pathname)) {
-        window.location.assign(buildLoginRedirect(pathname, search))
-      }
+      const redirect = unauthorizedRedirectForLocation(window.location, import.meta.env.BASE_URL)
+      if (redirect) window.location.assign(redirect)
     } else if (err.code === 'ECONNABORTED') {
       message.error('请求超时，请稍后重试')
     } else if (!err.response) {

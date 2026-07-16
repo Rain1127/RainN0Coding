@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AdminLayout from '@/layouts/AdminLayout.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { adminDeleteApp, adminListApps, deployApp, downloadApp } from '@/api/app'
 import type { AppVO } from '@/types/app'
 import { useAccessibleDialog } from '@/composables/useAccessibleDialog'
 import { useAuthStore } from '@/stores/auth'
+import { buildAdminListQuery, isCanonicalAdminListQuery, parseAdminListQuery } from '@/utils/adminListQuery'
+import { formatDateTime, formatInteger } from '@/utils/formatters'
 
 const apps = ref<AppVO[]>([])
+const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const searchName = ref('')
 const currentPage = ref(1)
@@ -36,9 +41,22 @@ const deploySequences = new Map<number, number>()
 
 const totalPages = computed(() => Math.max(1, serverPages.value || Math.ceil(total.value / pageSize.value)))
 
-onMounted(() => {
-  void fetchApps()
-})
+watch(
+  () => route.query,
+  (query) => {
+    const state = parseAdminListQuery(query)
+    currentPage.value = state.page
+    pageSize.value = state.pageSize
+    searchName.value = state.search
+    const canonical = buildAdminListQuery(state)
+    if (!isCanonicalAdminListQuery(query, canonical)) {
+      void router.replace({ query: canonical })
+      return
+    }
+    void fetchApps()
+  },
+  { deep: true, immediate: true },
+)
 onBeforeUnmount(() => {
   requestSequence += 1
   invalidateDeployments()
@@ -65,8 +83,7 @@ async function fetchApps() {
     total.value = resultTotal
     serverPages.value = pages
     if (records.length === 0 && resultTotal > 0 && requestedPage > pages) {
-      currentPage.value = pages
-      void fetchApps()
+      void updateRoute({ page: pages })
       return
     }
     apps.value = records
@@ -83,20 +100,27 @@ async function fetchApps() {
 }
 
 function searchApps() {
-  currentPage.value = 1
-  void fetchApps()
+  void updateRoute({ page: 1, search: searchName.value.trim() })
 }
 
 function changePage(nextPage: number) {
   if (nextPage < 1 || nextPage > totalPages.value || nextPage === currentPage.value) return
-  currentPage.value = nextPage
-  void fetchApps()
+  void updateRoute({ page: nextPage })
 }
 
 function changePageSize(event: Event) {
-  pageSize.value = Number((event.target as HTMLSelectElement).value)
-  currentPage.value = 1
-  void fetchApps()
+  void updateRoute({ page: 1, pageSize: Number((event.target as HTMLSelectElement).value) })
+}
+
+async function updateRoute(patch: Partial<{ page: number; pageSize: number; search: string }>) {
+  const state = {
+    page: patch.page ?? currentPage.value,
+    pageSize: patch.pageSize ?? pageSize.value,
+    search: patch.search ?? searchName.value.trim(),
+  }
+  const query = buildAdminListQuery(state)
+  if (isCanonicalAdminListQuery(route.query, query)) await fetchApps()
+  else await router.replace({ query })
 }
 
 async function requestDelete(app: AppVO, event: Event) {
@@ -113,12 +137,12 @@ async function confirmDelete() {
   invalidateDeployments()
   actionError.value = ''
   let deletedSuccessfully = false
+  const shouldMoveToPreviousPage = apps.value.length === 1 && currentPage.value > 1
   try {
     const deleted = await adminDeleteApp({ id: app.id })
     if (!deleted) throw new Error('delete rejected')
     feedback.value = `已删除“${app.appName || `应用 #${app.id}`}”。`
     deletedSuccessfully = true
-    if (apps.value.length === 1 && currentPage.value > 1) currentPage.value -= 1
   } catch {
     actionError.value = '删除失败，应用仍然保留，请稍后重试。'
   } finally {
@@ -127,7 +151,8 @@ async function confirmDelete() {
     deletingApp.value = null
   }
   if (deletedSuccessfully) {
-    await fetchApps()
+    if (shouldMoveToPreviousPage) await updateRoute({ page: currentPage.value - 1 })
+    else await fetchApps()
     await nextTick()
     if (document.activeElement === document.body) appsTableTitle.value?.focus()
   }
@@ -190,7 +215,7 @@ function normalizeHttpUrl(value: unknown) {
     <section class="admin-card admin-toolbar" aria-label="应用筛选">
       <label class="field-label" for="app-search">应用名称</label>
       <div class="search-row">
-        <input id="app-search" v-model="searchName" aria-label="搜索应用名称" type="search" placeholder="输入应用名称" @keyup.enter="searchApps">
+        <input id="app-search" v-model="searchName" name="app-search" autocomplete="off" aria-label="搜索应用名称" type="search" placeholder="例如：运营看板…" @keyup.enter="searchApps">
         <button type="button" class="primary-button" data-action="search-apps" @click="searchApps">搜索</button>
       </div>
     </section>
@@ -205,7 +230,7 @@ function normalizeHttpUrl(value: unknown) {
       <div class="section-heading">
         <div>
           <h2 id="apps-table-title" ref="appsTableTitle" tabindex="-1">全部应用</h2>
-          <p>共 {{ total }} 个应用</p>
+          <p class="tabular-nums">共 {{ formatInteger(total) }} 个应用</p>
         </div>
       </div>
 
@@ -229,8 +254,8 @@ function normalizeHttpUrl(value: unknown) {
                 <td><span class="type-badge">{{ app.codeGenType || '未知' }}</span></td>
                 <td>{{ app.userVO?.userName || `用户 #${app.userId}` }}</td>
                 <td>{{ app.deployKey ? '已部署' : '未部署' }}</td>
-                <td>{{ app.priority }}</td>
-                <td>{{ app.createTime || '—' }}</td>
+                <td class="tabular-nums">{{ formatInteger(app.priority) }}</td>
+                <td class="tabular-nums">{{ formatDateTime(app.createTime) }}</td>
                 <td>
                   <div class="row-actions">
                     <button type="button" data-action="deploy-app" :disabled="!isOwner(app) || deployingIds.has(app.id)" :title="!isOwner(app) ? '仅应用所有者可操作' : undefined" @click="handleDeploy(app)">{{ deployingIds.has(app.id) ? '部署中…' : '部署' }}</button>
@@ -245,9 +270,9 @@ function normalizeHttpUrl(value: unknown) {
         </div>
       </template>
         <div v-if="!loading && !loadError && total > 0" class="pagination" aria-label="应用分页">
-          <label>每页 <select :value="pageSize" aria-label="每页应用数" @change="changePageSize"><option :value="10">10</option><option :value="20">20</option><option :value="50">50</option></select></label>
+          <label>每页 <select name="app-page-size" autocomplete="off" :value="pageSize" aria-label="每页应用数" @change="changePageSize"><option :value="10">10</option><option :value="20">20</option><option :value="50">50</option></select></label>
           <button type="button" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">上一页</button>
-          <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+          <span class="tabular-nums">第 {{ formatInteger(currentPage) }} / {{ formatInteger(totalPages) }} 页</span>
           <button type="button" :disabled="currentPage >= totalPages" @click="changePage(currentPage + 1)">下一页</button>
         </div>
     </section>
@@ -276,9 +301,9 @@ input,select{min-height:44px;border:1px solid var(--color-border);border-radius:
 .inline-feedback,.inline-alert,.deployment-result{margin:0 0 var(--space-4);border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4)}.inline-feedback{color:#166534;background:#ecfdf3}.inline-alert{color:#991b1b;background:var(--color-danger-soft)}.deployment-result{overflow-wrap:anywhere;background:var(--color-primary-soft)}.deployment-result a,.table-link{color:var(--color-primary);font-weight:700}
 .section-heading{display:flex;justify-content:space-between;padding:var(--space-5);border-bottom:1px solid var(--color-border)}.section-heading h2,.section-heading p{margin:0}.section-heading p{margin-top:var(--space-1);color:var(--color-text-muted)}
 .admin-state{display:flex;min-height:240px;align-items:center;justify-content:center;flex-direction:column;gap:var(--space-2);padding:var(--space-6);text-align:center}.admin-state span{color:var(--color-text-muted)}
-.admin-table-scroll{max-width:100%;overflow-x:auto}table{width:100%;min-width:980px;border-collapse:collapse}th,td{padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-border);text-align:left;vertical-align:middle}th{color:var(--color-text-muted);background:var(--color-surface-subtle);font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}.type-badge{border-radius:999px;padding:.2rem .55rem;background:var(--color-primary-soft);font-family:var(--font-mono);font-size:.8rem}.row-actions{display:flex;gap:var(--space-1)}.row-actions button{min-height:40px;border:0;border-radius:var(--radius-sm);padding:0 var(--space-2);color:var(--color-primary);background:transparent;font-weight:700}.row-actions button:hover{background:var(--color-primary-soft)}.row-actions .danger-link{color:var(--color-danger)}
+.admin-table-scroll{max-width:100%;overflow-x:auto}table{width:100%;min-width:980px;border-collapse:collapse}th,td{padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-border);text-align:left;vertical-align:middle}th{color:var(--color-text-muted);background:var(--color-surface-subtle);font-size:.8rem;letter-spacing:.04em;text-transform:uppercase}.type-badge{border-radius:999px;padding:.2rem .55rem;background:var(--color-primary-soft);font-family:var(--font-mono);font-size:.8rem}.tabular-nums{font-variant-numeric:tabular-nums}.row-actions{display:flex;gap:var(--space-1)}.row-actions button{min-height:44px;border:0;border-radius:var(--radius-sm);padding:0 var(--space-2);color:var(--color-primary);background:transparent;font-weight:700}.row-actions button:hover{background:var(--color-primary-soft)}.row-actions .danger-link{color:var(--color-danger)}
 .owner-only{display:block;margin-top:var(--space-1);color:var(--color-text-muted)}
-.pagination{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);padding:var(--space-4)}.pagination button{min-height:40px;border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:0 var(--space-3);background:#fff}
-.dialog-backdrop{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:var(--space-4);background:rgb(15 23 42 / 55%)}.confirm-dialog{width:min(100%,460px);border-radius:var(--radius-lg);padding:var(--space-6);background:#fff;box-shadow:var(--shadow-drawer)}.confirm-dialog h2{margin:0}.confirm-dialog p{color:var(--color-text-muted)}.dialog-kicker{margin:0 0 var(--space-2);color:var(--color-danger)!important;font-size:.75rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.dialog-actions{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-5)}
+.pagination{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);padding:var(--space-4)}.pagination button{min-height:44px;border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:0 var(--space-3);background:#fff}
+.dialog-backdrop{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:var(--space-4);background:rgb(15 23 42 / 55%)}.confirm-dialog{width:min(100%,460px);max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain;border-radius:var(--radius-lg);padding:var(--space-6);background:#fff;box-shadow:var(--shadow-drawer)}.confirm-dialog h2{margin:0}.confirm-dialog p{color:var(--color-text-muted)}.dialog-kicker{margin:0 0 var(--space-2);color:var(--color-danger)!important;font-size:.75rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.dialog-actions{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-5)}
 @media(max-width:640px){.search-row{flex-direction:column}.pagination{align-items:stretch;flex-wrap:wrap;justify-content:flex-start}.dialog-actions>*{flex:1}}
 </style>

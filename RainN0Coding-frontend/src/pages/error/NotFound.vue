@@ -9,7 +9,8 @@ const missingPath = computed(() => {
 </script>
 
 <template>
-  <main class="error-page">
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <main id="main-content" class="error-page" tabindex="-1">
     <section class="error-card" aria-labelledby="not-found-title">
       <p class="error-code" aria-hidden="true">404</p>
       <h1 id="not-found-title">404 · 页面不存在</h1>

@@ -7,6 +7,7 @@ import { adminDeleteApp, adminGetAppVO, deployApp, downloadApp } from '@/api/app
 import type { AppVO } from '@/types/app'
 import { useAccessibleDialog } from '@/composables/useAccessibleDialog'
 import { useAuthStore } from '@/stores/auth'
+import { formatDateTime, formatInteger } from '@/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -128,7 +129,7 @@ async function confirmDelete() {
     await closeDeleteDialog()
     return
   }
-  actionFeedback.value = '应用已删除，正在返回应用列表。'
+  actionFeedback.value = '应用已删除，正在返回应用列表…'
   deleting.value = false
   await closeDeleteDialog()
   if (!viewActive || sequence !== deleteSequence || currentApp.id !== appId.value) return
@@ -153,11 +154,11 @@ async function confirmDelete() {
     <section v-else-if="app" class="detail-card" aria-labelledby="app-information">
       <div class="detail-heading"><h2 id="app-information">基本信息</h2><span :class="['status-badge', app.deployKey && 'status-badge--success']">{{ app.deployKey ? '已部署' : '未部署' }}</span></div>
       <dl class="detail-grid">
-        <div><dt>应用 ID</dt><dd>{{ app.id }}</dd></div><div><dt>应用名称</dt><dd>{{ app.appName || '未命名应用' }}</dd></div>
+        <div><dt>应用 ID</dt><dd class="tabular-nums">{{ formatInteger(app.id) }}</dd></div><div><dt>应用名称</dt><dd>{{ app.appName || '未命名应用' }}</dd></div>
         <div><dt>代码生成类型</dt><dd><code>{{ app.codeGenType || '未知' }}</code></dd></div><div><dt>创建者</dt><dd>{{ app.userVO?.userName || `用户 #${app.userId}` }}</dd></div>
-        <div><dt>部署标识</dt><dd><code>{{ app.deployKey || '尚未部署' }}</code></dd></div><div><dt>当前版本</dt><dd>{{ app.currentVersion ?? '—' }}</dd></div>
-        <div><dt>优先级</dt><dd>{{ app.priority }}</dd></div><div><dt>创建时间</dt><dd>{{ app.createTime || '—' }}</dd></div>
-        <div><dt>更新时间</dt><dd>{{ app.updateTime || '—' }}</dd></div><div><dt>最近编辑</dt><dd>{{ app.editTime || '—' }}</dd></div>
+        <div><dt>部署标识</dt><dd><code>{{ app.deployKey || '尚未部署' }}</code></dd></div><div><dt>当前版本</dt><dd class="tabular-nums">{{ formatInteger(app.currentVersion) }}</dd></div>
+        <div><dt>优先级</dt><dd class="tabular-nums">{{ formatInteger(app.priority) }}</dd></div><div><dt>创建时间</dt><dd class="tabular-nums">{{ formatDateTime(app.createTime) }}</dd></div>
+        <div><dt>更新时间</dt><dd class="tabular-nums">{{ formatDateTime(app.updateTime) }}</dd></div><div><dt>最近编辑</dt><dd class="tabular-nums">{{ formatDateTime(app.editTime) }}</dd></div>
         <div class="detail-grid__wide"><dt>初始需求</dt><dd>{{ app.initPrompt || '未记录' }}</dd></div>
       </dl>
       <p v-if="deploymentUrl" class="deployment-result" role="status">部署地址：<a :href="deploymentUrl" target="_blank" rel="noopener noreferrer">{{ deploymentUrl }}</a></p>
@@ -187,9 +188,10 @@ async function confirmDelete() {
 </template>
 
 <style scoped>
+.tabular-nums{font-variant-numeric:tabular-nums}
 .detail-card{border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface);box-shadow:var(--shadow-card)}.detail-state{display:flex;min-height:320px;align-items:center;justify-content:center;flex-direction:column;gap:var(--space-2);padding:var(--space-6);text-align:center}.detail-state span{color:var(--color-text-muted)}.detail-heading{display:flex;align-items:center;justify-content:space-between;padding:var(--space-5);border-bottom:1px solid var(--color-border)}.detail-heading h2{margin:0}.status-badge{border-radius:999px;padding:.3rem .7rem;color:#475569;background:#e2e8f0;font-size:.8rem;font-weight:800}.status-badge--success{color:#166534;background:#dcfce7}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0}.detail-grid>div{min-width:0;padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--color-border)}.detail-grid>div:nth-child(odd){border-right:1px solid var(--color-border)}.detail-grid .detail-grid__wide{grid-column:1/-1;border-right:0}.detail-grid dt{color:var(--color-text-muted);font-size:.8rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}.detail-grid dd{margin:var(--space-1) 0 0;overflow-wrap:anywhere;font-weight:600}.detail-grid code{font-family:var(--font-mono)}.detail-actions{display:flex;gap:var(--space-2);padding:var(--space-5)}.primary-button,.secondary-button,.secondary-link,.danger-button{display:inline-flex;min-height:44px;align-items:center;justify-content:center;border-radius:var(--radius-sm);padding:0 var(--space-4);font-weight:700}.primary-button{border:1px solid var(--color-primary);color:#fff;background:var(--color-primary)}.secondary-button,.secondary-link{border:1px solid var(--color-border);color:var(--color-text);background:#fff;text-decoration:none}.danger-button{border:1px solid var(--color-danger);color:#fff;background:var(--color-danger)}.deployment-result,.inline-alert{margin:var(--space-4) var(--space-5) 0;border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);overflow-wrap:anywhere}.deployment-result{background:var(--color-primary-soft)}.deployment-result a{color:var(--color-primary);font-weight:700}.inline-alert{color:#991b1b;background:var(--color-danger-soft)}
 .inline-feedback{margin:var(--space-4) var(--space-5) 0;border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);color:#166534;background:#ecfdf3}
 .owner-notice{margin:var(--space-4) var(--space-5) 0;color:var(--color-text-muted);font-weight:600}
-.dialog-backdrop{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:var(--space-4);background:rgb(15 23 42 / 55%)}.confirm-dialog{width:min(100%,480px);border-radius:var(--radius-lg);padding:var(--space-6);background:#fff;box-shadow:var(--shadow-drawer)}.confirm-dialog h2{margin:0}.confirm-dialog p{color:var(--color-text-muted)}.dialog-kicker{margin:0 0 var(--space-2);color:var(--color-danger)!important;font-size:.75rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.dialog-actions{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-5)}
+.dialog-backdrop{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:var(--space-4);background:rgb(15 23 42 / 55%)}.confirm-dialog{width:min(100%,480px);max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain;border-radius:var(--radius-lg);padding:var(--space-6);background:#fff;box-shadow:var(--shadow-drawer)}.confirm-dialog h2{margin:0}.confirm-dialog p{color:var(--color-text-muted)}.dialog-kicker{margin:0 0 var(--space-2);color:var(--color-danger)!important;font-size:.75rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.dialog-actions{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-5)}
 @media(max-width:640px){.detail-grid{grid-template-columns:1fr}.detail-grid>div,.detail-grid>div:nth-child(odd){grid-column:1;border-right:0}.detail-actions,.dialog-actions{flex-direction:column}}
 </style>

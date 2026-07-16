@@ -5,6 +5,17 @@ import { adminDeleteApp, adminListApps, deployApp, downloadApp } from '@/api/app
 import { useAuthStore } from '@/stores/auth'
 import AppManagement from './AppManagement.vue'
 
+const routeState = vi.hoisted(() => ({ route: null as any, replace: vi.fn() }))
+
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  routeState.route = reactive({ query: {} as Record<string, unknown> })
+  return {
+    useRoute: () => routeState.route,
+    useRouter: () => ({ replace: routeState.replace }),
+  }
+})
+
 vi.mock('@/api/app', () => ({
   adminDeleteApp: vi.fn(),
   adminListApps: vi.fn(),
@@ -43,7 +54,42 @@ describe('AppManagement', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     vi.clearAllMocks()
+    routeState.route.query = {}
+    routeState.replace.mockImplementation(async ({ query }: { query: Record<string, unknown> }) => {
+      routeState.route.query = query
+    })
     vi.mocked(adminListApps).mockResolvedValue(page('应用一'))
+  })
+
+  it('hydrates page, page size, and search from the URL with one fetch and follows history changes', async () => {
+    routeState.route.query = { page: '2', pageSize: '20', search: 'board' }
+    vi.mocked(adminListApps).mockResolvedValue({ ...page('board'), total: 60, current: 2, pages: 3, size: 20 })
+
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(adminListApps).toHaveBeenCalledTimes(1)
+    expect(adminListApps).toHaveBeenLastCalledWith(expect.objectContaining({
+      pageNum: 2,
+      pageSize: 20,
+      appName: 'board',
+    }))
+    expect((wrapper.get('#app-search').element as HTMLInputElement).value).toBe('board')
+
+    routeState.route.query = { page: '3', pageSize: '20', search: 'next' }
+    await flushPromises()
+    expect(adminListApps).toHaveBeenCalledTimes(2)
+    expect(adminListApps).toHaveBeenLastCalledWith(expect.objectContaining({ pageNum: 3, pageSize: 20, appName: 'next' }))
+  })
+
+  it('canonicalizes invalid URL values before making a single default fetch', async () => {
+    routeState.route.query = { page: '-4', pageSize: '13', search: '   ' }
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(routeState.replace).toHaveBeenCalledWith({ query: {} })
+    expect(adminListApps).toHaveBeenCalledTimes(1)
+    expect(adminListApps).toHaveBeenCalledWith(expect.objectContaining({ pageNum: 1, pageSize: 10 }))
   })
   afterEach(() => wrapper?.unmount())
 
@@ -179,5 +225,27 @@ describe('AppManagement', () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(document.activeElement).toBe(trigger.element)
     expect(wrapper.get('[role="alert"]').text()).toContain('删除失败')
+  })
+
+  it('moves deletion of the only last-page row through URL state with one replacement fetch', async () => {
+    routeState.route.query = { page: '2' }
+    vi.mocked(adminListApps).mockResolvedValueOnce({
+      ...page('last-row'), total: 11, current: 2, pages: 2,
+    }).mockResolvedValueOnce({
+      ...page('previous-page'), total: 10, current: 1, pages: 1,
+    })
+    vi.mocked(adminDeleteApp).mockResolvedValue(true)
+    wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-action="request-delete-app"]').trigger('click')
+    await wrapper.get('[data-action="confirm-delete-app"]').trigger('click')
+    await flushPromises()
+
+    expect(routeState.replace).toHaveBeenCalledTimes(1)
+    expect(routeState.replace).toHaveBeenCalledWith({ query: {} })
+    expect(adminListApps).toHaveBeenCalledTimes(2)
+    expect(adminListApps).toHaveBeenLastCalledWith(expect.objectContaining({ pageNum: 1 }))
+    expect(wrapper.text()).toContain('previous-page')
   })
 })

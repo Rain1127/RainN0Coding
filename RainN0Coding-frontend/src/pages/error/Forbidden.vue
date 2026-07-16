@@ -1,5 +1,6 @@
 <template>
-  <main class="error-page">
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <main id="main-content" class="error-page" tabindex="-1">
     <section class="error-card" aria-labelledby="forbidden-title">
       <p class="error-code" aria-hidden="true">403</p>
       <h1 id="forbidden-title">403 · 没有权限访问</h1>

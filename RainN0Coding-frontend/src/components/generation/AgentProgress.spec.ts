@@ -34,6 +34,15 @@ describe('AgentProgress', () => {
     expect(wrapper.findAll('[data-step-status="complete"]')).toHaveLength(7)
   })
 
+  it('announces workflow status changes without interrupting the user', () => {
+    const wrapper = mount(AgentProgress, { props: { phase: 'code', status: 'running' } })
+
+    const status = wrapper.get('.agent-progress__run-status')
+    expect(status.attributes('role')).toBe('status')
+    expect(status.attributes('aria-live')).toBe('polite')
+    expect(status.attributes('aria-atomic')).toBe('true')
+  })
+
   it.each([
     ['arch', 'architect'],
     ['code', 'coder'],

@@ -70,7 +70,7 @@ function statusText(index: number) {
         <p class="agent-progress__eyebrow">Agent workflow</p>
         <h2 id="agent-progress-title">生成进度</h2>
       </div>
-      <span class="agent-progress__run-status">{{ status === 'connecting' ? '正在连接' : status === 'cancelled' ? '已取消' : status === 'failed' ? '需要处理' : status === 'success' ? '已完成' : status === 'running' ? '生成中' : '等待开始' }}</span>
+      <span class="agent-progress__run-status" role="status" aria-live="polite" aria-atomic="true">{{ status === 'connecting' ? '正在连接…' : status === 'cancelled' ? '已取消' : status === 'failed' ? '需要处理' : status === 'success' ? '已完成' : status === 'running' ? '生成中…' : '等待开始' }}</span>
     </div>
 
     <ol class="agent-progress__list">
@@ -82,7 +82,7 @@ function statusText(index: number) {
         :aria-current="stepStatus(index) === 'current' ? 'step' : undefined"
         class="agent-progress__step"
       >
-        <span class="agent-progress__marker" aria-hidden="true">{{ stepStatus(index) === 'complete' ? '✓' : index + 1 }}</span>
+        <span class="agent-progress__marker" aria-hidden="true">{{ stepStatus(index) === 'complete' ? 'OK' : index + 1 }}</span>
         <span class="agent-progress__copy">
           <strong>{{ agent.label }}</strong>
           <span>{{ agent.description }}</span>
@@ -92,7 +92,7 @@ function statusText(index: number) {
     </ol>
 
     <p v-if="!knownPhase" class="agent-progress__unknown" data-unknown-phase role="status">
-      正在处理扩展阶段：<code>{{ phase }}</code>
+      正在处理扩展阶段… <code>{{ phase }}</code>
     </p>
   </section>
 </template>

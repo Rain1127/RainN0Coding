@@ -11,10 +11,13 @@ progress.md
 task_plan.md
 .codex-test-cookie.txt
 .planning/
+.superpowers/
 .claude/
 .codex-mysql/
 .worktrees/
 .venv/
+RainN0Coding-frontend/node_modules/
+RainN0Coding-frontend/dist/
 verified_code/
 python-agent/verified_code/
 .DS_Store

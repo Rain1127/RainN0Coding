@@ -76,6 +76,8 @@ const typeLabels: Record<CodeGenType, string> = {
       <label for="project-code-type">代码类型</label>
       <select
         id="project-code-type"
+        name="project-code-type"
+        autocomplete="off"
         :value="codeGenType"
         :disabled="loading"
         @change="handleTypeChange"
@@ -90,6 +92,8 @@ const typeLabels: Record<CodeGenType, string> = {
       <label for="project-deployment-status">部署状态（当前页）</label>
       <select
         id="project-deployment-status"
+        name="project-deployment-status"
+        autocomplete="off"
         :value="status"
         :disabled="loading"
         @change="handleStatusChange"

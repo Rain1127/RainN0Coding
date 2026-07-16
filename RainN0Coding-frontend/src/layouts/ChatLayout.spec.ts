@@ -4,11 +4,16 @@ import { nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
 import { useAppsStore } from '@/stores/apps'
+import { useAuthStore } from '@/stores/auth'
 import ChatLayout from './ChatLayout.vue'
 
 async function mountLayout() {
   const pinia = createPinia()
   setActivePinia(pinia)
+  useAuthStore().user = {
+    id: 1, userAccount: 'admin', userName: 'Admin', userAvatar: '', userProfile: '',
+    userRole: 'admin', createTime: '', updateTime: '',
+  }
   const fetchRecentApps = vi.spyOn(useAppsStore(), 'fetchRecentApps').mockResolvedValue()
 
   const router = createRouter({
@@ -56,6 +61,13 @@ describe('ChatLayout', () => {
 
     expect(wrapper.find('a[href="/projects"]').exists()).toBe(true)
     expect(wrapper.get('.shell-primary-button--sidebar').attributes('href')).toBe('/')
+    wrapper.unmount()
+  })
+
+  it('renders administration navigation as a real link', async () => {
+    const { wrapper } = await mountLayout()
+
+    expect(wrapper.find('a[href="/admin/apps"]').exists()).toBe(true)
     wrapper.unmount()
   })
 

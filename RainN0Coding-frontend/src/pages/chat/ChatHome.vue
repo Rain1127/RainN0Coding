@@ -151,7 +151,7 @@ onUnmounted(() => {
           <router-link to="/projects" class="home-section__link">查看全部项目</router-link>
         </div>
 
-        <div v-if="apps.recentLoading" class="recent-projects" aria-label="正在加载最近项目" aria-busy="true">
+        <div v-if="apps.recentLoading" class="recent-projects" aria-label="正在加载最近项目…" aria-busy="true">
           <div v-for="index in 3" :key="index" class="recent-project-card recent-project-card--skeleton" />
         </div>
         <p v-else-if="apps.recentError" class="home-inline-note" role="status">
@@ -187,13 +187,13 @@ onUnmounted(() => {
             <ClockCircleOutlined v-if="javaStatus === 'checking'" aria-hidden="true" />
             <CheckCircleOutlined v-else-if="javaStatus === 'online'" aria-hidden="true" />
             <WarningOutlined v-else aria-hidden="true" />
-            <span><strong>Java 服务</strong>{{ javaStatus === 'online' ? '运行正常' : javaStatus === 'offline' ? '暂不可用' : '检查中' }}</span>
+            <span><strong>Java 服务</strong>{{ javaStatus === 'online' ? '运行正常' : javaStatus === 'offline' ? '暂不可用' : '检查中…' }}</span>
           </div>
           <div class="service-status" :class="`service-status--${pythonStatus}`">
             <ClockCircleOutlined v-if="pythonStatus === 'checking'" aria-hidden="true" />
             <CheckCircleOutlined v-else-if="pythonStatus === 'online'" aria-hidden="true" />
             <WarningOutlined v-else aria-hidden="true" />
-            <span><strong>Python 服务</strong>{{ pythonStatus === 'online' ? '运行正常' : pythonStatus === 'offline' ? '暂不可用' : '检查中' }}</span>
+            <span><strong>Python 服务</strong>{{ pythonStatus === 'online' ? '运行正常' : pythonStatus === 'offline' ? '暂不可用' : '检查中…' }}</span>
           </div>
         </div>
         <p class="home-inline-note">状态检查失败不会阻止你编写或保存需求。</p>

@@ -371,7 +371,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="workbench__grid">
-        <main class="conversation" aria-labelledby="conversation-title">
+        <section class="conversation" aria-labelledby="conversation-title">
           <div class="panel-heading">
             <div>
               <p class="panel-heading__eyebrow">Conversation</p>
@@ -404,8 +404,11 @@ onBeforeUnmount(() => {
             <label for="workbench-prompt">继续描述需求</label>
             <textarea
               id="workbench-prompt"
+              name="workbench-prompt"
               v-model="input"
               rows="4"
+              autocomplete="off"
+              required
               :disabled="!hasCurrentApp || isGenerating"
               placeholder="例如：增加项目筛选、空状态和移动端布局…"
               @keydown="handleComposerKeydown"
@@ -420,7 +423,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </form>
-        </main>
+        </section>
 
         <aside class="workbench__inspector" aria-label="生成详情">
           <AgentProgress :phase="generation.phase" :status="generation.status" />

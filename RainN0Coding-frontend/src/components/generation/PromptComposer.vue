@@ -57,6 +57,7 @@ function selectExample(example: PromptExample) {
         rows="5"
         maxlength="4000"
         autocomplete="off"
+        required
         :disabled="loading"
         aria-describedby="prompt-description"
         placeholder="例如：创建一个项目管理看板，支持任务分组、负责人筛选和进度统计…"
@@ -134,10 +135,6 @@ function selectExample(example: PromptExample) {
   background: transparent;
   line-height: 1.6;
   resize: vertical;
-}
-
-.prompt-composer textarea:focus {
-  outline: none;
 }
 
 .prompt-composer__field:focus-within {

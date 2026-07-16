@@ -1,9 +1,20 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listUsers, updateUser } from '@/api/user'
 import { useAuthStore } from '@/stores/auth'
 import UserManagement from './UserManagement.vue'
+
+const routeState = vi.hoisted(() => ({ route: null as any, replace: vi.fn() }))
+
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  routeState.route = reactive({ query: {} as Record<string, unknown> })
+  return {
+    useRoute: () => routeState.route,
+    useRouter: () => ({ replace: routeState.replace }),
+  }
+})
 
 vi.mock('@/api/user', () => ({ addUser: vi.fn(), deleteUser: vi.fn(), listUsers: vi.fn(), updateUser: vi.fn() }))
 vi.mock('@/api/auth', () => ({ getLoginUser: vi.fn(), login: vi.fn(), logout: vi.fn(), register: vi.fn() }))
@@ -21,7 +32,7 @@ function mountPage() {
     createTime: '',
     updateTime: '',
   }
-  return mount(UserManagement, {
+  const wrapper = mount(UserManagement, {
     global: {
       plugins: [pinia],
       stubs: {
@@ -30,11 +41,19 @@ function mountPage() {
       },
     },
   })
+  mountedWrappers.push(wrapper)
+  return wrapper
 }
+
+const mountedWrappers: Array<ReturnType<typeof mount>> = []
 
 describe('UserManagement', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    routeState.route.query = {}
+    routeState.replace.mockImplementation(async ({ query }: { query: Record<string, unknown> }) => {
+      routeState.route.query = query
+    })
     vi.mocked(listUsers).mockResolvedValue({
       records: [
         { id: 7, userAccount: 'me', userName: '我', userAvatar: '', userProfile: '', userRole: 'admin', createTime: '' },
@@ -46,6 +65,43 @@ describe('UserManagement', () => {
       pages: 1,
     })
     vi.mocked(updateUser).mockResolvedValue(true)
+  })
+  afterEach(() => {
+    for (const wrapper of mountedWrappers.splice(0)) wrapper.unmount()
+  })
+
+  it('hydrates pagination and user filters from the URL and follows history changes once', async () => {
+    routeState.route.query = { page: '2', pageSize: '20', search: 'operator', role: 'admin' }
+    vi.mocked(listUsers).mockResolvedValue({
+      records: [], total: 60, size: 20, current: 2, pages: 3,
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(listUsers).toHaveBeenCalledTimes(1)
+    expect(listUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      pageNum: 2,
+      pageSize: 20,
+      userAccount: 'operator',
+      userRole: 'admin',
+    }))
+    expect((wrapper.get('[name="user-role-filter"]').element as HTMLSelectElement).value).toBe('admin')
+
+    routeState.route.query = { page: '3', pageSize: '20', role: 'user' }
+    await flushPromises()
+    expect(listUsers).toHaveBeenCalledTimes(2)
+    expect(listUsers).toHaveBeenLastCalledWith(expect.objectContaining({ pageNum: 3, pageSize: 20, userRole: 'user' }))
+  })
+
+  it('canonicalizes invalid user list query values before one default fetch', async () => {
+    routeState.route.query = { page: '0', pageSize: '200', role: 'owner', search: '  ' }
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(routeState.replace).toHaveBeenCalledWith({ query: {} })
+    expect(listUsers).toHaveBeenCalledTimes(1)
+    expect(listUsers).toHaveBeenCalledWith(expect.objectContaining({ pageNum: 1, pageSize: 10 }))
   })
 
   it('searches with real fields and prevents changing the signed-in account', async () => {

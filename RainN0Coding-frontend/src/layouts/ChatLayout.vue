@@ -80,7 +80,9 @@ watch(() => route.fullPath, closeMobileNavigation)
         <label for="desktop-project-search" class="sr-only">搜索最近项目</label>
         <a-input
           id="desktop-project-search"
+          name="desktop-project-search"
           v-model:value="appsStore.searchKeyword"
+          autocomplete="off"
           placeholder="搜索最近项目…"
           allow-clear
         >
@@ -122,9 +124,11 @@ watch(() => route.fullPath, closeMobileNavigation)
           </button>
           <template #overlay>
             <a-menu>
-              <a-menu-item v-if="auth.isAdmin" @click="router.push('/admin/apps')">
-                <SettingOutlined aria-hidden="true" />
-                管理后台
+              <a-menu-item v-if="auth.isAdmin">
+                <router-link to="/admin/apps" class="shell-menu-link">
+                  <SettingOutlined aria-hidden="true" />
+                  管理后台
+                </router-link>
               </a-menu-item>
               <a-menu-item @click="handleLogout">
                 <LogoutOutlined aria-hidden="true" />

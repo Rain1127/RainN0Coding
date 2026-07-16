@@ -20,6 +20,8 @@ describe('error pages', () => {
     expect(wrapper.text()).toContain('没有权限')
     expect(wrapper.text()).not.toContain('用户管理')
     expect(wrapper.get('a[href="/"]').text()).toContain('返回首页')
+    expect(wrapper.get('.skip-link').attributes('href')).toBe('#main-content')
+    expect(wrapper.get('main').attributes('id')).toBe('main-content')
   })
 
   it('renders the missing route as text and never injects markup', async () => {
@@ -29,5 +31,7 @@ describe('error pages', () => {
     expect(wrapper.text()).toContain('/missing/<img-src=x>')
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.get('a[href="/"]').text()).toContain('返回首页')
+    expect(wrapper.get('.skip-link').attributes('href')).toBe('#main-content')
+    expect(wrapper.get('main').attributes('id')).toBe('main-content')
   })
 })

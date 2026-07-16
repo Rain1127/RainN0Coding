@@ -3,6 +3,7 @@ import { nextTick, onBeforeUnmount, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import { useAuthStore } from '@/stores/auth'
+import { safeRouterRedirect } from '@/router/guards'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -82,28 +83,6 @@ function errorMessage(error: unknown) {
   return '登录失败，请检查账号和密码后重试'
 }
 
-function safeRedirect(value: unknown) {
-  if (typeof value !== 'string') {
-    return '/'
-  }
-
-  let decoded = value
-  try {
-    decoded = decodeURIComponent(value)
-  } catch {
-    return '/'
-  }
-
-  const isUnsafe = [value, decoded].some((candidate) => (
-    !candidate.startsWith('/')
-    || candidate.startsWith('//')
-    || candidate.includes('\\')
-    || /[\u0000-\u001f\u007f]/.test(candidate)
-  ))
-
-  return isUnsafe ? '/' : value
-}
-
 async function handleLogin() {
   if (loading.value) {
     return
@@ -119,7 +98,7 @@ async function handleLogin() {
   try {
     const isCurrentRequest = await auth.login(form.userAccount.trim(), form.userPassword)
     if (isCurrentRequest && isMounted) {
-      await router.replace(safeRedirect(route.query.redirect))
+      await router.replace(safeRouterRedirect(route.query.redirect, import.meta.env.BASE_URL))
     }
   } catch (error) {
     if (isMounted) {
