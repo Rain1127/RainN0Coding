@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "intent-fallback-vue",
+      "agent": "intent",
+      "category": "fallback",
+      "input_state": {"phase": "init", "user_request": "Build a task management dashboard", "code_gen_type": "vue_project"},
+      "expectations": {
+        "equals": {"phase": "intent_done", "error": null},
+        "required_paths": ["intent.primary_intent", "intent.slots.code_gen_type", "clarification"]
+      },
+      "metric_tags": {
+        "equals.phase": "intent_state_transition",
+        "equals.error": "intent_failure_handling",
+        "required_paths": "intent_output_protocol_completeness"
+      }
+    }
+  ]
+}

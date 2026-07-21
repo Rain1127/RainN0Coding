@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "reviewer-detects-xss",
+      "agent": "reviewer",
+      "category": "security",
+      "input_state": {
+        "phase": "code_done",
+        "code_files": [{"path": "src/App.vue", "content": "<div v-html=\"userInput\"></div>"}]
+      },
+      "expectations": {
+        "equals": {"passed": false},
+        "required_paths": ["score", "issues"],
+        "required_text": {"issues": ["xss", "v-html", "unescaped user input"]}
+      },
+      "metric_tags": {
+        "equals.passed": "critical_defect_detection",
+        "required_paths": "review_output_protocol_completeness",
+        "required_text.issues": "critical_defect_recall"
+      },
+      "output_metrics": {"score": "review_score"}
+    }
+  ]
+}
