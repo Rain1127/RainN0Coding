@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "supervisor-review-passed",
+      "agent": "supervisor",
+      "category": "routing",
+      "input_state": {"phase": "review_done", "review": {"passed": true}, "retry_count": 0, "max_retries": 3},
+      "expectations": {"equals": {"next_node": "builder_agent"}},
+      "metric_tags": {"equals.next_node": "route_accuracy"}
+    },
+    {
+      "id": "supervisor-code-retry",
+      "agent": "supervisor",
+      "category": "retry",
+      "input_state": {"phase": "review_done", "review": {"passed": false, "issues": [{"category": "security", "description": "escape user text"}]}, "retry_count": 1, "max_retries": 3},
+      "expectations": {"equals": {"next_node": "coder_agent"}},
+      "metric_tags": {"equals.next_node": "retry_route_accuracy"}
+    },
+    {
+      "id": "supervisor-architecture-discussion",
+      "agent": "supervisor",
+      "category": "routing",
+      "input_state": {"phase": "review_done", "review": {"passed": false, "issues": [{"category": "architecture", "description": "component boundary is invalid"}]}, "retry_count": 0, "max_retries": 3},
+      "expectations": {"equals": {"next_node": "autogen_discussion"}},
+      "metric_tags": {"equals.next_node": "architecture_escalation_accuracy"}
+    },
+    {
+      "id": "supervisor-retry-exhausted",
+      "agent": "supervisor",
+      "category": "recovery",
+      "input_state": {"phase": "review_done", "review": {"passed": false, "issues": [{"category": "security", "description": "xss"}]}, "retry_count": 3, "max_retries": 3},
+      "expectations": {"equals": {"next_node": "human_intervention"}},
+      "metric_tags": {"equals.next_node": "retry_limit_enforcement"}
+    }
+  ]
+}
