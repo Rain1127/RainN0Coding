@@ -344,7 +344,7 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
     rag_section = ""
     if rag_contexts:
         rag_section = "\n## 可复用资源（来自 RAG 多路检索 —— 优先使用，避免造轮子）\n\n"
-        for path, ctx in rag_contexts.items():
+        for path, ctx in rag_contexts.items():  # path：文件路径，ctx：对应的 RAG 上下文
             rag_section += f"### 为 `{path}` 检索到的参考:\n{ctx}\n\n"
 
     # === 构造初始消息 ===

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from config import config
 from core.model_router import model_router
 
-
+# 创建 LLM 实例
 def create_llm(temperature: float | None = None) -> ChatOpenAI:
     """通用 LLM（deepseek-v4-pro，自由文本生成）—— 保留兼容"""
     return ChatOpenAI(
