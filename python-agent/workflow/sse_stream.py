@@ -72,16 +72,16 @@ async def stream_workflow(
         if summary or recent:
             parts = []
             if summary:
-                parts.append(f"[瀵硅瘽鎽樿] {summary}")
+                parts.append(f"[对话摘要] {summary}")
             if recent:
-                parts.append("[鏈€杩戝璇漖")
+                parts.append("[最近对话]")
                 for message in recent[-6:]:
-                    role_label = "鐢ㄦ埛" if message["role"] == "user" else "AI"
+                    role_label = "用户" if message["role"] == "user" else "AI"
                     parts.append(f"{role_label}: {message['content'][:300]}")
-            parts.append(f"[褰撳墠璇锋眰] {user_request}")
+            parts.append(f"[当前请求] {user_request}")
             enriched_request = "\n".join(parts)
 
-        yield _event("workflow_start", message=f"寮€濮嬪鐞嗛渶姹? {user_request[:50]}")
+        yield _event("workflow_start", message=f"开始处理需求: {user_request[:50]}")
         if summary:
             yield _event("memory_loaded", summary=summary[:200], recent_count=len(recent))
 
@@ -89,7 +89,7 @@ async def stream_workflow(
 
         try:
             phase_start_times["intent"] = time.time()
-            yield _event("phase_start", phase="intent", message="姝ｅ湪鐞嗚В浣犵殑闇€姹?..")
+            yield _event("phase_start", phase="intent", message="正在理解你的需求...")
             seen_phases.add("intent_done")
 
             async for state in run_workflow_async(
@@ -113,9 +113,9 @@ async def stream_workflow(
                     seen_phases.add("mode_detected")
                     mode = state.get("mode", "new")
                     mode_messages = {
-                        "new": "姝ｅ湪鍚姩鍏ㄦ柊浠ｇ爜鐢熸垚...",
-                        "modify": "妫€娴嬪埌宸叉湁浠ｇ爜锛屾鍦ㄥ熀浜庣幇鏈変唬鐮佽繘琛屽閲忎慨鏀?...",
-                        "rebuild": "姝ｅ湪閲嶆柊鏋勫缓椤圭洰...",
+                        "new": "正在启动全新代码生成...",
+                        "modify": "检测到已有代码，正在基于现有代码进行增量修改...",
+                        "rebuild": "正在重新构建项目...",
                     }
                     yield _event("mode_detected", mode=mode, message=mode_messages.get(mode, ""))
 
@@ -139,7 +139,7 @@ async def stream_workflow(
                         yield _event(
                             "phase_start",
                             phase="code",
-                            message="绋嬪簭鍛樻鍦ㄥ熀浜庣幇鏈変唬鐮佽繘琛屽閲忎慨鏀?...",
+                            message="程序员正在基于现有代码进行增量修改...",
                         )
                         seen_phases.add("code_done")
                     else:
@@ -147,7 +147,7 @@ async def stream_workflow(
                         yield _event(
                             "phase_start",
                             phase="pm",
-                            message="浜у搧缁忕悊姝ｅ湪鍒嗘瀽闇€姹?...",
+                            message="产品经理正在分析需求...",
                         )
                         seen_phases.add("prd_done")
 
@@ -175,7 +175,7 @@ async def stream_workflow(
                         },
                     )
                     phase_start_times["arch"] = time.time()
-                    yield _event("phase_start", phase="arch", message="鏋舵瀯甯堟鍦ㄨ璁′唬鐮佺粨鏋?...")
+                    yield _event("phase_start", phase="arch", message="架构师正在设计代码结构...")
 
                 if phase == "arch_done" and "arch_done" not in seen_phases:
                     seen_phases.add("arch_done")
@@ -189,7 +189,7 @@ async def stream_workflow(
                         },
                     )
                     phase_start_times["code"] = time.time()
-                    yield _event("phase_start", phase="code", message="绋嬪簭鍛樻鍦ㄧ紪鍐欎唬鐮?...")
+                    yield _event("phase_start", phase="code", message="程序员正在编写代码...")
 
                 if phase == "code_done":
                     is_retry = retry_count > prev_retry_count
@@ -200,7 +200,7 @@ async def stream_workflow(
                             "phase_start",
                             phase="code_retry",
                             retry=retry_count,
-                            message=f"姝ｅ湪淇瀹℃煡鍙戠幇鐨勯棶棰橈紙绗�{retry_count} 娆￠噸璇曪級...",
+                            message=f"正在修复审查发现的问题（第 {retry_count} 次重试）...",
                         )
 
                     code_files = state.get("code_files", [])
@@ -248,7 +248,7 @@ async def stream_workflow(
 
                     if not is_retry:
                         phase_start_times["review"] = time.time()
-                        yield _event("phase_start", phase="review", message="浠ｇ爜瀹℃煡涓?...")
+                        yield _event("phase_start", phase="review", message="代码审查中...")
 
                 if phase == "review_done":
                     review = state.get("review") or {}
@@ -306,7 +306,7 @@ async def stream_workflow(
                         conversation_memory.add_message(thread_id, "user", user_request)
                         if code_files:
                             file_list = ", ".join(f.get("path", "") for f in code_files[:5])
-                            resp = f"[{len(code_files)}涓枃浠�] {file_list}"
+                            resp = f"[{len(code_files)}个文件] {file_list}"
                         else:
                             resp = final.get("phase", "completed")
                         conversation_memory.add_message(thread_id, "assistant", resp)
@@ -338,7 +338,7 @@ async def stream_workflow(
         except Exception as exc:
             try:
                 conversation_memory.add_message(thread_id, "user", user_request)
-                conversation_memory.add_message(thread_id, "assistant", f"[閿欒] {str(exc)[:200]}")
+                conversation_memory.add_message(thread_id, "assistant", f"[错误] {str(exc)[:200]}")
             except Exception:
                 pass
             yield _event("error", message=str(exc))
