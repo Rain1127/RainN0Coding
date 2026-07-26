@@ -20,70 +20,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from rag.sqlite_store import sqlite_store
 from rag.code_grep import code_grep
 from rag.rag_cache import rag_cache
+from rag.retrieval_common import PostProcessor, RetrievalContext, RetrievalResult
 from config import config, get_lang_config
 
 # 延迟导入 Milvus 相关模块，确保 grep 通道在无 pymilvus 时也能工作
-_retrieval_result: type | None = None
-_post_processor: type | None = None
-_retrieval_context: type | None = None
+_retrieval_result: type = RetrievalResult
+_post_processor: type = PostProcessor
+_retrieval_context: type = RetrievalContext
 _semantic_retriever = None
 
 
 def _lazy_import_rag():
-    global _retrieval_result, _post_processor, _retrieval_context, _semantic_retriever
-    if _retrieval_result is None:
-        try:
-            from rag.retrieval_engine import RetrievalResult, PostProcessor, RetrievalContext
-            _retrieval_result = RetrievalResult
-            _post_processor = PostProcessor
-            _retrieval_context = RetrievalContext
-        except ImportError:
-            # 降级：定义最小数据类
-            from dataclasses import dataclass, field
-
-            @dataclass
-            class _RetrievalResult:
-                content: str
-                source_collection: str
-                source_channel: str
-                score: float
-                metadata: dict = field(default_factory=dict)
-
-            _retrieval_result = _RetrievalResult
-            _post_processor = _MinimalPostProcessor
-            _retrieval_context = None
-
+    global _semantic_retriever
     if _semantic_retriever is None:
         try:
             from rag.semantic_engine import semantic_retriever as sr
             _semantic_retriever = sr
         except ImportError:
             _semantic_retriever = None
-
-
-class _MinimalPostProcessor:
-    """降级后处理：无 Milvus 时的最小实现"""
-    def dedup(self, results):
-        seen = set()
-        unique = []
-        for r in results:
-            h = hash(r.content)
-            if h not in seen:
-                seen.add(h)
-                unique.append(r)
-        return unique
-
-    def rerank(self, results):
-        results.sort(key=lambda x: x.score, reverse=True)
-        return results[:8]
-
-    def format(self, results):
-        if not results:
-            return ""
-        blocks = []
-        for r in results:
-            blocks.append(r.content[:800])
-        return "## 可复用资源\n\n" + "\n---\n".join(blocks)
 
 
 class HybridEngine:
@@ -111,7 +65,7 @@ class HybridEngine:
 
     def __init__(self):
         _lazy_import_rag()
-        self._postprocessor = _post_processor() if _post_processor else _MinimalPostProcessor()
+        self._postprocessor = _post_processor()
         self._sqlite_ready = False
 
     def _ensure_sqlite(self):
