@@ -30,6 +30,7 @@ MARKER_FILE_ALLOWLIST = {
         "test_guardrails_tools.py",
         "test_guardrails_output.py",
         "test_internal_auth_and_concurrency.py",
+        "test_retrieval_common.py",
         "test_tools.py",
         "test_workflow_imports_unittest.py",
         "test_workflow_resilience.py",
