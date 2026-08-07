@@ -251,7 +251,10 @@ import { AntDesignVueResolver } from 'unplugin-vue-components/resolvers'
 plugins: [
   vue(),
   tailwindcss(),
-  Components({ resolvers: [AntDesignVueResolver()] }),
+  Components({
+    dts: false,
+    resolvers: [AntDesignVueResolver({ importStyle: 'css-in-js' })],
+  }),
 ],
 ```
 

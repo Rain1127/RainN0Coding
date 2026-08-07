@@ -28,7 +28,7 @@ The application context smoke test will override the external `RedissonClient` a
 
 ### Frontend bundle optimization
 
-The frontend will use its existing `unplugin-vue-components` dependency with `AntDesignVueResolver`. Global `app.use(Antd)` registration will be removed, while explicit static APIs such as `message` remain normal imports. Route-level lazy loading remains unchanged.
+The frontend will use its existing `unplugin-vue-components` dependency with `AntDesignVueResolver({ importStyle: 'css-in-js' })`, matching Ant Design Vue 4's installed style entrypoints. Global `app.use(Antd)` registration will be removed, while explicit static APIs such as `message` remain normal imports. Route-level lazy loading remains unchanged.
 
 The production build output will be checked against the same 500 kB entry-chunk threshold that currently fails. The purpose is actual entry-bundle reduction, not merely increasing Vite's warning limit.
 
