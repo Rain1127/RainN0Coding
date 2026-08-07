@@ -1,6 +1,5 @@
 package com.rain.rainn0coding.utils;
 
-import cn.hutool.core.collection.LineIter;
 import cn.hutool.core.img.ImgUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
@@ -8,7 +7,6 @@ import cn.hutool.core.util.StrUtil;
 import com.rain.rainn0coding.exception.BusinessException;
 import com.rain.rainn0coding.exception.ErrorCode;
 import io.github.bonigarcia.wdm.WebDriverManager;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.OutputType;
@@ -21,30 +19,29 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 import java.io.File;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Slf4j
 public class WebScreenshotUtils {
 
-    private static final WebDriver webDriver;
-
-    static {
-        final int DEFAULT_WIDTH = 1600;
-        final int DEFAULT_HEIGHT = 900;
-        webDriver = initChromeDriver(DEFAULT_WIDTH, DEFAULT_HEIGHT);
-    }
-
-    @PreDestroy
-    public void destroy() {
-        webDriver.quit();
-    }
+    private static final int DEFAULT_WIDTH = 1600;
+    private static final int DEFAULT_HEIGHT = 900;
 
     public static String saveWebPageScreenshot(String webUrl){
+        return saveWebPageScreenshot(
+                webUrl,
+                () -> initChromeDriver(DEFAULT_WIDTH, DEFAULT_HEIGHT));
+    }
+
+    static String saveWebPageScreenshot(String webUrl, Supplier<WebDriver> driverFactory) {
         //非空校验
         if (StrUtil.isBlank(webUrl)){
             log.error("网页URL不能为空");
             return null;
         }
+        WebDriver webDriver = null;
         try {
+            webDriver = driverFactory.get();
             //创建临时目录
             String rootPath = System.getProperty("user.dir") + "/tmp/screenshot" + UUID.randomUUID().toString().substring(0,8);
             FileUtil.mkdir(rootPath);
@@ -72,8 +69,21 @@ public class WebScreenshotUtils {
         }catch (Exception e){
             log.error("保存网页截图失败",e);
             return null;
+        } finally {
+            closeWebDriver(webDriver);
         }
 
+    }
+
+    private static void closeWebDriver(WebDriver webDriver) {
+        if (webDriver == null) {
+            return;
+        }
+        try {
+            webDriver.quit();
+        } catch (Exception e) {
+            log.warn("关闭 Chrome WebDriver 失败", e);
+        }
     }
 
     /**
@@ -162,6 +172,7 @@ public class WebScreenshotUtils {
             Thread.sleep(2000);
             log.info("页面加载完成");
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             log.error("等待页面加载失败", e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "等待页面加载失败");
         }
