@@ -10,7 +10,7 @@ Repair the three current, reproducible issues found during the 2026-08-07 audit 
 2. Make the default Java test suite independent of a live Redis server and replace the live screenshot smoke test with deterministic regression coverage.
 3. Reduce the frontend entry bundle by replacing global Ant Design Vue registration with existing on-demand component tooling.
 
-Out of scope: product feature changes, API contract changes, database migrations, dependency upgrades, deployment changes, and edits to the user's current `pyproject.toml` or unrelated untracked files.
+Out of scope: product feature changes, API contract changes, database migrations, production dependency upgrades, deployment changes, and edits to the user's current `pyproject.toml` or unrelated untracked files. A test-scoped embedded datasource is allowed to keep the full-context smoke test hermetic.
 
 ## Design
 
@@ -24,7 +24,7 @@ A package-visible overload/factory seam will let unit tests provide a fake drive
 
 `WebScreenshotUtilsTest` will stop loading the full Spring context and stop visiting a public website. Regression tests will verify driver creation and cleanup behavior with mocks.
 
-The application context smoke test will override the external `RedissonClient` bean with a test mock. Production Redis configuration remains unchanged; only the test boundary becomes hermetic.
+The application context smoke test will override the external `RedissonClient` and `COSClient` beans with test mocks and use a test-scoped H2 in-memory datasource because MyBatis opens a JDBC connection during dialect detection. Production Redis/MySQL/COS configuration remains unchanged; only the test boundary becomes hermetic.
 
 ### Frontend bundle optimization
 

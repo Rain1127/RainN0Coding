@@ -15,6 +15,7 @@
 - Modify `src/test/java/com/rain/rainn0coding/utils/WebScreenshotUtilsTest.java`: deterministic driver lifecycle and interrupt regression tests.
 - Modify `src/main/java/com/rain/rainn0coding/utils/WebScreenshotUtils.java`: per-call driver ownership, cleanup, and interrupt restoration.
 - Modify `src/test/java/com/rain/rainn0coding/RainN0CodingApplicationTests.java`: replace live Redisson with a test override.
+- Modify `pom.xml`: add H2 with test scope for MyBatis dialect detection in the full-context smoke test.
 - Modify `RainN0Coding-frontend/src/main.ts`: remove global Ant Design Vue plugin registration.
 - Modify `RainN0Coding-frontend/vite.config.ts`: enable on-demand Ant Design Vue component resolution.
 - Verify `src/main/resources/static/index.html`: generated frontend entry references after the final production build; include only if the repository intentionally tracks the generated entry file.
@@ -167,6 +168,7 @@ git commit -m "fix: isolate screenshot driver lifecycle"
 ### Task 2: Hermetic Spring context smoke test
 
 **Files:**
+- Modify: `pom.xml`
 - Modify: `src/test/java/com/rain/rainn0coding/RainN0CodingApplicationTests.java`
 
 - [ ] **Step 1: Preserve the existing RED evidence**
@@ -180,19 +182,23 @@ mvn -q -Dtest=RainN0CodingApplicationTests test
 
 Expected: context load error caused by `RedissonClient` connecting to `localhost:6379`.
 
-- [ ] **Step 2: Override only the external Redisson boundary**
+- [ ] **Step 2: Override Redis and provide an embedded test datasource**
 
-Add a Spring test bean override:
+Add Spring test bean overrides for the external clients:
 
 ```java
 import org.redisson.api.RedissonClient;
+import com.qcloud.cos.COSClient;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @MockitoBean
 private RedissonClient redissonClient;
+
+@MockitoBean
+private COSClient cosClient;
 ```
 
-The test remains `@SpringBootTest`; production configuration is untouched.
+Add `com.h2database:h2` with `<scope>test</scope>` and set the test properties to an H2 in-memory URL with `MODE=MySQL`. Also set `spring.session.store-type=none` so the smoke test does not create a Redis-backed HTTP session store. The test remains `@SpringBootTest`; production configuration is untouched.
 
 - [ ] **Step 3: Run the context test and verify GREEN**
 
@@ -209,8 +215,8 @@ Expected: zero failures and zero errors.
 - [ ] **Step 5: Commit the test isolation**
 
 ```powershell
-git add -- src/test/java/com/rain/rainn0coding/RainN0CodingApplicationTests.java
-git commit -m "test: isolate application context from Redis"
+git add -- pom.xml src/test/java/com/rain/rainn0coding/RainN0CodingApplicationTests.java docs/superpowers/specs/2026-08-07-code-health-repair-design.md docs/superpowers/plans/2026-08-07-code-health-repairs.md
+git commit -m "test: isolate application context dependencies"
 ```
 
 ### Task 3: Ant Design Vue on-demand loading
