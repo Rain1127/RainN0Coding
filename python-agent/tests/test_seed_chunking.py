@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rag.seed_chunking import expand_seed_record
-import rag.seed_milvus as seed_milvus
+import rag.seed_vector_store as seed_vector_store
 
 
 def test_expand_seed_record_keeps_short_component_as_one_record():
@@ -59,7 +59,7 @@ def test_seed_collection_chunks_component_library_records(monkeypatch):
         def embed(self, text):
             return [0.1, 0.2, 0.3]
 
-    class FakeMilvusStore:
+    class FakeVectorStore:
         def connect(self):
             return None
 
@@ -69,10 +69,18 @@ def test_seed_collection_chunks_component_library_records(monkeypatch):
         def insert_one(self, collection_name, data):
             inserted.append((collection_name, data))
 
-    monkeypatch.setattr(seed_milvus, "embedding_service", FakeEmbeddingService())
-    monkeypatch.setattr(seed_milvus, "milvus_store", FakeMilvusStore())
+    monkeypatch.setattr(
+        seed_vector_store,
+        "embedding_service",
+        FakeEmbeddingService(),
+    )
+    monkeypatch.setattr(
+        seed_vector_store,
+        "vector_store",
+        FakeVectorStore(),
+    )
 
-    seed_milvus.seed_collection(
+    seed_vector_store.seed_collection(
         "component_library",
         [
             {
