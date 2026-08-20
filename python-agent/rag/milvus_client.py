@@ -15,6 +15,7 @@ Milvus 客户端 —— 双模式：Lite (本地文件) / Standalone (Docker)
 """
 import os
 import shutil
+import json
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pymilvus import MilvusClient
@@ -151,7 +152,11 @@ class MilvusStore:
         results = [None] * len(queries)
         for f in as_completed(futures):
             idx = futures[f]
-            results[idx] = f.result()
+            try:
+                results[idx] = f.result()
+            except Exception as exc:
+                print(f"[Milvus] search failed: {exc}")
+                results[idx] = []
         return results
 
     # ========== 异步搜索（供 asyncio 集成） ==========
@@ -265,6 +270,54 @@ class MilvusStore:
         return results or []
 
     # ========== 内部方法 ==========
+    @staticmethod
+    def _filters_to_expr(filters: dict[str, object]) -> str:
+        if not filters:
+            raise ValueError("filters must not be empty")
+
+        return " && ".join(
+            f"{field} == {json.dumps(value, ensure_ascii=False)}"
+            for field, value in filters.items()
+        )
+
+    def delete_by_filters(
+        self,
+        collection_name: str,
+        filters: dict[str, object],
+    ) -> int:
+        return self.delete_by_expr(
+            collection_name,
+            self._filters_to_expr(filters),
+        )
+
+    def query_by_filters(
+        self,
+        collection_name: str,
+        filters: dict[str, object],
+        output_fields: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        return self.query(
+            collection_name,
+            self._filters_to_expr(filters),
+            output_fields,
+            limit,
+        )
+
+    def count(self, collection_name: str) -> int:
+        self.connect()
+        if collection_name not in self._client.list_collections():
+            return 0
+
+        self._load_collection(collection_name)
+        stats = self._client.get_collection_stats(
+            collection_name=collection_name,
+        )
+        return int(stats.get("row_count", 0))
+
+    def reset_all(self) -> None:
+        self.connect()
+        self._cleanup()
 
     def _load_collection(self, collection_name: str):
         # MilvusClient handles load automatically in most cases.
