@@ -5,8 +5,8 @@ Embedding 次数从 5-10 次降到 1 次，Milvus 只搜 2 个 Collection。
 """
 
 from rag.embedding_service import embedding_service
-from rag.milvus_client import milvus_store
 from rag.retrieval_common import RetrievalResult
+from rag.vector_store import vector_store
 
 
 class SemanticRetriever:
@@ -37,7 +37,7 @@ class SemanticRetriever:
             return []
 
         queries = [(c["collection"], query_vector, c["top_k"]) for c in self.SEMANTIC_COLLECTIONS]
-        raw_results = milvus_store.search_multi(queries)
+        raw_results = vector_store.search_multi(queries)
 
         results: list[RetrievalResult] = []
         for (col, _, _), hits in zip(queries, raw_results):

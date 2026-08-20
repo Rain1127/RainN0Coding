@@ -162,12 +162,12 @@ async def route_code_gen_type_api(request: RouteCodeGenTypeRequest):
 
 async def health():
     """Health check endpoint."""
-    milvus_ok = False
+    vector_store_ok = False
     try:
-        from rag.milvus_client import milvus_store
+        from rag.vector_store import vector_store
 
-        milvus_store.connect()
-        milvus_ok = True
+        vector_store.connect()
+        vector_store_ok = True
     except Exception:
         pass
 
@@ -185,8 +185,18 @@ async def health():
             "status": "ok",
             "model": _config().DEEPSEEK_MODEL,
             "chat_model": _config().CHAT_MODEL,
-            "milvus_connected": milvus_ok,
-            "milvus_mode": _config().MILVUS_MODE,
+            "vector_store_connected": vector_store_ok,
+            "vector_db_provider": _config().VECTOR_DB_PROVIDER,
+            "milvus_connected": (
+                vector_store_ok
+                if _config().VECTOR_DB_PROVIDER == "milvus"
+                else False
+            ),
+            "milvus_mode": (
+                _config().MILVUS_MODE
+                if _config().VECTOR_DB_PROVIDER == "milvus"
+                else None
+            ),
             "sqlite_connected": sqlite_ok,
             "hybrid_engine": _config().USE_HYBRID_ENGINE,
         }

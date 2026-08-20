@@ -70,10 +70,10 @@ async def lifespan(app):
             logger.info("Quality cleanup task stopped")
 
         try:
-            from rag.milvus_client import milvus_store
+            from rag.vector_store import vector_store
 
-            milvus_store.close()
-            logger.info("Milvus connection closed")
+            vector_store.close()
+            logger.info("Vector store connection closed")
         except Exception:
             pass
         try:
@@ -99,7 +99,7 @@ async def _periodic_quality_cleanup():
         try:
             from rag.code_grep import code_grep
             from rag.feedback_tracker import feedback_tracker
-            from rag.milvus_client import milvus_store
+            from rag.vector_store import vector_store
 
             feedback_tracker.connect()
             feedback_tracker.init_tables()
@@ -113,19 +113,24 @@ async def _periodic_quality_cleanup():
                 logger.info("[QualityCleanup] no low-quality entries to clean")
                 continue
 
-            deleted_milvus = 0
+            deleted_vectors = 0
             deleted_fs = 0
             for entry in entries:
                 e_app_id = entry["app_id"]
                 e_file_path = entry["file_path"]
 
                 try:
-                    milvus_store.connect()
-                    expr = f'app_id == "{e_app_id}" && file_path == "{e_file_path}"'
-                    count = milvus_store.delete_by_expr("code_store", expr)
-                    deleted_milvus += count
+                    vector_store.connect()
+                    count = vector_store.delete_by_filters(
+                        "code_store",
+                        {"app_id": e_app_id, "file_path": e_file_path},
+                    )
+                    deleted_vectors += count
                 except Exception as e:
-                    logger.warning(f"[QualityCleanup] Milvus delete failed {e_app_id}/{e_file_path}: {e}")
+                    logger.warning(
+                        f"[QualityCleanup] vector store delete failed "
+                        f"{e_app_id}/{e_file_path}: {e}"
+                    )
 
                 try:
                     if code_grep.delete_code(e_app_id, e_file_path):
@@ -139,7 +144,8 @@ async def _periodic_quality_cleanup():
                     pass
 
             logger.info(
-                f"[QualityCleanup] cleaned: {len(entries)} entries, Milvus={deleted_milvus}, FS={deleted_fs}"
+                f"[QualityCleanup] cleaned: {len(entries)} entries, "
+                f"vectors={deleted_vectors}, FS={deleted_fs}"
             )
         except Exception as e:
             logger.warning(f"[QualityCleanup] cleanup task error: {e}")

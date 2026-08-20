@@ -18,9 +18,9 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rag.embedding_service import embedding_service
-from rag.milvus_client import milvus_store
 from rag.rag_cache import rag_cache
 from rag.retrieval_common import PostProcessor, RetrievalContext, RetrievalResult
+from rag.vector_store import vector_store
 from config import config, get_lang_config
 
 
@@ -101,7 +101,7 @@ class IntentDirectedRetriever:
             return []
 
         # 并行执行
-        raw_results = milvus_store.search_multi(queries)
+        raw_results = vector_store.search_multi(queries)
 
         for query, hits in zip(queries, raw_results):
             col = query[0]
@@ -174,7 +174,7 @@ class GlobalVectorRetriever:
 
         # 构造并行查询
         queries = [(col, query_vector, 5) for col in self.ALL_COLLECTIONS]
-        raw_results = milvus_store.search_multi(queries)
+        raw_results = vector_store.search_multi(queries)
 
         results: list[RetrievalResult] = []
         for query, hits in zip(queries, raw_results):

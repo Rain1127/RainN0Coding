@@ -2,7 +2,7 @@
 RAG 上下文构建器 —— Coder Agent 与检索引擎的桥梁
 
 build_rag_context(): 为每个文件构建增强 Prompt
-index_code_files():   构建成功后将代码入库（Milvus + 文件系统双写）
+index_code_files():   构建成功后将代码入库（向量数据库 + 文件系统双写）
 
 检索引擎：
   - USE_HYBRID_ENGINE=true → HybridEngine (grep + RAG 混合)
@@ -10,15 +10,15 @@ index_code_files():   构建成功后将代码入库（Milvus + 文件系统双�
 """
 from config import config
 
-# 延迟导入 Milvus 相关模块（无 pymilvus 时也能加载）
+# 延迟导入向量检索相关模块
 _retrieval_engine = None
 _retrieval_context_cls = None
 _embedding_service = None
-_milvus_store = None
+_vector_store = None
 
 
-def _lazy_import_milvus():
-    global _retrieval_engine, _retrieval_context_cls, _embedding_service, _milvus_store
+def _lazy_import_vector_store():
+    global _retrieval_engine, _retrieval_context_cls, _embedding_service, _vector_store
     if _retrieval_engine is None:
         try:
             from rag.retrieval_engine import retrieval_engine, RetrievalContext
@@ -32,10 +32,11 @@ def _lazy_import_milvus():
             _embedding_service = embedding_service
         except ImportError:
             pass
-    if _milvus_store is None:
+    if _vector_store is None:
         try:
-            from rag.milvus_client import milvus_store
-            _milvus_store = milvus_store
+            from rag.vector_store import vector_store
+
+            _vector_store = vector_store
         except ImportError:
             pass
 
@@ -95,9 +96,9 @@ def build_rag_context(
             ))
         else:
             # 回退：纯向量检索引擎
-            _lazy_import_milvus()
+            _lazy_import_vector_store()
             if _retrieval_engine is None or _retrieval_context_cls is None:
-                print("[RAG] build_rag_context 失败: RetrievalEngine 不可用 (pymilvus 未安装)")
+                print("[RAG] build_rag_context 失败: RetrievalEngine 不可用")
                 return ""
             ctx = _retrieval_context_cls(
                 phase=phase,
@@ -117,7 +118,7 @@ def build_rag_context(
 def index_code_files(code_files: list, app_id: str, code_gen_type: str,
                      review_score: int = 0):
     """
-    将生成的代码双写入 Milvus code_store + 文件系统 (供 ripgrep 搜索)。
+    将生成的代码双写入向量数据库 code_store + 文件系统（供 ripgrep 搜索）。
 
     Args:
         code_files: [{'path': str, 'content': str}, ...]
@@ -138,13 +139,13 @@ def index_code_files(code_files: list, app_id: str, code_gen_type: str,
         except Exception as e:
             print(f"[RAG] 文件系统写入失败 {f.get('path', '?')}: {e}")
 
-    # 同时写入 Milvus（兼容过渡期，pymilvus 不可用时跳过）
+    # 同时写入当前配置的向量数据库
     indexed = 0
-    _lazy_import_milvus()
-    if _milvus_store and _embedding_service:
+    _lazy_import_vector_store()
+    if _vector_store and _embedding_service:
         try:
-            _milvus_store.connect()
-            _milvus_store.ensure_collection("code_store")
+            _vector_store.connect()
+            _vector_store.ensure_collection("code_store")
 
             for f in code_files:
                 content = f.get("content", "")
@@ -159,7 +160,7 @@ def index_code_files(code_files: list, app_id: str, code_gen_type: str,
                     continue
 
                 try:
-                    _milvus_store.insert_one("code_store", {
+                    _vector_store.insert_one("code_store", {
                         "vector": vec,
                         "app_id": app_id,
                         "file_path": f.get("path", ""),
@@ -171,7 +172,7 @@ def index_code_files(code_files: list, app_id: str, code_gen_type: str,
                 except Exception as e:
                     print(f"[RAG] 入库失败 {f.get('path', '?')}: {e}")
         except Exception as e:
-            print(f"[RAG] Milvus 写入跳过: {e}")
+            print(f"[RAG] 向量数据库写入跳过: {e}")
 
     # 记录质量元数据到反馈追踪器 (P2)
     try:
@@ -184,4 +185,7 @@ def index_code_files(code_files: list, app_id: str, code_gen_type: str,
         print(f"[RAG] 质量元数据记录失败（不影响入库）: {e}")
 
     file_count = code_grep.get_file_count()
-    print(f"[RAG] 已入库 {indexed}/{len(code_files)} 文件到 Milvus，文件系统共 {file_count} 文件")
+    print(
+        f"[RAG] 已入库 {indexed}/{len(code_files)} 文件到向量数据库，"
+        f"文件系统共 {file_count} 文件"
+    )

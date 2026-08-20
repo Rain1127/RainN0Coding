@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import rag.vector_store.qdrant_store as qdrant_store_module
 from rag.vector_store.base import VectorStore
 from rag.vector_store.qdrant_store import QdrantStore
 
@@ -102,5 +103,28 @@ def test_qdrant_store_satisfies_vector_store_contract():
 
     try:
         assert isinstance(store, VectorStore)
+    finally:
+        store.close()
+
+
+def test_qdrant_client_construction_defers_compatibility_check(monkeypatch):
+    captured = {}
+
+    class FakeConstructedClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        qdrant_store_module,
+        "QdrantClient",
+        FakeConstructedClient,
+    )
+
+    store = QdrantStore()
+    try:
+        assert captured["check_compatibility"] is False
     finally:
         store.close()

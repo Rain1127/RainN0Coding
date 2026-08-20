@@ -1,4 +1,7 @@
+import pytest
+
 from rag.milvus_client import MilvusStore
+from rag.vector_store.qdrant_store import QdrantStore
 
 
 REQUIRED_METHODS = {
@@ -22,6 +25,7 @@ def test_milvus_store_satisfies_vector_store_contract():
     actual_methods = set(dir(MilvusStore))
 
     assert REQUIRED_METHODS <= actual_methods
+
 
 def test_milvus_search_multi_degrades_failed_query_to_empty_result(monkeypatch):
     store = MilvusStore()
@@ -51,6 +55,7 @@ def test_milvus_search_multi_degrades_failed_query_to_empty_result(monkeypatch):
         [],
     ]
 
+
 def test_milvus_adapter_reexports_existing_store():
     from rag.vector_store.milvus_store import (
         MilvusStore as AdapterMilvusStore,
@@ -59,3 +64,27 @@ def test_milvus_adapter_reexports_existing_store():
 
     assert AdapterMilvusStore is MilvusStore
     assert isinstance(milvus_store, MilvusStore)
+
+
+def test_factory_returns_existing_milvus_singleton():
+    from rag.milvus_client import milvus_store
+    from rag.vector_store.factory import create_vector_store
+
+    assert create_vector_store("milvus") is milvus_store
+
+
+def test_factory_creates_qdrant_store():
+    from rag.vector_store.factory import create_vector_store
+
+    store = create_vector_store("qdrant")
+    try:
+        assert isinstance(store, QdrantStore)
+    finally:
+        store.close()
+
+
+def test_factory_rejects_unknown_provider():
+    from rag.vector_store.factory import create_vector_store
+
+    with pytest.raises(ValueError, match="milvus, qdrant"):
+        create_vector_store("unknown")

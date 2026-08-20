@@ -60,6 +60,7 @@ class QdrantStore:
             url=config.QDRANT_URL,
             api_key=config.QDRANT_API_KEY or None,
             timeout=config.QDRANT_TIMEOUT_SECONDS,
+            check_compatibility=False,
         )
         self._connected = False
         self._executor = ThreadPoolExecutor(
