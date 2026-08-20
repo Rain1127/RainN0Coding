@@ -35,9 +35,25 @@ class Config:
     CB_FAILURE_THRESHOLD: int = 3         # 连续失败 N 次后熔断
     CB_COOLDOWN_SECONDS: int = 30         # 熔断后冷却时间（秒）
 
+    # ===== Vector database =====
+    VECTOR_DB_PROVIDER: str = os.getenv(
+        "VECTOR_DB_PROVIDER",
+        "milvus",
+    ).strip().lower()
+
     # ===== Milvus =====
     MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
+
+    # ===== Qdrant =====
+    QDRANT_URL: str = os.getenv(
+        "QDRANT_URL",
+        "http://localhost:6333",
+    ).rstrip("/")
+    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
+    QDRANT_TIMEOUT_SECONDS: float = float(
+        os.getenv("QDRANT_TIMEOUT_SECONDS", "10")
+    )
 
     # ===== Embedding =====
     LOCAL_EMBEDDING_ENABLED: bool = os.getenv("LOCAL_EMBEDDING_ENABLED", "false").lower() == "true"

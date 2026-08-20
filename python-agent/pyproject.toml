@@ -24,6 +24,7 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.1.0",
     "pydantic>=2.13.4",
     "pymilvus>=2.4",
+    "qdrant-client>=1.18,<1.19",
     "pytest>=8.0",
     "python-dotenv>=1.2.2",
     "rank-bm25>=0.2.2",
