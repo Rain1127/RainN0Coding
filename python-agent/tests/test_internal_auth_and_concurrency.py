@@ -48,11 +48,18 @@ def load_main(
 def _install_fake_runtime_modules(monkeypatch):
     milvus_module = types.ModuleType("rag.milvus_client")
     milvus_module.milvus_store = _FakeStore()
+    vector_store_module = types.ModuleType("rag.vector_store")
+    vector_store_module.vector_store = _FakeStore()
     sqlite_module = types.ModuleType("rag.sqlite_store")
     sqlite_module.sqlite_store = _FakeStore()
     feedback_module = types.ModuleType("rag.feedback_tracker")
     feedback_module.feedback_tracker = _FakeStore()
     monkeypatch.setitem(sys.modules, "rag.milvus_client", milvus_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "rag.vector_store",
+        vector_store_module,
+    )
     monkeypatch.setitem(sys.modules, "rag.sqlite_store", sqlite_module)
     monkeypatch.setitem(sys.modules, "rag.feedback_tracker", feedback_module)
 

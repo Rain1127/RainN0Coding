@@ -66,6 +66,26 @@ def test_milvus_adapter_reexports_existing_store():
     assert isinstance(milvus_store, MilvusStore)
 
 
+def test_milvus_close_releases_client_and_connection_state():
+    class FakeClient:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    store = MilvusStore()
+    client = FakeClient()
+    store._client = client
+    store._connected = True
+
+    store.close()
+
+    assert client.closed is True
+    assert store._client is None
+    assert store._connected is False
+
+
 def test_factory_returns_existing_milvus_singleton():
     from rag.milvus_client import milvus_store
     from rag.vector_store.factory import create_vector_store

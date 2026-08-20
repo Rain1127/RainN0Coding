@@ -345,6 +345,14 @@ class MilvusStore:
         if self._executor:
             self._executor.shutdown(wait=False)
 
+        if self._client is not None:
+            close = getattr(self._client, "close", None)
+            if callable(close):
+                close()
+
+        self._client = None
+        self._connected = False
+
     def __del__(self):
         try:
             self.close()
