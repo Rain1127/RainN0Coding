@@ -11,6 +11,13 @@ def _remove_reloaded_config_after_test():
 
 
 def _reload_config(monkeypatch, **env):
+    import dotenv
+
+    monkeypatch.setattr(
+        dotenv,
+        "load_dotenv",
+        lambda *args, **kwargs: False,
+    )
     for key, value in env.items():
         monkeypatch.setenv(key, value)
 
