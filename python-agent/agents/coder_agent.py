@@ -22,6 +22,7 @@ from tools import (
     get_all_tools, set_tool_context, get_user_role,
     create_file, read_file, modify_file, delete_file, list_files, exit_tool,
 )
+from tools.path_guard import resolve_project_path
 
 # 最大工具调用轮数（对标 Java 侧 maxSequentialToolInvocations=20）
 MAX_TOOL_ROUNDS = 20
@@ -268,6 +269,42 @@ def _collect_code_files(project_dir: str) -> list[dict]:
     return code_files
 
 
+_TOOL_FAILURE_PREFIXES = (
+    "guardrail_blocked",
+    "未知工具",
+    "工具执行失败",
+    "错误：",
+    "文件写入失败",
+    "读取文件失败",
+    "修改文件失败",
+    "删除文件失败",
+    "读取目录失败",
+    "权限不足：",
+    "警告：文件中未找到",
+)
+
+
+def _tool_result_failed(result: object) -> bool:
+    text = str(result).strip()
+    return text.startswith(_TOOL_FAILURE_PREFIXES)
+
+
+def _missing_required_files(project_dir: str, file_list: list[dict]) -> list[str]:
+    missing = []
+    for file_spec in file_list:
+        path = str(file_spec.get("path", "")).strip().replace("\\", "/")
+        if not path:
+            continue
+        try:
+            full_path = resolve_project_path(project_dir, path)
+        except ValueError:
+            missing.append(path)
+            continue
+        if not os.path.isfile(full_path) or os.path.getsize(full_path) == 0:
+            missing.append(path)
+    return missing
+
+
 # ============ Agent 主函数 ============
 
 def coder_agent(state: CodeGenState) -> CodeGenState:
@@ -316,6 +353,9 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
     os.makedirs(project_dir, exist_ok=True)
     user_role = state.get("user_role", "user")
     set_tool_context(project_dir, app_id, user_role)
+    can_complete_from_file_coverage = (
+        mode != "modify" and bool(_missing_required_files(project_dir, file_list))
+    )
 
     # === 重试上下文（含 AutoGen 讨论结论） ===
     review = state.get("review")
@@ -417,6 +457,7 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
     # === ReAct 循环 ===
     code_files: list[dict] = []
     exited = False
+    completed = False
 
     for round_num in range(1, MAX_TOOL_ROUNDS + 1):
         try:
@@ -435,6 +476,7 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
 
         # 是否有 tool_calls
         if hasattr(response, "tool_calls") and response.tool_calls:
+            round_had_tool_failure = False
             for tc in response.tool_calls:
                 tool_name = tc.get("name", "")
                 tool_args = tc.get("args", {})
@@ -449,6 +491,10 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
                     except Exception as e:
                         tool_result = f"工具执行失败: {e}"
 
+                round_had_tool_failure = (
+                    round_had_tool_failure or _tool_result_failed(tool_result)
+                )
+
                 if tool_name == "exit_tool":
                     exited = True
 
@@ -458,10 +504,22 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
             log_agent_ok("Coder Agent", f"第{round_num}轮工具调用完成，tool_calls={len(response.tool_calls)}")
 
             if exited:
+                completed = True
                 log_agent_ok("Coder Agent", "收到 exit_tool，结束代码生成循环")
                 break
+
+            if can_complete_from_file_coverage and not round_had_tool_failure:
+                missing_required_files = _missing_required_files(project_dir, file_list)
+                if not missing_required_files:
+                    completed = True
+                    log_agent_ok(
+                        "Coder Agent",
+                        f"目标文件已全部生成，提前结束工具循环，round={round_num}/{MAX_TOOL_ROUNDS}",
+                    )
+                    break
         else:
             # 没有 tool_calls —— 可能是 LLM 直接输出了文本（旧 JSON 模式兜底）
+            completed = True
             content = response.content if hasattr(response, "content") else str(response)
             if content:
                 try:
@@ -473,6 +531,23 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
                 except (json.JSONDecodeError, KeyError, TypeError):
                     pass
             break
+
+    if not completed:
+        if mode == "modify":
+            error = "Coder Agent 达到工具调用轮数上限，修改任务未收到明确完成信号"
+        else:
+            missing_required_files = _missing_required_files(project_dir, file_list)
+            if missing_required_files:
+                error = (
+                    "Coder Agent 达到工具调用轮数上限，仍缺少目标文件: "
+                    + ", ".join(missing_required_files)
+                )
+            else:
+                error = "Coder Agent 达到工具调用轮数上限，工具失败导致任务未正常完成"
+        state["error"] = error
+        state["phase"] = "error"
+        log_agent_fail("Coder Agent", error)
+        return state
 
     # === 收集结果 ===
     # 如果工具模式没有产生 code_files，从文件系统收集
