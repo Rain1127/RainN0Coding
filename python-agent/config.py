@@ -6,34 +6,36 @@ load_dotenv()
 
 
 class Config:
-    # ===== DeepSeek API =====
-    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
-    DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
-    CHAT_MODEL: str = os.getenv("CHAT_MODEL", "deepseek-chat")  # 结构化输出用（v4-pro 不支持 json_mode）
-    REASONING_MODEL: str = os.getenv("REASONING_MODEL", "deepseek-v4-pro")
-
-    # ===== GLM 备用模型 =====
-    ZHIPU_API_KEY: str = os.getenv("ZHIPU_API_KEY", "")
-    ZHIPU_BASE_URL: str = os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
-    ZHIPU_FLASH_MODEL: str = os.getenv("ZHIPU_FLASH_MODEL", "glm-4.7-flash")
+    # ===== LiteLLM Gateway =====
+    LITELLM_BASE_URL: str = os.getenv(
+        "LITELLM_BASE_URL",
+        "http://127.0.0.1:4000/v1",
+    ).rstrip("/")
+    LITELLM_API_KEY: str = os.getenv("LITELLM_API_KEY", "")
+    LITELLM_HEALTH_URL: str = os.getenv(
+        "LITELLM_HEALTH_URL",
+        "http://127.0.0.1:4000/health/liveliness",
+    )
+    LLM_REASONING_MODEL: str = os.getenv("LLM_REASONING_MODEL", "code-reasoning")
+    LLM_STRUCTURED_MODEL: str = os.getenv("LLM_STRUCTURED_MODEL", "code-structured")
+    LLM_LIGHTWEIGHT_MODEL: str = os.getenv("LLM_LIGHTWEIGHT_MODEL", "code-lightweight")
+    LLM_MODEL_ALIASES: dict[str, str] = {
+        "reasoning": LLM_REASONING_MODEL,
+        "structured": LLM_STRUCTURED_MODEL,
+        "lightweight": LLM_LIGHTWEIGHT_MODEL,
+    }
 
     # ===== LLM 通用参数 =====
     LLM_TEMPERATURE: float = 0.1          # 代码生成需要低温度
     LLM_TEMPERATURE_STRUCTURED: float = 0.0  # 结构化输出用 0 温度
     LLM_MAX_TOKENS: int = 8192
     LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT", "120"))     # LLM 调用超时（秒）
-    LLM_FALLBACK_TIMEOUT: int = int(os.getenv("LLM_FALLBACK_TIMEOUT", "60"))  # fallback 模型超时
 
     # ===== LangSmith 监控 =====
     LANGSMITH_TRACING: bool = os.getenv("LANGSMITH_TRACING", "false").lower() == "true"
     LANGSMITH_API_KEY: str = os.getenv("LANGSMITH_API_KEY", "")
     LANGSMITH_ENDPOINT: str = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     LANGSMITH_PROJECT: str = os.getenv("LANGSMITH_PROJECT", "RainN0Coding")
-
-    # ===== 熔断器 =====
-    CB_FAILURE_THRESHOLD: int = 3         # 连续失败 N 次后熔断
-    CB_COOLDOWN_SECONDS: int = 30         # 熔断后冷却时间（秒）
 
     # ===== Vector database =====
     VECTOR_DB_PROVIDER: str = os.getenv(
@@ -90,7 +92,7 @@ class Config:
     GUARDRAILS_MAX_LIST_FILES_DEPTH: int = int(os.getenv("GUARDRAILS_MAX_LIST_FILES_DEPTH", "6"))
 
     # ===== RAGAS 离线评估 =====
-    RAGAS_JUDGE_MODEL: str = os.getenv("RAGAS_JUDGE_MODEL", DEEPSEEK_MODEL)  # Judge LLM 模型名，默认用 DEEPSEEK_MODEL
+    RAGAS_JUDGE_MODEL: str = os.getenv("RAGAS_JUDGE_MODEL", LLM_REASONING_MODEL)
     RAGAS_JUDGE_TEMPERATURE: float = 0.0  # Judge 使用 0 温度确保确定性
 
     # ===== RAG 检索引擎 =====
