@@ -2,7 +2,7 @@
   "dashboard": {
     "uid": "ai-workflow-monitoring",
     "title": "AI Workflow Monitoring",
-    "description": "Python Agent 工作流监控：阶段耗时、LLM 调用、重试分析、RAG 缓存、熔断器",
+    "description": "Python Agent 工作流监控：阶段耗时、LLM 调用、重试分析、RAG 缓存",
     "tags": ["ai", "python", "workflow"],
     "timezone": "browser",
     "schemaVersion": 39,
@@ -287,36 +287,6 @@
           "defaults": {
             "unit": "ops",
             "custom": {"lineWidth": 2}
-          }
-        }
-      },
-      {
-        "id": 50,
-        "title": "熔断器状态",
-        "type": "statestimeline",
-        "gridPos": {"x": 0, "y": 44, "h": 6, "w": 24},
-        "targets": [
-          {
-            "expr": "ai_circuit_breaker_state",
-            "legendFormat": "{{model_name}}",
-            "refId": "A"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "mappings": [
-              {"type": "value", "value": 0, "text": "CLOSED"},
-              {"type": "value", "value": 1, "text": "OPEN"},
-              {"type": "value", "value": 2, "text": "HALF_OPEN"}
-            ],
-            "color": {"mode": "thresholds"},
-            "thresholds": {
-              "steps": [
-                {"value": 0, "color": "green"},
-                {"value": 1, "color": "red"},
-                {"value": 2, "color": "orange"}
-              ]
-            }
           }
         }
       }

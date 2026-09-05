@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -30,3 +31,18 @@ def test_gateway_env_contract_keeps_provider_keys_out_of_python_agent():
     assert "LITELLM_MASTER_KEY=" in text
     assert "DEEPSEEK_API_KEY=" in text
     assert "ZHIPUAI_API_KEY=" in text
+
+
+def test_litellm_dashboard_uses_current_metrics():
+    path = ROOT / "grafana" / "dashboards" / "litellm-gateway.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    text = json.dumps(payload)
+    for metric in (
+        "litellm_proxy_total_requests_metric",
+        "litellm_request_total_latency_metric_bucket",
+        "litellm_total_tokens_metric",
+        "litellm_spend_metric",
+        "litellm_deployment_successful_fallbacks",
+    ):
+        assert metric in text
+    assert "ai_circuit_breaker_state" not in text

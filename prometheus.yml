@@ -36,3 +36,14 @@ scrape_configs:
       - targets: [ 'localhost:8000' ]
     scrape_interval: 10s
     scrape_timeout: 10s
+
+  # LiteLLM 网关监控（token 文件只包含密钥本身，不含 Bearer 前缀）
+  - job_name: 'LiteLLM'
+    metrics_path: '/metrics'
+    authorization:
+      type: Bearer
+      credentials_file: 'secrets/litellm_metrics_token'
+    static_configs:
+      - targets: [ 'localhost:4000' ]
+    scrape_interval: 10s
+    scrape_timeout: 10s

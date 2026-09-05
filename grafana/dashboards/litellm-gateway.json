@@ -1,0 +1,138 @@
+{
+  "dashboard": {
+    "uid": "litellm-gateway",
+    "title": "LiteLLM Gateway",
+    "description": "网关请求、错误、延迟、token、费用、故障转移和部署状态",
+    "tags": ["ai", "litellm", "gateway"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "请求速率（按业务模型）",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 0, "h": 8, "w": 12},
+        "targets": [
+          {
+            "expr": "sum(rate(litellm_proxy_total_requests_metric[5m])) by (requested_model)",
+            "legendFormat": "{{requested_model}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {"defaults": {"unit": "reqps"}}
+      },
+      {
+        "id": 2,
+        "title": "请求错误率",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 0, "h": 8, "w": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(litellm_proxy_failed_requests_metric[5m])) / clamp_min(sum(rate(litellm_proxy_total_requests_metric[5m])), 1)",
+            "legendFormat": "错误率",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "orange", "value": 0.02},
+                {"color": "red", "value": 0.05}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "P95 总延迟",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 0, "h": 8, "w": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (requested_model, le) (rate(litellm_request_total_latency_metric_bucket[5m])))",
+            "legendFormat": "{{requested_model}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {"defaults": {"unit": "s"}}
+      },
+      {
+        "id": 4,
+        "title": "Token 速率",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 8, "h": 8, "w": 12},
+        "targets": [
+          {
+            "expr": "sum(rate(litellm_total_tokens_metric[5m])) by (requested_model, api_provider)",
+            "legendFormat": "{{requested_model}} / {{api_provider}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {"defaults": {"unit": "ops"}}
+      },
+      {
+        "id": 5,
+        "title": "近 24 小时费用",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 8, "h": 8, "w": 12},
+        "targets": [
+          {
+            "expr": "sum(increase(litellm_spend_metric[24h])) by (requested_model, api_provider)",
+            "legendFormat": "{{requested_model}} / {{api_provider}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {"defaults": {"unit": "currencyUSD"}}
+      },
+      {
+        "id": 6,
+        "title": "近 1 小时成功故障转移",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 16, "h": 8, "w": 12},
+        "targets": [
+          {
+            "expr": "sum(increase(litellm_deployment_successful_fallbacks[1h])) by (requested_model, fallback_model)",
+            "legendFormat": "{{requested_model}} -> {{fallback_model}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {"defaults": {"unit": "short", "decimals": 0}}
+      },
+      {
+        "id": 7,
+        "title": "部署状态",
+        "type": "statestimeline",
+        "gridPos": {"x": 12, "y": 16, "h": 8, "w": 12},
+        "targets": [
+          {
+            "expr": "max(litellm_deployment_state) by (litellm_model_name, api_provider)",
+            "legendFormat": "{{litellm_model_name}} / {{api_provider}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "0": {"text": "HEALTHY", "color": "green"},
+                  "1": {"text": "UNHEALTHY", "color": "red"},
+                  "2": {"text": "COOLDOWN", "color": "orange"}
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "overwrite": true
+}
