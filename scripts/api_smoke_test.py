@@ -19,6 +19,13 @@ from typing import Any
 import httpx
 
 
+REQUIRED_LITELLM_MODELS = {
+    "code-reasoning",
+    "code-structured",
+    "code-lightweight",
+}
+
+
 def require_base_response(response: httpx.Response, step: str) -> Any:
     response.raise_for_status()
     payload = response.json()
@@ -45,6 +52,30 @@ def require_raw(response: httpx.Response, step: str) -> Any:
     return payload
 
 
+def validate_litellm_gateway(client: httpx.Client, api_key: str) -> None:
+    liveness = client.get("/health/liveliness")
+    liveness.raise_for_status()
+    print("[PASS] LiteLLM liveness")
+
+    models = client.get(
+        "/v1/models",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    models.raise_for_status()
+    payload = models.json()
+    model_ids = {
+        item.get("id")
+        for item in payload.get("data", [])
+        if isinstance(item, dict)
+    }
+    missing = REQUIRED_LITELLM_MODELS - model_ids
+    if missing:
+        raise AssertionError(
+            f"LiteLLM authorized model list is missing: {sorted(missing)}"
+        )
+    print("[PASS] LiteLLM authorized model listing")
+
+
 def parse_java_sse_payload(line: str) -> dict[str, Any] | None:
     if not line.startswith("data:"):
         return None
@@ -66,14 +97,20 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--java-base", default="http://127.0.0.1:8123/api")
     parser.add_argument("--python-base", default="http://127.0.0.1:8000")
+    parser.add_argument("--litellm-base", default="http://127.0.0.1:4000")
     parser.add_argument("--skip-generation", action="store_true")
     args = parser.parse_args()
+
+    litellm_api_key = os.getenv("LITELLM_API_KEY", "")
+    if not litellm_api_key:
+        raise RuntimeError("Set LITELLM_API_KEY before running the live smoke test.")
 
     timeout = httpx.Timeout(60.0, connect=10.0)
     public = httpx.Client(base_url=args.java_base, timeout=timeout)
     user = httpx.Client(base_url=args.java_base, timeout=timeout)
     admin = httpx.Client(base_url=args.java_base, timeout=timeout)
     python_api = httpx.Client(base_url=args.python_base, timeout=timeout)
+    litellm_api = httpx.Client(base_url=args.litellm_base, timeout=timeout)
 
     suffix = f"{int(time.time())}{uuid.uuid4().hex[:5]}"
     user_account = f"smoke_{suffix}"
@@ -84,6 +121,8 @@ def main() -> None:
     version_id: int | None = None
 
     try:
+        validate_litellm_gateway(litellm_api, litellm_api_key)
+
         python_health = python_api.get("/api/health")
         python_health.raise_for_status()
         assert python_health.json().get("status") == "ok"
@@ -403,6 +442,7 @@ def main() -> None:
         user.close()
         admin.close()
         python_api.close()
+        litellm_api.close()
 
 
 if __name__ == "__main__":

@@ -185,3 +185,14 @@ Set-Location RainN0Coding-frontend
 npm test
 npm run build
 ```
+
+## 13. 本次自动化验收记录（2026-09-05）
+
+- LiteLLM 配置、请求上下文、路由边界、健康检查和监控契约：`53 passed`。
+- LiteLLM 隔离回退契约：主模型返回 500 后重试一次并切换备用模型；双模型失败时返回非 2xx，`2 passed`。
+- Java：`113 tests`，`0 failures`，`0 errors`。
+- Vue：`266 passed`，`vue-tsc -b` 通过，Vite 生产构建通过（产物写入系统临时目录，未覆盖仓库静态资源）。
+- Python 全量：`202 passed, 7 skipped, 1 failed`。唯一失败为本机 `127.0.0.1:6333` 未运行 Qdrant；另有 `onnxruntime/fastembed` 的 Windows 原生访问冲突诊断，但 pytest 仍完成并给出上述结果。
+- 生产 Python 代码未检出 DeepSeek/智谱 API Key 名称或厂商直连 URL；密钥扫描命中项均为 `.env.example` 占位符或 RAG 示例文本，不是真实凭据。
+
+本机真实链路验收仍待完成：当前仅 MySQL 3306 在监听，PostgreSQL 5432、Redis 6379、LiteLLM 4000、Python 8000、Java 8123 和 Prometheus 9090 均未启动，且 `infrastructure/litellm/.env` 尚未创建。配置好本地服务与真实厂商密钥后，按第 1～11 节执行即可完成最终验收。
