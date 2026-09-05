@@ -196,7 +196,7 @@ npm run build
 ## 13. 本次自动化验收记录（2026-09-05）
 
 - LiteLLM 配置、请求上下文、路由边界、健康检查和监控契约：最新定向回归 `49 passed`。
-- LiteLLM 隔离回退契约：主模型返回 500 后重试一次并切换备用模型；双模型失败时返回非 2xx，`2 passed`。
+- LiteLLM 隔离运行契约：主模型返回 500 后重试一次并切换备用模型；双模型失败时返回非 2xx；Prometheus 实际导出面板所需指标，`3 passed`。
 - Java：`113 tests`，`0 failures`，`0 errors`。
 - Vue：`266 passed`，`vue-tsc -b` 通过，Vite 生产构建通过（产物写入系统临时目录，未覆盖仓库静态资源）。
 - Python 全量：`202 passed, 7 skipped, 1 failed`。唯一失败为本机 `127.0.0.1:6333` 未运行 Qdrant；另有 `onnxruntime/fastembed` 的 Windows 原生访问冲突诊断，但 pytest 仍完成并给出上述结果。

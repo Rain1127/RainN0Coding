@@ -57,4 +57,5 @@ if ($env:DATABASE_URL -match 'replace-me') {
 }
 
 $port = if ($env:LITELLM_PORT) { $env:LITELLM_PORT } else { '4000' }
+$env:PYTHONUTF8 = '1'
 & $litellmCommand --config $configFile --host '127.0.0.1' --port $port

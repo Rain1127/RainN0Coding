@@ -44,7 +44,6 @@ model_list:
 
 router_settings:
   num_retries: 1
-  request_timeout: 120
   allowed_fails: 3
   cooldown_time: 30
   fallbacks:
@@ -70,8 +69,11 @@ litellm_settings:
     supported_call_types: []
   prometheus_metrics_config:
     - group: proxy_requests
-      metrics: [litellm_proxy_total_requests_metric, litellm_proxy_failed_requests_metric]
-      include_labels: [status_code, requested_model, model_group]
+      metrics: [litellm_proxy_total_requests_metric]
+      include_labels: [status_code, requested_model]
+    - group: proxy_failures
+      metrics: [litellm_proxy_failed_requests_metric]
+      include_labels: [exception_status, requested_model]
     - group: deployment_responses
       metrics: [litellm_deployment_success_responses, litellm_deployment_failure_responses]
       include_labels: [requested_model, api_provider]

@@ -26,9 +26,33 @@ model_list:
 
 router_settings:
   num_retries: 1
-  request_timeout: 5
   fallbacks:
     - code-reasoning: [code-reasoning-glm]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  callbacks: [prometheus]
+  prometheus_metrics_config:
+    - group: proxy_requests
+      metrics: [litellm_proxy_total_requests_metric]
+      include_labels: [status_code, requested_model]
+    - group: proxy_failures
+      metrics: [litellm_proxy_failed_requests_metric]
+      include_labels: [exception_status, requested_model]
+    - group: deployment_responses
+      metrics: [litellm_deployment_success_responses, litellm_deployment_failure_responses]
+      include_labels: [requested_model, api_provider]
+    - group: fallbacks
+      metrics: [litellm_deployment_successful_fallbacks, litellm_deployment_failed_fallbacks]
+      include_labels: [requested_model, fallback_model, exception_status]
+    - group: deployment_state
+      metrics: [litellm_deployment_state]
+      include_labels: [litellm_model_name, api_provider]
+    - group: usage
+      metrics: [litellm_input_tokens_metric, litellm_output_tokens_metric, litellm_total_tokens_metric, litellm_spend_metric]
+      include_labels: [requested_model, model, api_provider, api_key_alias]
+    - group: latency
+      metrics: [litellm_request_total_latency_metric, litellm_llm_api_latency_metric]
+      include_labels: [requested_model, model, api_provider, api_key_alias]

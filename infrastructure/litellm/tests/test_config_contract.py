@@ -60,4 +60,12 @@ def test_litellm_dashboard_uses_current_metrics():
         "litellm_deployment_successful_fallbacks",
     ):
         assert metric in text
+    for counter_sample in (
+        "litellm_proxy_total_requests_metric_total",
+        "litellm_proxy_failed_requests_metric_total",
+        "litellm_total_tokens_metric_total",
+        "litellm_spend_metric_total",
+        "litellm_deployment_successful_fallbacks_total",
+    ):
+        assert counter_sample in text
     assert "ai_circuit_breaker_state" not in text

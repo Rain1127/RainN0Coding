@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -84,9 +85,10 @@ def contract_stack():
             f"{FALLBACK_URL}/health",
         ),
         (
-            {
-                "LITELLM_MASTER_KEY": "sk-contract",
-                "FAKE_PRIMARY_API_BASE": f"{PRIMARY_URL}/v1",
+                {
+                    "LITELLM_MASTER_KEY": "sk-contract",
+                    "PYTHONUTF8": "1",
+                    "FAKE_PRIMARY_API_BASE": f"{PRIMARY_URL}/v1",
                 "FAKE_FALLBACK_API_BASE": f"{FALLBACK_URL}/v1",
             },
             [
@@ -170,3 +172,31 @@ def test_both_providers_failing_returns_gateway_error():
     assert response.status_code >= 400
     assert _request_count(PRIMARY_URL) == 2
     assert _request_count(FALLBACK_URL) >= 1
+
+
+def test_prometheus_exports_dashboard_metric_samples():
+    _reset_counts()
+    _completion("ping").raise_for_status()
+    assert _completion("fail-all").status_code >= 400
+    time.sleep(1)
+
+    response = httpx.get(
+        f"{GATEWAY_URL}/metrics",
+        headers={"Authorization": "Bearer sk-contract"},
+        follow_redirects=True,
+        timeout=5,
+    )
+
+    response.raise_for_status()
+    exported_names = sorted(
+        set(re.findall(r"^# (?:HELP|TYPE) (litellm_[A-Za-z0-9_:]+)", response.text, re.MULTILINE))
+    )
+    for sample_name in (
+        "litellm_proxy_total_requests_metric_total",
+        "litellm_proxy_failed_requests_metric_total",
+        "litellm_request_total_latency_metric_bucket",
+        "litellm_total_tokens_metric_total",
+        "litellm_spend_metric_total",
+        "litellm_deployment_successful_fallbacks_total",
+    ):
+        assert sample_name in response.text, exported_names

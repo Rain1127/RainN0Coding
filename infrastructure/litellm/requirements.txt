@@ -1,1 +1,2 @@
 litellm[proxy]==1.98.0
+prometheus-client==0.25.0

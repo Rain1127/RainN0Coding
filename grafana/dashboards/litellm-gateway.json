@@ -16,7 +16,7 @@
         "gridPos": {"x": 0, "y": 0, "h": 8, "w": 12},
         "targets": [
           {
-            "expr": "sum(rate(litellm_proxy_total_requests_metric[5m])) by (requested_model)",
+            "expr": "sum(rate(litellm_proxy_total_requests_metric_total[5m])) by (requested_model)",
             "legendFormat": "{{requested_model}}",
             "refId": "A"
           }
@@ -30,7 +30,7 @@
         "gridPos": {"x": 12, "y": 0, "h": 8, "w": 6},
         "targets": [
           {
-            "expr": "sum(rate(litellm_proxy_failed_requests_metric[5m])) / clamp_min(sum(rate(litellm_proxy_total_requests_metric[5m])), 1)",
+            "expr": "sum(rate(litellm_proxy_failed_requests_metric_total[5m])) / clamp_min(sum(rate(litellm_proxy_total_requests_metric_total[5m])), 1)",
             "legendFormat": "错误率",
             "refId": "A"
           }
@@ -70,7 +70,7 @@
         "gridPos": {"x": 0, "y": 8, "h": 8, "w": 12},
         "targets": [
           {
-            "expr": "sum(rate(litellm_total_tokens_metric[5m])) by (requested_model, api_provider)",
+            "expr": "sum(rate(litellm_total_tokens_metric_total[5m])) by (requested_model, api_provider)",
             "legendFormat": "{{requested_model}} / {{api_provider}}",
             "refId": "A"
           }
@@ -84,7 +84,7 @@
         "gridPos": {"x": 12, "y": 8, "h": 8, "w": 12},
         "targets": [
           {
-            "expr": "sum(increase(litellm_spend_metric[24h])) by (requested_model, api_provider)",
+            "expr": "sum(increase(litellm_spend_metric_total[24h])) by (requested_model, api_provider)",
             "legendFormat": "{{requested_model}} / {{api_provider}}",
             "refId": "A"
           }
@@ -98,7 +98,7 @@
         "gridPos": {"x": 0, "y": 16, "h": 8, "w": 12},
         "targets": [
           {
-            "expr": "sum(increase(litellm_deployment_successful_fallbacks[1h])) by (requested_model, fallback_model)",
+            "expr": "sum(increase(litellm_deployment_successful_fallbacks_total[1h])) by (requested_model, fallback_model)",
             "legendFormat": "{{requested_model}} -> {{fallback_model}}",
             "refId": "A"
           }
