@@ -1,0 +1,89 @@
+model_list:
+  - model_name: code-reasoning
+    litellm_params:
+      model: os.environ/DEEPSEEK_REASONING_MODEL
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: os.environ/DEEPSEEK_API_BASE
+      timeout: 120
+  - model_name: code-reasoning-chat
+    litellm_params:
+      model: os.environ/DEEPSEEK_CHAT_MODEL
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: os.environ/DEEPSEEK_API_BASE
+      timeout: 60
+  - model_name: code-reasoning-glm
+    litellm_params:
+      model: os.environ/ZHIPUAI_MODEL
+      api_key: os.environ/ZHIPUAI_API_KEY
+      api_base: os.environ/ZHIPUAI_API_BASE
+      timeout: 60
+  - model_name: code-structured
+    litellm_params:
+      model: os.environ/DEEPSEEK_CHAT_MODEL
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: os.environ/DEEPSEEK_API_BASE
+      timeout: 120
+  - model_name: code-structured-glm
+    litellm_params:
+      model: os.environ/ZHIPUAI_MODEL
+      api_key: os.environ/ZHIPUAI_API_KEY
+      api_base: os.environ/ZHIPUAI_API_BASE
+      timeout: 60
+  - model_name: code-lightweight
+    litellm_params:
+      model: os.environ/DEEPSEEK_CHAT_MODEL
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: os.environ/DEEPSEEK_API_BASE
+      timeout: 60
+  - model_name: code-lightweight-glm
+    litellm_params:
+      model: os.environ/ZHIPUAI_MODEL
+      api_key: os.environ/ZHIPUAI_API_KEY
+      api_base: os.environ/ZHIPUAI_API_BASE
+      timeout: 60
+
+router_settings:
+  num_retries: 1
+  request_timeout: 120
+  allowed_fails: 3
+  cooldown_time: 30
+  fallbacks:
+    - code-reasoning: [code-reasoning-chat, code-reasoning-glm]
+    - code-structured: [code-structured-glm]
+    - code-lightweight: [code-lightweight-glm]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  user_api_key_cache_ttl: 300
+
+litellm_settings:
+  callbacks: [prometheus]
+  cache: true
+  enable_redis_auth_cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    password: os.environ/REDIS_PASSWORD
+    namespace: litellm
+    supported_call_types: []
+  prometheus_metrics_config:
+    - group: proxy_requests
+      metrics: [litellm_proxy_total_requests_metric, litellm_proxy_failed_requests_metric]
+      include_labels: [status_code, requested_model, model_group]
+    - group: deployment_responses
+      metrics: [litellm_deployment_success_responses, litellm_deployment_failure_responses]
+      include_labels: [requested_model, api_provider]
+    - group: fallbacks
+      metrics: [litellm_deployment_successful_fallbacks, litellm_deployment_failed_fallbacks]
+      include_labels: [requested_model, fallback_model, exception_status]
+    - group: deployment_state
+      metrics: [litellm_deployment_state]
+      include_labels: [litellm_model_name, api_provider]
+    - group: usage
+      metrics: [litellm_input_tokens_metric, litellm_output_tokens_metric, litellm_total_tokens_metric, litellm_spend_metric]
+      include_labels: [requested_model, model, api_provider, api_key_alias]
+    - group: latency
+      metrics: [litellm_request_total_latency_metric, litellm_llm_api_latency_metric]
+      include_labels: [requested_model, model, api_provider, api_key_alias]

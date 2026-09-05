@@ -16,6 +16,11 @@ task_plan.md
 .codex-mysql/
 .worktrees/
 .venv/
+infrastructure/litellm/.venv/
+infrastructure/litellm/.env
+infrastructure/litellm/.gateway.pid
+infrastructure/litellm/.contract-*.pid
+secrets/
 RainN0Coding-frontend/node_modules/
 RainN0Coding-frontend/dist/
 verified_code/

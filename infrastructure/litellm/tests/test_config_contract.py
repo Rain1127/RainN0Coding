@@ -1,0 +1,32 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[3]
+CONFIG = ROOT / "infrastructure" / "litellm" / "config.yaml"
+ENV_EXAMPLE = ROOT / "infrastructure" / "litellm" / ".env.example"
+
+
+def test_gateway_config_exposes_only_stable_business_models():
+    text = CONFIG.read_text(encoding="utf-8")
+    for model in ("code-reasoning", "code-structured", "code-lightweight"):
+        assert f"model_name: {model}" in text
+    assert "num_retries: 1" in text
+    assert "code-reasoning: [code-reasoning-chat, code-reasoning-glm]" in text
+    assert "callbacks: [prometheus]" in text
+
+
+def test_gateway_config_references_environment_instead_of_secrets():
+    text = CONFIG.read_text(encoding="utf-8")
+    assert "os.environ/LITELLM_MASTER_KEY" in text
+    assert "os.environ/DATABASE_URL" in text
+    assert "os.environ/DEEPSEEK_API_KEY" in text
+    assert "os.environ/ZHIPUAI_API_KEY" in text
+    assert "sk-your" not in text
+
+
+def test_gateway_env_contract_keeps_provider_keys_out_of_python_agent():
+    text = ENV_EXAMPLE.read_text(encoding="utf-8")
+    assert "DATABASE_URL=" in text
+    assert "LITELLM_MASTER_KEY=" in text
+    assert "DEEPSEEK_API_KEY=" in text
+    assert "ZHIPUAI_API_KEY=" in text
