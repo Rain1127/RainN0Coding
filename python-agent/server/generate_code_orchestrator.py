@@ -8,6 +8,7 @@ from typing import Any
 from guardrails.audit import audit_from_decision
 from guardrails.engine import evaluate_prompt
 from guardrails.models import PromptContext
+from request_context import bind_request_context
 from tracing import resolve_trace_id, set_current_trace_id
 
 
@@ -134,19 +135,25 @@ async def orchestrate_generate_code(
     async def event_generator():
         status = "success"
         try:
-            async for event in stream_workflow(
-                user_request=request.prompt,
+            with bind_request_context(
+                request_id=request.request_id,
+                trace_id=resolved_trace_id,
                 user_id=request.user_id,
                 app_id=request.app_id,
-                code_gen_type=request.code_gen_type,
-                user_role=request.user_role,
-                trace_id=resolved_trace_id,
-                request_id=request.request_id,
             ):
-                event_status = _status_from_sse_event(event)
-                if event_status and status == "success":
-                    status = event_status
-                yield {"data": event}
+                async for event in stream_workflow(
+                    user_request=request.prompt,
+                    user_id=request.user_id,
+                    app_id=request.app_id,
+                    code_gen_type=request.code_gen_type,
+                    user_role=request.user_role,
+                    trace_id=resolved_trace_id,
+                    request_id=request.request_id,
+                ):
+                    event_status = _status_from_sse_event(event)
+                    if event_status and status == "success":
+                        status = event_status
+                    yield {"data": event}
         except Exception:
             status = "error"
             raise

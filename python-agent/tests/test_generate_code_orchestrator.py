@@ -261,3 +261,44 @@ def test_orchestrate_generate_code_records_error_and_releases_permit_when_stream
     assert semaphore.release_calls == 1
     assert metric.inc_calls == 1
     assert metric.dec_calls == 1
+
+
+def test_orchestrate_generate_code_binds_context_for_stream_lifetime(monkeypatch):
+    import server.generate_code_orchestrator as orchestrator
+    from request_context import get_request_metadata
+
+    monkeypatch.setattr(orchestrator.config, "GUARDRAILS_ENABLED", False)
+    monkeypatch.setattr(orchestrator, "resolve_trace_id", lambda trace_id: "trace-context")
+    monkeypatch.setattr(orchestrator, "set_current_trace_id", lambda trace_id: None)
+
+    semaphore = _FakeSemaphore()
+    metric = _FakeMetric()
+
+    async def fake_stream_workflow(**kwargs):
+        assert get_request_metadata() == {
+            "request_id": "req-context",
+            "trace_id": "trace-context",
+            "user_id": "user-context",
+            "app_id": "app-context",
+        }
+        yield json.dumps({"type": "done", "status": "success"})
+
+    result = asyncio.run(
+        orchestrator.orchestrate_generate_code(
+            _request(
+                request_id="req-context",
+                trace_id="incoming-trace",
+                user_id="user-context",
+                app_id="app-context",
+            ),
+            semaphore=semaphore,
+            stream_workflow=fake_stream_workflow,
+            record_request=lambda *args: None,
+            active_requests_metric=metric,
+            logger=_logger(),
+        )
+    )
+
+    assert result.event_generator is not None
+    asyncio.run(_collect_events(result.event_generator))
+    assert get_request_metadata() == {}
