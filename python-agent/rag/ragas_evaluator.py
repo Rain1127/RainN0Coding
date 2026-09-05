@@ -4,7 +4,7 @@ RAGAS RAG 质量评估器
 模式:
   1. online (轻量): 用检索 score 计算 precision/recall，不调 LLM，不阻塞主流程
   2. offline (完整): 用 RAGAS LLM 评估 faithfulness/context_relevancy，事后批量跑
-     Judge LLM: deepseek-v4-pro (可配置 RAGAS_JUDGE_MODEL 环境变量)
+     Judge LLM: LiteLLM reasoning 别名（可配置 RAGAS_JUDGE_MODEL 环境变量）
 
 用法:
   from rag.ragas_evaluator import evaluate_online, evaluate_offline
@@ -90,10 +90,10 @@ def create_ragas_embeddings():
 
 def create_ragas_judge_llm():
     """
-    创建 RAGAS 离线评估用的 Judge LLM（deepseek-v4-pro）。
+    创建通过 LiteLLM 调用的 RAGAS 离线评估 Judge LLM。
 
     使用 RAGAS 0.4.x 的 llm_factory + OpenAI 兼容客户端，
-    指向 DeepSeek API，温度设为 0 确保评估结果稳定可复现。
+    使用 reasoning 业务模型别名，温度设为 0 确保评估结果稳定可复现。
 
     Returns:
         InstructorBaseRagasLLM 实例，可直接传给 ragas.evaluate() 的 metrics
@@ -102,9 +102,10 @@ def create_ragas_judge_llm():
     import openai
 
     client = openai.OpenAI(
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.LITELLM_API_KEY,
+        base_url=config.LITELLM_BASE_URL,
         timeout=config.LLM_TIMEOUT,
+        max_retries=0,
     )
     return llm_factory(
         model=config.RAGAS_JUDGE_MODEL,
@@ -116,7 +117,7 @@ def evaluate_offline(dataset: list[dict]) -> list[dict]:
     """
     离线评估（完整 RAGAS，需要 Judge LLM）。
 
-    使用 deepseek-v4-pro 作为 Judge LLM 对生成结果进行多维度评估。
+    使用 LiteLLM reasoning 业务模型对生成结果进行多维度评估。
 
     dataset: [{"question": str, "answer": str, "contexts": [str], "ground_truth": str}]
 

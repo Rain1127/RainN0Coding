@@ -1,11 +1,6 @@
-"""统一的 LLM 实例工厂 —— 多候选路由 + 熔断降级
+"""统一的 LLM 实例工厂 —— 通过 LiteLLM 使用业务模型组
 
 所有 Agent 通过此模块获取模型调用能力。
-
-变更 2026-05-25:
-  - create_json_parser() 集成 ModelRouter 多候选路由
-  - 支持 reasoning / structured / lightweight 三组候选
-  - 全部候选失败时降级返回 None
 """
 import json
 from langchain_openai import ChatOpenAI
@@ -15,13 +10,14 @@ from core.model_router import model_router
 
 # 创建 LLM 实例
 def create_llm(temperature: float | None = None) -> ChatOpenAI:
-    """通用 LLM（deepseek-v4-pro，自由文本生成）—— 保留兼容"""
+    """创建使用 LiteLLM reasoning 别名的兼容客户端。"""
     return ChatOpenAI(
-        model=config.DEEPSEEK_MODEL,
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        model=config.LLM_REASONING_MODEL,
+        api_key=config.LITELLM_API_KEY,
+        base_url=config.LITELLM_BASE_URL,
         temperature=temperature if temperature is not None else config.LLM_TEMPERATURE,
         max_tokens=config.LLM_MAX_TOKENS,
+        max_retries=0,
     )
 
 
@@ -70,7 +66,7 @@ def _call_with_parser(messages: list, output_schema: type[BaseModel],
 def create_json_parser(output_schema: type[BaseModel], field_spec: str,
                        group: str = "structured", agent_name: str = None):
     """
-    创建 JSON 解析器 —— 多候选路由 + 熔断降级。
+    创建 JSON 解析器，由 LiteLLM 处理模型选择和故障转移。
 
     用法:
         parser = create_json_parser(PRD, PRD_FIELD_SPEC, group="structured",
@@ -107,13 +103,14 @@ def create_json_parser(output_schema: type[BaseModel], field_spec: str,
 
 
 def create_reasoning_llm() -> ChatOpenAI:
-    """推理模型（保留兼容）"""
+    """创建使用 LiteLLM reasoning 别名的推理客户端。"""
     return ChatOpenAI(
-        model=config.REASONING_MODEL,
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        model=config.LLM_REASONING_MODEL,
+        api_key=config.LITELLM_API_KEY,
+        base_url=config.LITELLM_BASE_URL,
         temperature=0.0,
-        max_tokens=16384,
+        max_tokens=config.LLM_MAX_TOKENS,
+        max_retries=0,
     )
 
 
@@ -172,8 +169,8 @@ def create_tool_enabled_llm(tools: list, group: str = "reasoning"):
     """
     创建带工具绑定的 LLM（供 Coder Agent 的 ReAct 循环使用）。
 
-    每轮调用都经过 ModelRouter，因此主模型失败或熔断时仍可切换到
-    同组后续候选。reasoning_content 由 coder_agent 在消息回传前清除。
+    每轮调用都经过 ModelRouter；重试、冷却和故障转移由 LiteLLM 负责。
+    reasoning_content 由 coder_agent 在消息回传前清除。
 
     Args:
         tools: LangChain @tool 装饰器创建的 Tool 对象列表

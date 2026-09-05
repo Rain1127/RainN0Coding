@@ -26,14 +26,14 @@ from config import config
 def _create_model_client() -> OpenAIChatCompletionClient:
     """创建 AutoGen 兼容的模型客户端。
 
-    AutoGen 0.7 需要显式 model_info 来声明模型能力。
-    deepseek-v4-pro 不支持 function_calling / json_output / structured_output。
+    AutoGen 0.7 需要显式 model_info 来声明网关模型能力。
     """
     return OpenAIChatCompletionClient(
-        model=config.DEEPSEEK_MODEL,
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        model=config.LLM_REASONING_MODEL,
+        api_key=config.LITELLM_API_KEY,
+        base_url=config.LITELLM_BASE_URL,
         temperature=0.1,
+        max_retries=0,
         model_info={
             "function_calling": False,
             "json_output": False,

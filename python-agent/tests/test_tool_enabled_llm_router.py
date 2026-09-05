@@ -6,6 +6,38 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import llm_factory
 
 
+def test_compatibility_llm_uses_gateway_reasoning_alias(monkeypatch):
+    captured = {}
+
+    class FakeLlm:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(llm_factory, "ChatOpenAI", FakeLlm)
+
+    llm_factory.create_llm(temperature=0.2)
+
+    assert captured["model"] == "code-reasoning"
+    assert captured["base_url"].endswith(":4000/v1")
+    assert captured["max_retries"] == 0
+
+
+def test_reasoning_llm_uses_gateway_without_sdk_retries(monkeypatch):
+    captured = {}
+
+    class FakeLlm:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(llm_factory, "ChatOpenAI", FakeLlm)
+
+    llm_factory.create_reasoning_llm()
+
+    assert captured["model"] == "code-reasoning"
+    assert captured["base_url"].endswith(":4000/v1")
+    assert captured["max_retries"] == 0
+
+
 def test_tool_enabled_llm_routes_each_invoke_through_model_fallback(monkeypatch):
     route_calls = []
 

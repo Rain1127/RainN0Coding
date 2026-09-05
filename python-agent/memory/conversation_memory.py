@@ -20,6 +20,7 @@ import time
 import redis
 from typing import Optional
 from config import config
+from request_context import get_request_metadata
 
 
 class ConversationMemory:
@@ -197,17 +198,18 @@ class ConversationMemory:
         try:
             import openai
             client = openai.OpenAI(
-                api_key=config.DEEPSEEK_API_KEY,
-                base_url=config.DEEPSEEK_BASE_URL,
+                api_key=config.LITELLM_API_KEY,
+                base_url=config.LITELLM_BASE_URL,
             )
             response = client.chat.completions.create(
-                model=config.CHAT_MODEL,
+                model=config.LLM_LIGHTWEIGHT_MODEL,
                 messages=[
                     {"role": "system", "content": "你是一个对话摘要助手。输出简洁的中文摘要。"},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,
                 max_tokens=300,
+                extra_body={"metadata": get_request_metadata()},
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
