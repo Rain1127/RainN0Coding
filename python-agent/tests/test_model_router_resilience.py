@@ -2,11 +2,13 @@ import os
 import sys
 from contextlib import contextmanager
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core.model_router as model_router_module
-from core.model_registry import ModelCandidate
 from core.model_router import ModelRouter
+from request_context import bind_request_context
 
 
 @contextmanager
@@ -14,110 +16,75 @@ def _noop_span(*args, **kwargs):
     yield
 
 
-def _make_candidate(name: str, model: str) -> ModelCandidate:
-    return ModelCandidate(
-        name=name,
-        model=model,
-        api_key="test-key",
-        base_url="http://example.com",
-        timeout=1,
-        circuit_breaker=None,
-    )
+def _install_fake_client(monkeypatch, *, content="ok", error=None):
+    captured = {"clients": [], "invocations": []}
 
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["clients"].append(kwargs)
 
-def test_route_waits_briefly_until_active_candidates_recover(monkeypatch):
-    router = ModelRouter()
-    deepseek = _make_candidate("deepseek-chat", "deepseek-chat")
-    glm = _make_candidate("GLM-4.7-Flash", "glm-4.7-flash")
+        def invoke(self, messages, config=None):
+            captured["invocations"].append({"messages": messages, "config": config})
+            if error is not None:
+                raise error
+            return type("Response", (), {"content": content})()
 
-    call_state = {"count": 0}
-    sleep_calls = []
-
-    class DummyGroup:
-        candidates = [deepseek, glm]
-
-        def get_active(self):
-            call_state["count"] += 1
-            if call_state["count"] < 3:
-                return []
-            return [glm]
-
-    monkeypatch.setattr(model_router_module, "get_group", lambda group_name: DummyGroup())
+    monkeypatch.setattr(model_router_module, "ChatOpenAI", FakeClient)
     monkeypatch.setattr(model_router_module, "start_span", _noop_span)
     monkeypatch.setattr(model_router_module, "record_llm_call", lambda *args, **kwargs: None)
-    monkeypatch.setattr(model_router_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
-    monkeypatch.setattr(
-        router,
-        "_call_llm",
-        lambda candidate, messages, parser=None, langsmith_extra=None: f"ok:{candidate.name}",
-    )
-
-    result = router.route("structured", [{"role": "user", "content": "prompt"}])
-
-    assert result == "ok:GLM-4.7-Flash"
-    assert call_state["count"] == 3
-    assert sleep_calls
+    return captured
 
 
-def test_route_probes_glm_first_when_all_candidates_are_still_open(monkeypatch):
-    router = ModelRouter()
-    deepseek = _make_candidate("deepseek-chat", "deepseek-chat")
-    glm = _make_candidate("GLM-4.7-Flash", "glm-4.7-flash")
-    seen = []
+def test_route_calls_gateway_once_with_alias_and_zero_sdk_retries(monkeypatch):
+    captured = _install_fake_client(monkeypatch)
 
-    class DummyGroup:
-        candidates = [deepseek, glm]
+    result = ModelRouter().route("structured", ["prompt"], allow_degraded=False)
 
-        def get_active(self):
-            return []
-
-    monkeypatch.setattr(model_router_module, "get_group", lambda group_name: DummyGroup())
-    monkeypatch.setattr(model_router_module, "start_span", _noop_span)
-    monkeypatch.setattr(model_router_module, "record_llm_call", lambda *args, **kwargs: None)
-    monkeypatch.setattr(model_router_module.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(
-        router,
-        "_call_llm",
-        lambda candidate, messages, parser=None, langsmith_extra=None: seen.append(candidate.name)
-        or f"ok:{candidate.name}",
-    )
-
-    result = router.route("structured", [{"role": "user", "content": "prompt"}])
-
-    assert result == "ok:GLM-4.7-Flash"
-    assert seen == ["GLM-4.7-Flash"]
+    assert result == "ok"
+    assert len(captured["clients"]) == 1
+    assert len(captured["invocations"]) == 1
+    assert captured["clients"][0]["model"] == "code-structured"
+    assert captured["clients"][0]["max_retries"] == 0
+    assert captured["clients"][0]["base_url"].endswith(":4000/v1")
 
 
-def test_route_retries_transient_candidate_failure_once(monkeypatch):
-    router = ModelRouter()
-    glm = _make_candidate("GLM-4.7-Flash", "glm-4.7-flash")
-    attempts = []
-    sleep_calls = []
+def test_route_puts_request_context_in_litellm_metadata(monkeypatch):
+    captured = _install_fake_client(monkeypatch)
 
-    class DummyGroup:
-        candidates = [glm]
+    with bind_request_context(
+        request_id="req-1",
+        trace_id="tr-1",
+        user_id="u-1",
+        app_id="a-1",
+    ):
+        ModelRouter().route(
+            "reasoning",
+            ["prompt"],
+            allow_degraded=False,
+            langsmith_extra={"metadata": {"phase": "coder"}},
+        )
 
-        def get_active(self):
-            return [glm]
+    assert captured["clients"][0]["extra_body"]["metadata"] == {
+        "request_id": "req-1",
+        "trace_id": "tr-1",
+        "user_id": "u-1",
+        "app_id": "a-1",
+        "phase": "coder",
+    }
 
-    def flaky_call(candidate, messages, parser=None, langsmith_extra=None):
-        attempts.append(candidate.name)
-        if len(attempts) == 1:
-            raise TimeoutError("temporary provider timeout")
-        return "recovered"
 
-    monkeypatch.setattr(model_router_module, "get_group", lambda group_name: DummyGroup())
-    monkeypatch.setattr(model_router_module, "start_span", _noop_span)
-    monkeypatch.setattr(model_router_module, "record_llm_call", lambda *args, **kwargs: None)
-    monkeypatch.setattr(model_router_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
-    monkeypatch.setattr(router, "_call_llm", flaky_call)
+def test_route_returns_none_only_when_degraded_mode_is_allowed(monkeypatch):
+    captured = _install_fake_client(monkeypatch, error=TimeoutError("gateway timeout"))
 
-    result = router.route(
-        "reasoning",
-        [{"role": "user", "content": "prompt"}],
-        allow_degraded=False,
-    )
+    result = ModelRouter().route("lightweight", ["prompt"], allow_degraded=True)
 
-    assert result == "recovered"
-    assert attempts == ["GLM-4.7-Flash", "GLM-4.7-Flash"]
-    assert sleep_calls == [model_router_module.TRANSIENT_RETRY_DELAY_SECONDS]
+    assert result is None
+    assert len(captured["clients"]) == 1
+    assert len(captured["invocations"]) == 1
+
+
+def test_route_raises_gateway_error_when_degraded_mode_is_forbidden(monkeypatch):
+    _install_fake_client(monkeypatch, error=TimeoutError("gateway timeout"))
+
+    with pytest.raises(RuntimeError, match="LiteLLM gateway call failed"):
+        ModelRouter().route("reasoning", ["prompt"], allow_degraded=False)
