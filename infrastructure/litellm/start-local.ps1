@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 $gatewayRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $venvRoot = Join-Path $gatewayRoot '.venv'
 $venvPython = Join-Path $venvRoot 'Scripts\python.exe'
+$litellmCommand = Join-Path $venvRoot 'Scripts\litellm.exe'
 $envFile = Join-Path $gatewayRoot '.env'
 $configFile = Join-Path $gatewayRoot 'config.yaml'
 $requirementsFile = Join-Path $gatewayRoot 'requirements.txt'
@@ -15,7 +16,16 @@ if (-not (Test-Path -LiteralPath $envFile)) {
 }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
-    py -3.12 -m venv $venvRoot
+    $repositoryRoot = Split-Path -Parent (Split-Path -Parent $gatewayRoot)
+    $agentPython = Join-Path $repositoryRoot 'python-agent\.venv\Scripts\python.exe'
+    if ($env:LITELLM_BOOTSTRAP_PYTHON) {
+        $bootstrapPython = $env:LITELLM_BOOTSTRAP_PYTHON
+    } elseif (Test-Path -LiteralPath $agentPython) {
+        $bootstrapPython = $agentPython
+    } else {
+        $bootstrapPython = (Get-Command python -ErrorAction Stop).Source
+    }
+    & $bootstrapPython -m venv $venvRoot
     & $venvPython -m pip install --disable-pip-version-check -r $requirementsFile
 }
 
@@ -35,4 +45,4 @@ if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
 }
 
 $port = if ($env:LITELLM_PORT) { $env:LITELLM_PORT } else { '4000' }
-& $venvPython -m litellm --config $configFile --host '127.0.0.1' --port $port
+& $litellmCommand --config $configFile --host '127.0.0.1' --port $port
