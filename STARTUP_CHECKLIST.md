@@ -150,6 +150,13 @@ npm run dev
 
 ## 10. 启动 Prometheus 与 Grafana
 
+Prometheus 使用 master key 抓取受保护的 LiteLLM 指标。先在仓库根目录创建已被 `.gitignore` 排除的 token 文件，文件中只能包含密钥本身，不能带 `Bearer ` 前缀：
+
+```powershell
+New-Item -ItemType Directory -Path secrets -Force | Out-Null
+$env:LITELLM_MASTER_KEY | Set-Content -LiteralPath secrets/litellm_metrics_token -NoNewline
+```
+
 ```powershell
 prometheus --config.file=prometheus.yml
 ```

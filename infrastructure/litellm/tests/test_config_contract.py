@@ -33,6 +33,21 @@ def test_gateway_env_contract_keeps_provider_keys_out_of_python_agent():
     assert "ZHIPUAI_API_KEY=" in text
 
 
+def test_local_start_rejects_missing_and_example_secrets():
+    text = (
+        ROOT / "infrastructure" / "litellm" / "start-local.ps1"
+    ).read_text(encoding="utf-8")
+    for required_name in (
+        "LITELLM_MASTER_KEY",
+        "DATABASE_URL",
+        "DEEPSEEK_API_KEY",
+        "ZHIPUAI_API_KEY",
+    ):
+        assert required_name in text
+    assert "sk-replace-with-random-master-key" in text
+    assert "replace-me" in text
+
+
 def test_litellm_dashboard_uses_current_metrics():
     path = ROOT / "grafana" / "dashboards" / "litellm-gateway.json"
     payload = json.loads(path.read_text(encoding="utf-8"))

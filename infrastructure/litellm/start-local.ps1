@@ -37,11 +37,23 @@ Get-Content -LiteralPath $envFile | ForEach-Object {
     }
 }
 
-if ([string]::IsNullOrWhiteSpace($env:LITELLM_MASTER_KEY)) {
-    throw 'LITELLM_MASTER_KEY must be set in infrastructure/litellm/.env.'
+foreach ($requiredName in @(
+    'LITELLM_MASTER_KEY',
+    'DATABASE_URL',
+    'DEEPSEEK_API_KEY',
+    'ZHIPUAI_API_KEY'
+)) {
+    $requiredValue = [Environment]::GetEnvironmentVariable($requiredName, 'Process')
+    if ([string]::IsNullOrWhiteSpace($requiredValue)) {
+        throw "$requiredName must be set in infrastructure/litellm/.env."
+    }
 }
-if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
-    throw 'DATABASE_URL must be set in infrastructure/litellm/.env.'
+
+if ($env:LITELLM_MASTER_KEY -eq 'sk-replace-with-random-master-key') {
+    throw 'Replace the example LITELLM_MASTER_KEY before starting LiteLLM.'
+}
+if ($env:DATABASE_URL -match 'replace-me') {
+    throw 'Replace the example PostgreSQL password in DATABASE_URL before starting LiteLLM.'
 }
 
 $port = if ($env:LITELLM_PORT) { $env:LITELLM_PORT } else { '4000' }
