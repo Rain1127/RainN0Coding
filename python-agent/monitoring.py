@@ -8,8 +8,7 @@ Prometheus 指标模块 —— FastAPI 自动埋点 + 业务自定义指标
 自定义指标：
     from monitoring import (record_phase_duration, record_llm_call,
                             record_request, record_retries, record_files_generated,
-                            record_rag_cache_hit, update_circuit_breaker,
-                            track_phase_duration)
+                            record_rag_cache_hit, track_phase_duration)
 """
 import time
 import contextvars
@@ -69,14 +68,6 @@ ai_rag_cache_hit_total = Counter(
     "RAG 缓存命中/未命中次数",
     ["status"],  # status: hit / miss
 )
-
-# --- 熔断器 ---
-ai_circuit_breaker_state = Gauge(
-    "ai_circuit_breaker_state",
-    "模型熔断器状态：0=CLOSED, 1=OPEN, 2=HALF_OPEN",
-    ["model_name"],
-)
-
 
 # ============ Agent 阶段追踪（contextvars，跨越异步上下文） ============
 
@@ -148,11 +139,6 @@ def record_files_generated(code_gen_type: str, file_count: int) -> None:
 def record_rag_cache_hit(status: str) -> None:
     """记录 RAG 缓存命中/未命中。status: 'hit' | 'miss'"""
     ai_rag_cache_hit_total.labels(status=status).inc()
-
-
-def update_circuit_breaker(model_name: str, state: int) -> None:
-    """更新模型熔断器状态。state: 0=CLOSED, 1=OPEN, 2=HALF_OPEN"""
-    ai_circuit_breaker_state.labels(model_name=model_name).set(state)
 
 
 # ============ FastAPI 集成 ============

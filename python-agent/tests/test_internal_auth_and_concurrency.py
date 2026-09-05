@@ -128,6 +128,51 @@ def test_health_does_not_require_internal_token(monkeypatch):
     assert response.status_code == 200
 
 
+def test_health_reports_litellm_gateway_without_provider_models(monkeypatch):
+    import httpx
+
+    requested_urls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout):
+            assert timeout == 2.0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def get(self, url):
+            requested_urls.append(url)
+            return FakeResponse()
+
+    monkeypatch.setenv("LITELLM_API_KEY", "sk-agent-test")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    main = load_main(monkeypatch, token="secret")
+    _install_fake_runtime_modules(monkeypatch)
+
+    client = TestClient(main.app)
+    response = client.get("/api/health")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert requested_urls == ["http://127.0.0.1:4000/health/liveliness"]
+    assert payload["llm_gateway"]["configured"] is True
+    assert payload["llm_gateway"]["reachable"] is True
+    assert payload["llm_gateway"]["models"] == [
+        "code-reasoning",
+        "code-structured",
+        "code-lightweight",
+    ]
+    assert "model" not in payload
+    assert "chat_model" not in payload
+
+
 def test_testclient_lifecycle_does_not_emit_on_event_deprecation_warning(monkeypatch):
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")

@@ -13,6 +13,7 @@ import asyncio
 import importlib
 import logging
 
+import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -162,6 +163,15 @@ async def route_code_gen_type_api(request: RouteCodeGenTypeRequest):
 
 async def health():
     """Health check endpoint."""
+    gateway_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(_config().LITELLM_HEALTH_URL)
+            response.raise_for_status()
+            gateway_ok = True
+    except httpx.HTTPError:
+        pass
+
     vector_store_ok = False
     try:
         from rag.vector_store import vector_store
@@ -183,8 +193,11 @@ async def health():
     return JSONResponse(
         {
             "status": "ok",
-            "model": _config().DEEPSEEK_MODEL,
-            "chat_model": _config().CHAT_MODEL,
+            "llm_gateway": {
+                "configured": bool(_config().LITELLM_API_KEY),
+                "reachable": gateway_ok,
+                "models": list(_config().LLM_MODEL_ALIASES.values()),
+            },
             "vector_store_connected": vector_store_ok,
             "vector_db_provider": _config().VECTOR_DB_PROVIDER,
             "milvus_connected": (
@@ -215,7 +228,7 @@ if __name__ == "__main__":
     import uvicorn
 
     logger.info(f"Starting server: http://0.0.0.0:{_config().SERVER_PORT}")
-    logger.info(f"Models: {_config().DEEPSEEK_MODEL} / {_config().CHAT_MODEL}")
+    logger.info(f"LiteLLM models: {list(_config().LLM_MODEL_ALIASES.values())}")
     logger.info(f"Milvus mode: {_config().MILVUS_MODE}")
     uvicorn.run(
         "server.main:app",
