@@ -1,113 +1,134 @@
-# 项目启动清单
+# 项目本地启动清单（无 Docker Compose）
 
-本文档用于在本地启动 `yu-ai-code-mother` 项目。推荐按顺序启动：基础设施 -> Python Agent -> Java 后端 -> Vue 前端。
+本地启动顺序：
 
-## 1. 服务总览
+```text
+MySQL -> PostgreSQL -> Redis -> LiteLLM -> Milvus Lite -> Python -> Java -> Vue -> Prometheus/Grafana
+```
 
-| 服务 | 作用 | 默认端口 / 地址 | 是否必需 |
-| --- | --- | --- | --- |
-| MySQL | 业务数据库，存储用户、应用、聊天记录等 | `localhost:3306` | 必需 |
-| Redis | 登录态、缓存、限流 | `localhost:6379` | 必需 |
-| Milvus | RAG 向量检索 | `localhost:19530` 或 lite 本地文件 | AI 生成建议启用 |
-| Python FastAPI Agent | LangGraph 多 Agent AI 生成引擎 | `http://localhost:8000` | 必需 |
-| Java Spring Boot Backend | 业务网关、认证、CRUD、SSE 代理 | `http://localhost:8123/api` | 必需 |
-| Vue Frontend | Web 前端界面 | 通常为 `http://localhost:5173` | 必需 |
-| Prometheus | 监控 Spring Boot Actuator 指标 | 按本地配置 | 可选 |
+## 1. 服务边界
 
-## 2. 启动前检查
+| 服务 | 作用 | 默认地址 |
+| --- | --- | --- |
+| MySQL | 用户、应用、聊天记录等业务数据 | `127.0.0.1:3306` |
+| PostgreSQL | LiteLLM 虚拟密钥、预算和消费记录 | `127.0.0.1:5432` |
+| Redis | Java 会话/限流与 LiteLLM 鉴权缓存（不同命名空间） | `127.0.0.1:6379` |
+| LiteLLM | 模型选择、重试、故障转移、配额、消费与指标 | `http://127.0.0.1:4000` |
+| Milvus Lite | 本地 RAG 向量检索文件 | Python 进程内 |
+| Python FastAPI | LangGraph 工作流与 SSE | `http://127.0.0.1:8000` |
+| Java Spring Boot | 业务网关、认证、CRUD、SSE 代理 | `http://127.0.0.1:8123/api` |
+| Vue | 开发前端 | `http://127.0.0.1:5173` |
 
-- JDK 使用 `D:/Program Files/Java/jdk-23`，Lombok 注解处理需要 JDK 23+。
-- MySQL 已启动，并存在数据库 `rainn0coding`。
-- Redis 已启动。
-- Python 虚拟环境存在：`python-agent/.venv/Scripts/python.exe`。
-- `python-agent/.env` 已配置模型 API Key、Milvus、Redis 等参数。
-- 前端依赖已安装，或准备执行 `npm install`。
-- 如果使用 Milvus standalone，Docker Desktop 与 WSL2 需要正常运行。
+DeepSeek、智谱密钥只放在 `infrastructure/litellm/.env`。`python-agent/.env` 只保存 LiteLLM 虚拟密钥，不能再保存厂商密钥。
 
-## 3. 启动 MySQL
+## 2. 启动 MySQL
 
-确认 MySQL 服务已启动，并创建数据库：
+使用本机 MySQL 服务，确认端口可用并创建业务数据库：
 
 ```sql
 CREATE DATABASE IF NOT EXISTS rainn0coding;
 ```
 
-如果项目需要初始化表结构，请执行项目提供的 SQL 初始化脚本。
+按项目 SQL 初始化表结构。Java 的 `MYSQL_URL`、`MYSQL_USERNAME`、`MYSQL_PASSWORD` 指向该数据库。
+
+## 3. 启动 PostgreSQL
+
+使用本机 PostgreSQL 服务，在 `psql` 交互会话中创建 LiteLLM 专用角色和数据库：
+
+```text
+psql -U postgres
+CREATE ROLE litellm LOGIN;
+\password litellm
+CREATE DATABASE litellm_gateway OWNER litellm;
+\q
+```
+
+`\password` 会交互读取密码，不会把明文密码写进命令历史。
 
 ## 4. 启动 Redis
 
-启动 Redis 后，确认 Java 后端能够连接到配置中的 Redis 地址。
+启动本机 Redis，并确认密码与以下两处一致：
 
-Redis 用于：
+- Java 使用 Redis DB 0 处理登录态、缓存和限流。
+- LiteLLM 使用 `litellm` 命名空间缓存鉴权结果，不启用响应语义缓存。
 
-- Sa-Token 登录态
-- 缓存
-- 接口限流
-- Python Agent 记忆摘要，视配置而定
+## 5. 配置并启动 LiteLLM
 
-## 5. 启动 Milvus
-
-如果使用 Docker standalone 模式：
-
-```bash
-cd milvus
-docker compose up -d
-```
-
-首次启动或重建 Milvus 后，需要写入 RAG 种子数据：
+首次运行：
 
 ```powershell
-cd python-agent
+Copy-Item infrastructure/litellm/.env.example infrastructure/litellm/.env
+```
+
+编辑 `infrastructure/litellm/.env`，填写随机 `LITELLM_MASTER_KEY`、PostgreSQL `DATABASE_URL`、Redis 密码、DeepSeek 密钥和智谱密钥。不要提交该文件。
+
+在单独终端启动网关：
+
+```powershell
+& '.\infrastructure\litellm\start-local.ps1'
+```
+
+首次启动会在 `infrastructure/litellm/.venv` 安装固定版本的 LiteLLM，不会修改 `python-agent` 的依赖。
+
+创建仅允许三个业务模型的 Python 服务虚拟密钥：
+
+```powershell
+$env:LITELLM_MASTER_KEY = Read-Host 'LiteLLM master key'
+& '.\infrastructure\litellm\provision-agent-key.ps1'
+```
+
+将脚本最后输出的虚拟密钥复制到 `python-agent/.env`：
+
+```dotenv
+LITELLM_BASE_URL=http://127.0.0.1:4000/v1
+LITELLM_HEALTH_URL=http://127.0.0.1:4000/health/liveliness
+LITELLM_API_KEY=粘贴刚生成的虚拟密钥
+LLM_REASONING_MODEL=code-reasoning
+LLM_STRUCTURED_MODEL=code-structured
+LLM_LIGHTWEIGHT_MODEL=code-lightweight
+```
+
+验证网关边界：
+
+```powershell
+$env:LITELLM_API_KEY = Read-Host 'Python agent virtual key'
+& '.\infrastructure\litellm\health-check.ps1'
+```
+
+## 6. 启用本地向量检索
+
+本地不启动 Compose。使用 `python-agent/.env` 中的 Milvus Lite：
+
+```dotenv
+VECTOR_DB_PROVIDER=milvus
+MILVUS_MODE=lite
+```
+
+首次运行后写入种子数据：
+
+```powershell
+Set-Location python-agent
 $env:PYTHONPATH='.'
 & '.\.venv\Scripts\python.exe' rag/seed_milvus.py
 ```
 
-如果使用 `MILVUS_MODE=lite`，请确认 `.env` 中 Milvus lite 路径配置正确。
-
-## 6. 启动 Python Agent
-
-进入 Python Agent 目录：
-
-```bash
-cd python-agent
-```
-
-推荐使用虚拟环境 Python 直接启动，避免 Windows 下 `uv` 导致 torch DLL 兼容问题：
+## 7. 启动 Python Agent
 
 ```powershell
-$env:PYTHONPATH='D:/yu-ai-code-mother/python-agent'
+Set-Location python-agent
+$env:PYTHONPATH='.'
 & '.\.venv\Scripts\python.exe' server/main.py
-```
-
-也可以使用 uvicorn：
-
-```bash
-uv run uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 健康检查：
 
-```bash
-curl http://localhost:8000/api/health
-```
-
-预期服务地址：
-
-```text
-http://localhost:8000
-```
-
-## 7. 启动 Java 后端
-
-在项目根目录执行：
-
 ```powershell
-$env:JAVA_HOME='D:/Program Files/Java/jdk-23'
-$env:Path="$env:JAVA_HOME/bin;$env:Path"
-mvn compile -DskipTests
+Invoke-RestMethod http://127.0.0.1:8000/api/health
 ```
 
-启动 Spring Boot：
+验收：`status=ok`，`llm_gateway.configured=true`，`llm_gateway.reachable=true`，并列出三个 `code-*` 模型。
+
+## 8. 启动 Java 后端
 
 ```powershell
 $env:JAVA_HOME='D:/Program Files/Java/jdk-23'
@@ -115,82 +136,43 @@ $env:Path="$env:JAVA_HOME/bin;$env:Path"
 mvn spring-boot:run
 ```
 
-也可以直接使用 IDE 启动主应用类。
+确认 MySQL、Redis 正常连接，并且 `PYTHON_AI_BASE_URL` 指向 `http://127.0.0.1:8000`。
 
-预期服务地址：
+## 9. 启动 Vue 前端
 
-```text
-http://localhost:8123/api
-```
-
-启动前请确认：
-
-- MySQL 正常连接
-- Redis 正常连接
-- Python Agent `http://localhost:8000` 正常
-
-## 8. 启动 Vue 前端
-
-进入前端目录：
-
-```bash
-cd RainN0Coding-frontend
-```
-
-首次启动先安装依赖：
-
-```bash
+```powershell
+Set-Location RainN0Coding-frontend
 npm install
-```
-
-启动开发服务器：
-
-```bash
 npm run dev
 ```
 
-预期访问地址通常为：
+打开 Vite 输出的本地地址，完成注册/登录、创建应用和代码生成。
 
-```text
-http://localhost:5173
-```
+## 10. 启动 Prometheus 与 Grafana
 
-如果端口被占用，以 Vite 控制台实际输出为准。
-
-## 9. 可选：启动 Prometheus
-
-如果需要采集 Spring Boot Actuator 指标：
-
-```bash
+```powershell
 prometheus --config.file=prometheus.yml
 ```
 
-Prometheus 默认会根据 `prometheus.yml` 抓取：
+Prometheus 必须同时抓取 Java、Python 和 LiteLLM；Grafana 导入仓库中的 provisioning 与 dashboards 配置。
 
-```text
-http://localhost:8123/api/actuator/prometheus
+## 11. 完整验收
+
+1. `health-check.ps1` 全部显示 `[PASS]`。
+2. FastAPI `/api/health` 显示网关已配置且可达。
+3. 前端发起一次代码生成，Java 继续透明代理 SSE。
+4. LiteLLM 日志显示 `code-*` 别名，Python 日志不出现厂商 URL。
+5. PostgreSQL 中的消费记录在 LiteLLM 重启后仍存在。
+6. Prometheus 能查询 LiteLLM 请求、失败、延迟、token、费用和 fallback 指标。
+7. 使用低预算测试虚拟密钥触发预算拒绝，不影响 Python 服务正式虚拟密钥。
+
+## 12. 回归命令
+
+```powershell
+Set-Location python-agent
+$env:PYTHONPATH='.'
+& '.\.venv\Scripts\python.exe' -m pytest tests -v
 ```
-
-## 10. 推荐验证顺序
-
-1. 检查 MySQL、Redis 已运行。
-2. 检查 Milvus 已运行，或 Milvus lite 配置正确。
-3. 执行 Python 健康检查：
-
-   ```bash
-   curl http://localhost:8000/api/health
-   ```
-
-4. 启动 Java 后端，确认控制台无数据库、Redis、Python Agent 连接错误。
-5. 打开前端页面。
-6. 测试注册 / 登录。
-7. 创建应用并发送代码生成请求。
-8. 确认 SSE 流式返回正常。
-9. 确认生成代码可以保存、预览、下载。
-
-## 11. 常用测试命令
-
-Java 测试：
 
 ```powershell
 $env:JAVA_HOME='D:/Program Files/Java/jdk-23'
@@ -198,31 +180,8 @@ $env:Path="$env:JAVA_HOME/bin;$env:Path"
 mvn test
 ```
 
-运行单个 Java 测试类：
-
 ```powershell
-$env:JAVA_HOME='D:/Program Files/Java/jdk-23'
-$env:Path="$env:JAVA_HOME/bin;$env:Path"
-mvn test -Dtest=AiCodeGeneratorFacadeTest
-```
-
-Python 测试：
-
-```powershell
-cd python-agent
-$env:PYTHONPATH='.'
-& '.\.venv\Scripts\python.exe' -m pytest tests/ -v
-```
-
-前端构建：
-
-```bash
-cd RainN0Coding-frontend
+Set-Location RainN0Coding-frontend
+npm test
 npm run build
-```
-
-## 12. 最小启动顺序
-
-```text
-MySQL -> Redis -> Milvus -> Python Agent -> Java Backend -> Vue Frontend
 ```
