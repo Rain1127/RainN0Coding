@@ -1,0 +1,34 @@
+model_list:
+  - model_name: code-reasoning
+    litellm_params:
+      model: openai/fake-primary
+      api_key: sk-fake-primary
+      api_base: os.environ/FAKE_PRIMARY_API_BASE
+      timeout: 2
+  - model_name: code-reasoning-glm
+    litellm_params:
+      model: openai/fake-fallback
+      api_key: sk-fake-fallback
+      api_base: os.environ/FAKE_FALLBACK_API_BASE
+      timeout: 2
+  - model_name: code-structured
+    litellm_params:
+      model: openai/fake-primary
+      api_key: sk-fake-primary
+      api_base: os.environ/FAKE_PRIMARY_API_BASE
+      timeout: 2
+  - model_name: code-lightweight
+    litellm_params:
+      model: openai/fake-primary
+      api_key: sk-fake-primary
+      api_base: os.environ/FAKE_PRIMARY_API_BASE
+      timeout: 2
+
+router_settings:
+  num_retries: 1
+  request_timeout: 5
+  fallbacks:
+    - code-reasoning: [code-reasoning-glm]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
