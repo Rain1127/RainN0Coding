@@ -103,3 +103,43 @@ def test_application_script_starts_private_dependencies_in_order():
     assert "--env PYTHON_AI_INTERNAL_TOKEN" in script
     assert "--volume rain-code-output:/data/code-output" in script
     assert "--volume rain-code-output:/app/tmp" in script
+
+
+def test_observability_configs_use_private_container_dns():
+    prometheus = (CLOUD_DIR / "prometheus.yml").read_text(encoding="utf-8")
+    collector = (CLOUD_DIR / "otel-collector-config.yml").read_text(
+        encoding="utf-8"
+    )
+    tempo = (CLOUD_DIR / "tempo.yml").read_text(encoding="utf-8")
+
+    for target in (
+        "java-api:8123",
+        "python-agent:8000",
+        "litellm:4000",
+    ):
+        assert target in prometheus
+    assert "/etc/prometheus/secrets/litellm_metrics_token" in prometheus
+    assert "endpoint: tempo:4317" in collector
+    assert "insecure: true" in collector
+    assert "endpoint: 0.0.0.0:4317" in collector
+    assert "endpoint: 0.0.0.0:4318" in collector
+    assert "backend: local" in tempo
+    assert "/var/tempo" in tempo
+
+
+def test_observability_script_only_publishes_loopback_grafana():
+    script = (CLOUD_DIR / "start-observability.sh").read_text(
+        encoding="utf-8"
+    )
+    datasource = (ROOT / "grafana" / "datasources" / "prometheus.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert script.count("--publish") == 1
+    assert "--publish 127.0.0.1:3001:3000" in script
+    assert (
+        "${metrics_token_file}:/etc/prometheus/secrets/"
+        "litellm_metrics_token:ro"
+    ) in script
+    assert "GF_SECURITY_ADMIN_PASSWORD" in script
+    assert "${PROMETHEUS_URL}" in datasource

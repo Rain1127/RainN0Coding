@@ -1,0 +1,32 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: RainN0Coding
+    metrics_path: /api/actuator/prometheus
+    scrape_interval: 10s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ["java-api:8123"]
+
+  - job_name: RainN0Coding-python
+    metrics_path: /metrics
+    scrape_interval: 10s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ["python-agent:8000"]
+
+  - job_name: LiteLLM
+    metrics_path: /metrics/
+    scrape_interval: 10s
+    scrape_timeout: 10s
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/litellm_metrics_token
+    static_configs:
+      - targets: ["litellm:4000"]
