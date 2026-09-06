@@ -143,3 +143,58 @@ def test_observability_script_only_publishes_loopback_grafana():
     ) in script
     assert "GF_SECURITY_ADMIN_PASSWORD" in script
     assert "${PROMETHEUS_URL}" in datasource
+
+
+def test_health_check_covers_services_metrics_and_port_boundaries():
+    script = (CLOUD_DIR / "health-check.sh").read_text(encoding="utf-8")
+
+    for name in (
+        "mysql",
+        "postgres",
+        "redis",
+        "qdrant",
+        "litellm",
+        "python-agent",
+        "java-api",
+        "frontend",
+        "tempo",
+        "otel-collector",
+        "prometheus",
+        "grafana",
+    ):
+        assert name in script
+    for job in ("RainN0Coding", "RainN0Coding-python", "LiteLLM"):
+        assert job in script
+    assert "docker port" in script
+    assert "127.0.0.1:3001" in script
+    assert "ALL CLOUD HEALTH CHECKS PASSED" in script
+
+
+def test_rollback_verifies_images_before_replacing_applications():
+    script = (CLOUD_DIR / "rollback.sh").read_text(encoding="utf-8")
+
+    inspect_position = script.index("docker image inspect")
+    start_position = script.index("start-app-services.sh")
+    assert inspect_position < start_position
+    assert "--applications-only" in script
+    assert "--release" in script
+    assert "docker volume rm" not in script
+    assert "docker system prune" not in script
+
+
+def test_runbook_contains_restore_seed_https_and_firewall_gates():
+    runbook = (CLOUD_DIR / "README.md").read_text(encoding="utf-8")
+
+    for required in (
+        "seed_vector_store.py",
+        "mysqldump",
+        "pg_dump",
+        "restore_verify",
+        "rollback.sh",
+        "22",
+        "80",
+        "443",
+        "HTTPS",
+        "待验收",
+    ):
+        assert required in runbook

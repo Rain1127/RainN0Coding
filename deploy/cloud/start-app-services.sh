@@ -1,6 +1,29 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+applications_only=false
+release_override=""
+while (($#)); do
+  case "$1" in
+    --applications-only)
+      applications_only=true
+      shift
+      ;;
+    --release)
+      [[ $# -ge 2 ]] || {
+        echo "--release requires a value." >&2
+        exit 2
+      }
+      release_override="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 versions_file="${script_dir}/versions.env"
 runtime_file="${script_dir}/runtime.env"
@@ -20,6 +43,10 @@ source "$versions_file"
 # shellcheck disable=SC1090
 source "$runtime_file"
 set +a
+
+if [[ -n "$release_override" ]]; then
+  APP_RELEASE="$release_override"
+fi
 
 : "${APP_RELEASE:?APP_RELEASE is required}"
 : "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
@@ -131,28 +158,36 @@ for image in "$frontend_image" "$java_image" "$python_image"; do
   }
 done
 
-postgres_password_encoded="$(urlencode "$POSTGRES_PASSWORD")"
-database_url="postgresql://${POSTGRES_USER}:${postgres_password_encoded}@postgres:5432/${POSTGRES_DB}"
+if [[ "$applications_only" == false ]]; then
+  postgres_password_encoded="$(urlencode "$POSTGRES_PASSWORD")"
+  database_url="postgresql://${POSTGRES_USER}:${postgres_password_encoded}@postgres:5432/${POSTGRES_DB}"
 
-replace_container litellm
-docker run -d --name litellm --network rain-network --restart unless-stopped \
-  --env LITELLM_MASTER_KEY --env DEEPSEEK_API_KEY \
-  --env DEEPSEEK_API_BASE --env DEEPSEEK_REASONING_MODEL \
-  --env DEEPSEEK_CHAT_MODEL --env ZHIPUAI_API_KEY \
-  --env ZHIPUAI_API_BASE --env ZHIPUAI_MODEL \
-  --env REDIS_PASSWORD --env REDIS_HOST=redis --env REDIS_PORT=6379 \
-  --env DATABASE_URL="$database_url" \
-  --volume "${script_dir}/../../infrastructure/litellm/config.yaml:/app/config.yaml:ro" \
-  --health-cmd='python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:4000/health/liveliness\", timeout=3)"' \
-  --health-interval=10s --health-timeout=5s --health-retries=18 \
-  "$LITELLM_IMAGE" --config /app/config.yaml --port 4000 >/dev/null
-wait_healthy litellm
+  replace_container litellm
+  docker run -d --name litellm --network rain-network --restart unless-stopped \
+    --env LITELLM_MASTER_KEY --env DEEPSEEK_API_KEY \
+    --env DEEPSEEK_API_BASE --env DEEPSEEK_REASONING_MODEL \
+    --env DEEPSEEK_CHAT_MODEL --env ZHIPUAI_API_KEY \
+    --env ZHIPUAI_API_BASE --env ZHIPUAI_MODEL \
+    --env REDIS_PASSWORD --env REDIS_HOST=redis --env REDIS_PORT=6379 \
+    --env DATABASE_URL="$database_url" \
+    --volume "${script_dir}/../../infrastructure/litellm/config.yaml:/app/config.yaml:ro" \
+    --health-cmd='python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:4000/health/liveliness\", timeout=3)"' \
+    --health-interval=10s --health-timeout=5s --health-retries=18 \
+    "$LITELLM_IMAGE" --config /app/config.yaml --port 4000 >/dev/null
+  wait_healthy litellm
+else
+  require_healthy litellm
+fi
 
 agent_key_file="${CLOUD_SECRETS_DIR}/litellm_agent_key"
 if [[ -z "${LITELLM_API_KEY:-}" ]]; then
   if [[ -s "$agent_key_file" ]]; then
     LITELLM_API_KEY="$(<"$agent_key_file")"
   else
+    [[ "$applications_only" == false ]] || {
+      echo "Missing ${agent_key_file}; run a full application start first." >&2
+      exit 1
+    }
     install -d -m 700 "$CLOUD_SECRETS_DIR"
     LITELLM_API_KEY="$(docker exec litellm python -c '
 import json
