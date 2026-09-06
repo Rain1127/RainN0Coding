@@ -3,6 +3,7 @@ application-local.yml
 *.local.yml
 *.env
 !.env.example
+!deploy/cloud/versions.env
 python-agent/.env
 AGENTS.md
 CLAUDE.md
