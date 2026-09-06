@@ -212,7 +212,7 @@ request = urllib.request.Request(
 )
 with urllib.request.urlopen(request, timeout=20) as response:
     print(json.load(response)["key"], end="")
-')'
+'
 }
 
 persist_agent_key() {
