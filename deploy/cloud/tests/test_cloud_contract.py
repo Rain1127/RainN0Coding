@@ -47,3 +47,39 @@ def test_runtime_example_contains_no_secret_values():
 
     assert secret_names
     assert all(runtime[key] == "" for key in secret_names)
+
+
+def test_prerequisite_script_creates_only_named_resources():
+    script = (CLOUD_DIR / "create-network-and-volumes.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "docker network inspect rain-network" in script
+    for volume in {
+        "rain-mysql",
+        "rain-postgres",
+        "rain-redis",
+        "rain-qdrant",
+        "rain-code-output",
+        "rain-prometheus",
+        "rain-grafana",
+        "rain-tempo",
+    }:
+        assert volume in script
+    assert "docker system prune" not in script
+
+
+def test_data_script_has_private_ports_and_health_gates():
+    script = (CLOUD_DIR / "start-data-services.sh").read_text(
+        encoding="utf-8"
+    )
+
+    for name in ("mysql", "postgres", "redis", "qdrant"):
+        assert f"replace_container {name}" in script
+        assert f"wait_healthy {name}" in script
+    assert "--publish" not in script
+    assert "--network rain-network" in script
+    assert '${MYSQL_PASSWORD:?' in script
+    assert '${POSTGRES_PASSWORD:?' in script
+    assert '${REDIS_PASSWORD:?' in script
+    assert "--env REDIS_PASSWORD" in script
