@@ -61,6 +61,16 @@ wait_healthy() {
   return 1
 }
 
+preflight_image() {
+  local image="$1"
+  docker image inspect "$image" >/dev/null 2>&1 \
+    || docker pull "$image" >/dev/null
+}
+
+for image in "$MYSQL_IMAGE" "$POSTGRES_IMAGE" "$REDIS_IMAGE" "$QDRANT_IMAGE"; do
+  preflight_image "$image"
+done
+
 "${script_dir}/create-network-and-volumes.sh"
 
 replace_container mysql

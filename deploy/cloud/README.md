@@ -165,8 +165,9 @@ docker exec postgres sh -c \
 docker exec -i postgres sh -c \
   'exec pg_restore -U "$POSTGRES_USER" --exit-on-error -d litellm_restore_verify' \
   <"$postgres_backup"
-docker exec postgres sh -c \
-  'psql -U "$POSTGRES_USER" -d litellm_restore_verify -tAc "SELECT count(*) FROM information_schema.tables" | grep -Eq "[1-9]"'
+docker exec postgres psql -U "$POSTGRES_USER" -d litellm_restore_verify -tAc \
+  "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" \
+  | grep -Eq '[1-9]'
 docker exec postgres sh -c \
   'dropdb -U "$POSTGRES_USER" litellm_restore_verify'
 ```

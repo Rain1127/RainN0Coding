@@ -129,6 +129,12 @@ require_healthy() {
   fi
 }
 
+preflight_image() {
+  local image="$1"
+  docker image inspect "$image" >/dev/null 2>&1 \
+    || docker pull "$image" >/dev/null
+}
+
 urlencode() {
   local raw="$1"
   local encoded=""
@@ -157,6 +163,9 @@ for image in "$frontend_image" "$java_image" "$python_image"; do
     exit 1
   }
 done
+if [[ "$applications_only" == false ]]; then
+  preflight_image "$LITELLM_IMAGE"
+fi
 
 if [[ "$applications_only" == false ]]; then
   postgres_password_encoded="$(urlencode "$POSTGRES_PASSWORD")"
@@ -179,17 +188,8 @@ else
   require_healthy litellm
 fi
 
-agent_key_file="${CLOUD_SECRETS_DIR}/litellm_agent_key"
-if [[ -z "${LITELLM_API_KEY:-}" ]]; then
-  if [[ -s "$agent_key_file" ]]; then
-    LITELLM_API_KEY="$(<"$agent_key_file")"
-  else
-    [[ "$applications_only" == false ]] || {
-      echo "Missing ${agent_key_file}; run a full application start first." >&2
-      exit 1
-    }
-    install -d -m 700 "$CLOUD_SECRETS_DIR"
-    LITELLM_API_KEY="$(docker exec litellm python -c '
+provision_agent_key() {
+  docker exec litellm python -c '
 import json
 import os
 import urllib.request
@@ -212,16 +212,71 @@ request = urllib.request.Request(
 )
 with urllib.request.urlopen(request, timeout=20) as response:
     print(json.load(response)["key"], end="")
-')"
+')'
+}
+
+persist_agent_key() {
+  install -d -m 700 "$CLOUD_SECRETS_DIR"
+  umask 077
+  printf '%s' "$LITELLM_API_KEY" >"$agent_key_file"
+  chmod 600 "$agent_key_file"
+}
+
+validate_agent_key() {
+  docker exec \
+    --env LITELLM_AGENT_KEY="$LITELLM_API_KEY" \
+    litellm python -c '
+import json
+import os
+import urllib.request
+
+request = urllib.request.Request(
+    "http://127.0.0.1:4000/v1/models",
+    headers={"Authorization": "Bearer " + os.environ["LITELLM_AGENT_KEY"]},
+)
+with urllib.request.urlopen(request, timeout=10) as response:
+    models = {item["id"] for item in json.load(response).get("data", [])}
+required = {"code-reasoning", "code-structured", "code-lightweight"}
+raise SystemExit(0 if required <= models else 1)
+' >/dev/null
+}
+
+agent_key_file="${CLOUD_SECRETS_DIR}/litellm_agent_key"
+runtime_agent_key="${LITELLM_API_KEY:-}"
+if [[ -z "$runtime_agent_key" ]]; then
+  if [[ -s "$agent_key_file" ]]; then
+    LITELLM_API_KEY="$(<"$agent_key_file")"
+  else
+    [[ "$applications_only" == false ]] || {
+      echo "Missing ${agent_key_file}; run a full application start first." >&2
+      exit 1
+    }
+    LITELLM_API_KEY="$(provision_agent_key)"
     [[ "$LITELLM_API_KEY" == sk-* ]] || {
       echo "LiteLLM returned an invalid service key." >&2
       exit 1
     }
-    umask 077
-    printf '%s' "$LITELLM_API_KEY" >"$agent_key_file"
-    chmod 600 "$agent_key_file"
+    persist_agent_key
     echo "Provisioned the python-agent virtual key in ${agent_key_file}."
   fi
+fi
+
+if ! validate_agent_key; then
+  if [[ "$applications_only" == true || -n "$runtime_agent_key" ]]; then
+    echo "The configured LiteLLM agent key is invalid or missing model access." >&2
+    exit 1
+  fi
+  LITELLM_API_KEY="$(provision_agent_key)"
+  [[ "$LITELLM_API_KEY" == sk-* ]] || {
+    echo "LiteLLM returned an invalid replacement service key." >&2
+    exit 1
+  }
+  persist_agent_key
+  validate_agent_key || {
+    echo "The replacement LiteLLM agent key failed validation." >&2
+    exit 1
+  }
+  echo "Replaced a stale python-agent virtual key."
 fi
 export LITELLM_API_KEY
 

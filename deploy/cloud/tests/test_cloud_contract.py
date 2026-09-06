@@ -83,6 +83,7 @@ def test_data_script_has_private_ports_and_health_gates():
     assert '${POSTGRES_PASSWORD:?' in script
     assert '${REDIS_PASSWORD:?' in script
     assert "--env REDIS_PASSWORD" in script
+    assert script.index("preflight_image") < script.index("replace_container mysql")
 
 
 def test_application_script_starts_private_dependencies_in_order():
@@ -103,6 +104,9 @@ def test_application_script_starts_private_dependencies_in_order():
     assert "--env PYTHON_AI_INTERNAL_TOKEN" in script
     assert "--volume rain-code-output:/data/code-output" in script
     assert "--volume rain-code-output:/app/tmp" in script
+    assert script.index("validate_agent_key") < script.index(
+        "replace_container python-agent"
+    )
 
 
 def test_observability_configs_use_private_container_dns():
@@ -143,6 +147,7 @@ def test_observability_script_only_publishes_loopback_grafana():
     ) in script
     assert "GF_SECURITY_ADMIN_PASSWORD" in script
     assert "${PROMETHEUS_URL}" in datasource
+    assert script.index("preflight_image") < script.index("replace_container tempo")
 
 
 def test_health_check_covers_services_metrics_and_port_boundaries():
@@ -198,3 +203,4 @@ def test_runbook_contains_restore_seed_https_and_firewall_gates():
         "待验收",
     ):
         assert required in runbook
+    assert "table_schema = 'public'" in runbook

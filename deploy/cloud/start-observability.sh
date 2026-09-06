@@ -93,6 +93,18 @@ wait_http() {
   return 1
 }
 
+preflight_image() {
+  local image="$1"
+  docker image inspect "$image" >/dev/null 2>&1 \
+    || docker pull "$image" >/dev/null
+}
+
+for image in \
+  "$PROMETHEUS_IMAGE" "$GRAFANA_IMAGE" "$OTEL_IMAGE" \
+  "$TEMPO_IMAGE" "$CURL_IMAGE"; do
+  preflight_image "$image"
+done
+
 for dependency in litellm python-agent java-api frontend; do
   require_healthy "$dependency"
 done
