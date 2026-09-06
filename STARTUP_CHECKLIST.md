@@ -45,12 +45,33 @@ CREATE DATABASE litellm_gateway OWNER litellm;
 
 `\password` 会交互读取密码，不会把明文密码写进命令历史。
 
+当前 Windows 验证机使用 PostgreSQL 17.11 的免安装发行包，目录为
+`D:\PostgreSQLPortable\17`，数据目录为 `D:\PostgreSQLPortable\17\data`。
+未注册 Windows Service；重启电脑后可用以下命令启动：
+
+```powershell
+$pgHome = 'D:\PostgreSQLPortable\17'
+Start-Process `
+  -FilePath "$pgHome\bin\pg_ctl.exe" `
+  -ArgumentList @('start', '-D', "$pgHome\data", '-l', "$pgHome\postgresql.log", '-w') `
+  -WindowStyle Hidden
+& "$pgHome\bin\pg_isready.exe" -h 127.0.0.1 -p 5432
+```
+
+管理员与 LiteLLM 数据库凭据分别保存在该目录下 ACL 受限的本地 `.env`
+文件中，不进入仓库。
+
 ## 4. 启动 Redis
 
 启动本机 Redis，并确认密码与以下两处一致：
 
 - Java 使用 Redis DB 0 处理登录态、缓存和限流。
 - LiteLLM 使用 `litellm` 命名空间缓存鉴权结果，不启用响应语义缓存。
+
+LiteLLM 1.98.0 的原子限流脚本不能在当前 Windows Redis 3.2.100 上可靠
+执行。日志出现 `falling back to in-memory enforcement` 时，只能视为单实例
+本地降级，不能作为多实例统一配额验收通过。云服务器固定使用 Redis 7；本机
+如需完整验证 Redis 协同限流，也应升级到兼容版本后再验收。
 
 ## 5. 配置并启动 LiteLLM
 
@@ -193,13 +214,19 @@ npm test
 npm run build
 ```
 
-## 13. 本次自动化验收记录（2026-09-05）
+## 13. 本次自动化与真实链路验收记录（2026-09-06）
 
-- LiteLLM 配置、请求上下文、路由边界、健康检查和监控契约：最新定向回归 `49 passed`。
-- LiteLLM 隔离运行契约：主模型返回 500 后重试一次并切换备用模型；双模型失败时返回非 2xx；Prometheus 实际导出面板所需指标，`3 passed`。
+- LiteLLM 配置与隔离 fallback 契约：`11 passed`。主模型返回 500 后重试一次并切换备用模型；双模型失败时返回非 2xx。
+- 请求归因定向回归：`14 passed`。ModelRouter、兼容 LangChain 客户端、会话摘要、AutoGen 和 RAGAS 均携带可持久化的 `request_id/trace_id/user_id/app_id`。
 - Java：`113 tests`，`0 failures`，`0 errors`。
 - Vue：`266 passed`，`vue-tsc -b` 通过，Vite 生产构建通过（产物写入系统临时目录，未覆盖仓库静态资源）。
 - Python 全量：`202 passed, 7 skipped, 1 failed`。唯一失败为本机 `127.0.0.1:6333` 未运行 Qdrant；另有 `onnxruntime/fastembed` 的 Windows 原生访问冲突诊断，但 pytest 仍完成并给出上述结果。
 - 生产 Python 代码未检出 DeepSeek/智谱 API Key 名称或厂商直连 URL；密钥扫描命中项均为 `.env.example` 占位符或 RAG 示例文本，不是真实凭据。
+- PostgreSQL 17.11 已安装到 D 盘；LiteLLM 1.98.0、PostgreSQL、Redis 和 Python Agent 当前均已启动，网关与 Python 健康检查返回 HTTP 200。
+- PostgreSQL 当前持久化 `50` 条消费记录和 `1` 个 `python-agent` 虚拟密钥，总记录成本为 `0.18093242`；其中 `23` 条已按 `4` 个业务请求写入完整请求元数据。
+- 真实 ModelRouter 调用已返回成功并写入 token/成本；两次 FastAPI SSE 生成均以 `done=success` 结束，第二次产生 `52` 个 SSE 事件，并按业务请求归集 `20` 次成功模型调用。
 
-本机真实链路验收仍待完成：当前仅 MySQL 3306 在监听，PostgreSQL 5432、Redis 6379、LiteLLM 4000、Python 8000、Java 8123 和 Prometheus 9090 均未启动，且 `infrastructure/litellm/.env` 尚未创建。配置好本地服务与真实厂商密钥后，按第 1～11 节执行即可完成最终验收。
+尚未通过的本机边界：Java 8123 缺少 MySQL 登录密码，Qdrant 6333 未启动，
+Prometheus 9090 未启动；当前 Redis 3.2.100 会让 LiteLLM 的原子限流降级到
+进程内存。因此整栈 API smoke、Prometheus target UP、Qdrant 集成和分布式限流
+仍是待验收项，不能标记为完成。
