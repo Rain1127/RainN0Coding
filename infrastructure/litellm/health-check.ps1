@@ -63,7 +63,7 @@ if ([string]::IsNullOrWhiteSpace($MasterKey)) {
 }
 $metricsArguments = @{
     Name = 'Prometheus metrics'
-    Uri = "$gatewayBase/metrics"
+    Uri = "$gatewayBase/metrics/"
     Headers = @{ Authorization = "Bearer $MasterKey" }
 }
 $metrics = Assert-Http @metricsArguments

@@ -1,2 +1,4 @@
 litellm[proxy]==1.98.0
+prisma==0.11.0
 prometheus-client==0.25.0
+redis==5.2.1

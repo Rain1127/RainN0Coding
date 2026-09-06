@@ -39,7 +39,7 @@ scrape_configs:
 
   # LiteLLM 网关监控（token 文件只包含密钥本身，不含 Bearer 前缀）
   - job_name: 'LiteLLM'
-    metrics_path: '/metrics'
+    metrics_path: '/metrics/'
     authorization:
       type: Bearer
       credentials_file: 'secrets/litellm_metrics_token'
