@@ -22,6 +22,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 from dataclasses import dataclass, field
 from config import config
+from request_context import build_litellm_headers
 
 
 @dataclass
@@ -106,6 +107,7 @@ def create_ragas_judge_llm():
         base_url=config.LITELLM_BASE_URL,
         timeout=config.LLM_TIMEOUT,
         max_retries=0,
+        default_headers=build_litellm_headers(),
     )
     return llm_factory(
         model=config.RAGAS_JUDGE_MODEL,

@@ -20,7 +20,7 @@ import time
 import redis
 from typing import Optional
 from config import config
-from request_context import get_request_metadata
+from request_context import build_litellm_metadata
 
 
 class ConversationMemory:
@@ -209,7 +209,7 @@ class ConversationMemory:
                 ],
                 temperature=0.1,
                 max_tokens=300,
-                extra_body={"metadata": get_request_metadata()},
+                extra_body={"metadata": build_litellm_metadata()},
             )
             return response.choices[0].message.content.strip()
         except Exception as e:

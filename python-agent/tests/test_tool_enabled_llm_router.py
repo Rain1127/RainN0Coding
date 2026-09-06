@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import llm_factory
+from request_context import bind_request_context
 
 
 def test_compatibility_llm_uses_gateway_reasoning_alias(monkeypatch):
@@ -15,11 +16,18 @@ def test_compatibility_llm_uses_gateway_reasoning_alias(monkeypatch):
 
     monkeypatch.setattr(llm_factory, "ChatOpenAI", FakeLlm)
 
-    llm_factory.create_llm(temperature=0.2)
+    with bind_request_context(
+        request_id="req-compat",
+        trace_id="trace-compat",
+        user_id="user-compat",
+        app_id="app-compat",
+    ):
+        llm_factory.create_llm(temperature=0.2)
 
     assert captured["model"] == "code-reasoning"
     assert captured["base_url"].endswith(":4000/v1")
     assert captured["max_retries"] == 0
+    assert captured["extra_body"]["metadata"]["spend_logs_metadata"]["request_id"] == "req-compat"
 
 
 def test_reasoning_llm_uses_gateway_without_sdk_retries(monkeypatch):
@@ -31,11 +39,20 @@ def test_reasoning_llm_uses_gateway_without_sdk_retries(monkeypatch):
 
     monkeypatch.setattr(llm_factory, "ChatOpenAI", FakeLlm)
 
-    llm_factory.create_reasoning_llm()
+    with bind_request_context(
+        request_id="req-reasoning",
+        trace_id="",
+        user_id="",
+        app_id="",
+    ):
+        llm_factory.create_reasoning_llm()
 
     assert captured["model"] == "code-reasoning"
     assert captured["base_url"].endswith(":4000/v1")
     assert captured["max_retries"] == 0
+    assert captured["extra_body"]["metadata"]["spend_logs_metadata"] == {
+        "request_id": "req-reasoning"
+    }
 
 
 def test_tool_enabled_llm_routes_each_invoke_through_model_fallback(monkeypatch):

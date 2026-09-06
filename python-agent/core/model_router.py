@@ -5,7 +5,7 @@ from langchain_openai import ChatOpenAI
 from config import config
 from core.model_registry import get_model_alias
 from monitoring import record_llm_call
-from request_context import get_request_metadata
+from request_context import build_litellm_metadata
 from tracing import start_span
 
 
@@ -22,11 +22,9 @@ class ModelRouter:
     ):
         model_alias = get_model_alias(group_name)
         runnable_config = dict(langsmith_extra or {})
-        gateway_metadata = get_request_metadata()
-        gateway_metadata.update(runnable_config.get("metadata", {}))
-        litellm_metadata = {"spend_logs_metadata": gateway_metadata}
-        if user_id := gateway_metadata.get("user_id"):
-            litellm_metadata["user_id"] = user_id
+        litellm_metadata = build_litellm_metadata(
+            runnable_config.get("metadata", {})
+        )
 
         with start_span(
             "llm.gateway",

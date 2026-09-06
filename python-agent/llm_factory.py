@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 from config import config
 from core.model_router import model_router
+from request_context import build_litellm_metadata
 
 # 创建 LLM 实例
 def create_llm(temperature: float | None = None) -> ChatOpenAI:
@@ -18,6 +19,7 @@ def create_llm(temperature: float | None = None) -> ChatOpenAI:
         temperature=temperature if temperature is not None else config.LLM_TEMPERATURE,
         max_tokens=config.LLM_MAX_TOKENS,
         max_retries=0,
+        extra_body={"metadata": build_litellm_metadata()},
     )
 
 
@@ -111,6 +113,7 @@ def create_reasoning_llm() -> ChatOpenAI:
         temperature=0.0,
         max_tokens=config.LLM_MAX_TOKENS,
         max_retries=0,
+        extra_body={"metadata": build_litellm_metadata()},
     )
 
 

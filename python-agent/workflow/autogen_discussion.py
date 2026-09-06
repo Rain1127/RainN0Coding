@@ -19,6 +19,7 @@ from autogen_core.models import SystemMessage as AGSystemMessage
 from autogen_core.models import UserMessage as AGUserMessage
 from autogen_core.models import AssistantMessage as AGAssistantMessage
 from config import config
+from request_context import build_litellm_headers
 
 
 # ===== LLM 客户端工厂 =====
@@ -34,6 +35,7 @@ def _create_model_client() -> OpenAIChatCompletionClient:
         base_url=config.LITELLM_BASE_URL,
         temperature=0.1,
         max_retries=0,
+        default_headers=build_litellm_headers(),
         model_info={
             "function_calling": False,
             "json_output": False,
