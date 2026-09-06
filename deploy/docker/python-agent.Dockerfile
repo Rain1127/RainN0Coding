@@ -9,12 +9,12 @@ COPY python-agent/pyproject.toml python-agent/uv.lock ./
 RUN pip install --no-cache-dir uv==0.8.15 \
     && uv sync --frozen --no-dev
 COPY python-agent/ ./
-RUN mkdir -p /data/generated \
-    && chown -R app:app /app /data/generated
+RUN mkdir -p /data/code-output \
+    && chown -R app:app /app /data/code-output
 USER 10001
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH=/app \
-    CODE_OUTPUT_DIR=/data/generated
+    CODE_OUTPUT_DIR=/data/code-output
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --retries=12 \
   CMD curl -fsS http://127.0.0.1:8000/api/health || exit 1

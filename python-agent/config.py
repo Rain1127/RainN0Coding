@@ -115,6 +115,7 @@ class Config:
     # ===== Redis =====
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
     # ===== 会话记忆 =====
     MEMORY_WINDOW_SIZE: int = int(os.getenv("MEMORY_WINDOW_SIZE", "10"))        # 滑动窗口大小
@@ -130,7 +131,10 @@ class Config:
     QUALITY_PENALTY_ON_FAILURE: float = float(os.getenv("QUALITY_PENALTY_ON_FAILURE", "10.0"))  # 构建失败扣分
 
     # ===== 项目目录 =====
-    CODE_OUTPUT_DIR: str = "/tmp/ai-code-project"
+    CODE_OUTPUT_DIR: str = os.getenv(
+        "CODE_OUTPUT_DIR",
+        "/tmp/ai-code-project",
+    )
 
 
 # ===== 多语言技术栈注册表 =====

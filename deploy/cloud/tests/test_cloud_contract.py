@@ -83,3 +83,23 @@ def test_data_script_has_private_ports_and_health_gates():
     assert '${POSTGRES_PASSWORD:?' in script
     assert '${REDIS_PASSWORD:?' in script
     assert "--env REDIS_PASSWORD" in script
+
+
+def test_application_script_starts_private_dependencies_in_order():
+    script = (CLOUD_DIR / "start-app-services.sh").read_text(
+        encoding="utf-8"
+    )
+
+    positions = [
+        script.index("replace_container litellm"),
+        script.index("replace_container python-agent"),
+        script.index("replace_container java-api"),
+        script.index("replace_container frontend"),
+    ]
+    assert positions == sorted(positions)
+    assert script.count("--publish") == 1
+    assert '--publish "${PUBLIC_HTTP_PORT}:80"' in script
+    assert "--env INTERNAL_API_TOKEN=\"$PYTHON_AI_INTERNAL_TOKEN\"" in script
+    assert "--env PYTHON_AI_INTERNAL_TOKEN" in script
+    assert "--volume rain-code-output:/data/code-output" in script
+    assert "--volume rain-code-output:/app/tmp" in script

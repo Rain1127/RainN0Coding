@@ -96,6 +96,7 @@ class ConversationMemory:
             self._redis = redis.Redis(
                 host=config.REDIS_HOST,
                 port=config.REDIS_PORT,
+                password=config.REDIS_PASSWORD or None,
                 db=1,
                 socket_connect_timeout=2,
             )

@@ -6,7 +6,7 @@ spring:
     store-type: redis
 
   profiles:
-    active: local
+    active: ${SPRING_PROFILES_ACTIVE:local}
 
   application:
     name: RainN0Coding-backend
