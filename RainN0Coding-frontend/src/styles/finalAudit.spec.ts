@@ -81,12 +81,13 @@ describe('final interface audit contracts', () => {
     expect(contents).not.toMatch(/outline:\s*none(?![\s\S]{0,400}:focus-visible)/)
   })
 
-  it('configures the production bundle for Spring without changing dev base', async () => {
+  it('uses the selected production build target without changing dev base', async () => {
     const config = await source('vite.config.ts')
 
     expect(config).toContain("mode === 'production'")
-    expect(config).toContain("base: isProduction ? '/api/' : '/'")
-    expect(config).toContain("'../src/main/resources/static'")
+    expect(config).toContain("resolveBuildTarget(process.env.VITE_BUILD_TARGET)")
+    expect(config).toContain("base: isProduction ? buildTarget.base : '/'")
+    expect(config).toContain("outDir: isProduction ? buildTarget.outDir : 'dist'")
     expect(config).toContain('emptyOutDir: true')
   })
 })
