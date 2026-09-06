@@ -65,11 +65,14 @@ def test_route_puts_request_context_in_litellm_metadata(monkeypatch):
         )
 
     assert captured["clients"][0]["extra_body"]["metadata"] == {
-        "request_id": "req-1",
-        "trace_id": "tr-1",
         "user_id": "u-1",
-        "app_id": "a-1",
-        "phase": "coder",
+        "spend_logs_metadata": {
+            "request_id": "req-1",
+            "trace_id": "tr-1",
+            "user_id": "u-1",
+            "app_id": "a-1",
+            "phase": "coder",
+        },
     }
 
 

@@ -24,6 +24,9 @@ class ModelRouter:
         runnable_config = dict(langsmith_extra or {})
         gateway_metadata = get_request_metadata()
         gateway_metadata.update(runnable_config.get("metadata", {}))
+        litellm_metadata = {"spend_logs_metadata": gateway_metadata}
+        if user_id := gateway_metadata.get("user_id"):
+            litellm_metadata["user_id"] = user_id
 
         with start_span(
             "llm.gateway",
@@ -37,7 +40,7 @@ class ModelRouter:
                     timeout=config.LLM_TIMEOUT,
                     max_retries=0,
                     temperature=0.0,
-                    extra_body={"metadata": gateway_metadata},
+                    extra_body={"metadata": litellm_metadata},
                 )
                 if parser:
                     result = parser(
