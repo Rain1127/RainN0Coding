@@ -85,10 +85,11 @@ def contract_stack():
             f"{FALLBACK_URL}/health",
         ),
         (
-                {
-                    "LITELLM_MASTER_KEY": "sk-contract",
-                    "PYTHONUTF8": "1",
-                    "FAKE_PRIMARY_API_BASE": f"{PRIMARY_URL}/v1",
+            {
+                "LITELLM_MASTER_KEY": "sk-contract",
+                "LITELLM_MODE": "PRODUCTION",
+                "PYTHONUTF8": "1",
+                "FAKE_PRIMARY_API_BASE": f"{PRIMARY_URL}/v1",
                 "FAKE_FALLBACK_API_BASE": f"{FALLBACK_URL}/v1",
             },
             [

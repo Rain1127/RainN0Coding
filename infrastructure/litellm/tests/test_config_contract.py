@@ -8,6 +8,7 @@ ENV_EXAMPLE = ROOT / "infrastructure" / "litellm" / ".env.example"
 REQUIREMENTS = ROOT / "infrastructure" / "litellm" / "requirements.txt"
 HEALTH_CHECK = ROOT / "infrastructure" / "litellm" / "health-check.ps1"
 PROMETHEUS = ROOT / "prometheus.yml"
+FALLBACK_TEST = ROOT / "infrastructure" / "litellm" / "tests" / "test_fallback_contract.py"
 
 
 def test_gateway_config_exposes_only_stable_business_models():
@@ -92,3 +93,8 @@ def test_metrics_scrapers_avoid_the_auth_stripping_redirect():
     prometheus = PROMETHEUS.read_text(encoding="utf-8")
     assert "job_name: 'LiteLLM'" in prometheus
     assert "metrics_path: '/metrics/'" in prometheus
+
+
+def test_fallback_contract_does_not_load_the_live_gateway_environment():
+    text = FALLBACK_TEST.read_text(encoding="utf-8")
+    assert '"LITELLM_MODE": "PRODUCTION"' in text
