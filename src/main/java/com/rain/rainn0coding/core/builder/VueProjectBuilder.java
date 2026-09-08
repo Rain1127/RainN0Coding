@@ -51,7 +51,8 @@ public class VueProjectBuilder {
 
     private boolean executeNpmBuild(File projectDir) {
         log.info("执行 npm run build...");
-        String command = String.format("%s run build", buildCommand("npm"));
+        // Generated Vite apps are served below /api/static/{deployKey}/.
+        String command = String.format("%s run build -- --base=./", buildCommand("npm"));
         return executeCommand(projectDir, command, 180);
     }
 

@@ -128,7 +128,7 @@ class Config:
     QUALITY_PENALTY_ON_FAILURE: float = float(os.getenv("QUALITY_PENALTY_ON_FAILURE", "10.0"))  # 构建失败扣分
 
     # ===== 项目目录 =====
-    CODE_OUTPUT_DIR: str = "/tmp/ai-code-project"
+    CODE_OUTPUT_DIR: str = os.getenv("CODE_OUTPUT_DIR", "/tmp/ai-code-project")
 
 
 # ===== 多语言技术栈注册表 =====

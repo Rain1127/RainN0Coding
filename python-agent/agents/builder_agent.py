@@ -333,8 +333,12 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                     build_log = "npm install failed:\n" + result.stderr[-2000:]
                     build_log_mode = "npm_install_failed"
                 else:
+                    build_command = ["npm", "run", "build"]
+                    if lc.get("is_frontend"):
+                        # Vite assets must resolve under the app's preview/publish directory.
+                        build_command += ["--", "--base=./"]
                     result = subprocess.run(
-                        ["npm", "run", "build"], cwd=project_dir,
+                        build_command, cwd=project_dir,
                         capture_output=True, text=True, timeout=180,
                     )
                     if result.returncode != 0:
