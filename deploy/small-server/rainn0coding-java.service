@@ -1,0 +1,25 @@
+[Unit]
+Description=RainN0Coding Java gateway
+After=network-online.target docker.service rainn0coding-python.service
+Wants=network-online.target
+
+[Service]
+User=rainn0coding
+Group=rainn0coding
+WorkingDirectory=/opt/rainn0coding/shared
+EnvironmentFile=/etc/rainn0coding/java.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NODE_OPTIONS=--max-old-space-size=384
+ExecStart=/usr/bin/java -Xms128m -Xmx384m -XX:MaxMetaspaceSize=256m -XX:ActiveProcessorCount=2 -jar /opt/rainn0coding/current/app.jar
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+MemoryHigh=850M
+MemoryMax=1200M
+MemorySwapMax=512M
+TasksMax=512
+NoNewPrivileges=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
