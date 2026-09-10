@@ -5,6 +5,7 @@ import com.rain.rainn0coding.exception.BusinessException;
 import com.rain.rainn0coding.exception.ErrorCode;
 import io.netty.channel.ChannelOption;
 import org.springframework.http.HttpStatus;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -48,6 +49,13 @@ public class PythonAiClient {
                                       String prompt, String codeGenType,
                                       String userRole, String traceId,
                                       String requestId, String idempotencyKey) {
+        return streamCodeGen(userId, appId, prompt, codeGenType, userRole, traceId, requestId, idempotencyKey, false);
+    }
+
+    public Flux<String> streamCodeGen(String userId, String appId,
+                                      String prompt, String codeGenType,
+                                      String userRole, String traceId,
+                                      String requestId, String idempotencyKey, boolean resume) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("userId", userId);
         body.put("appId", appId);
@@ -57,6 +65,7 @@ public class PythonAiClient {
         body.put("traceId", traceId != null ? traceId : "");
         body.put("requestId", requestId != null ? requestId : "");
         body.put("history", List.of());
+        body.put("resume", resume);
 
         WebClient.RequestBodySpec request = webClient.post()
                 .uri("/api/generate-code");
@@ -78,6 +87,33 @@ public class PythonAiClient {
                 .onErrorMap(WebClientResponseException.class, this::mapPythonResponseException)
                 .onErrorMap(TimeoutException.class,
                         exception -> new BusinessException(ErrorCode.PYTHON_SERVICE_TIMEOUT));
+    }
+
+    public Map<String, Object> pauseGeneration(String userId, String appId, String runId) {
+        return generationControl("/api/generation/pause", userId, appId, runId);
+    }
+
+    public Map<String, Object> generationStatus(String userId, String appId, String runId) {
+        return generationControl("/api/generation/status", userId, appId, runId);
+    }
+
+    private Map<String, Object> generationControl(String endpoint, String userId, String appId, String runId) {
+        WebClient.RequestBodySpec request = webClient.post().uri(endpoint);
+        if (StringUtils.hasText(properties.getInternalToken())) {
+            request.header("X-Internal-Token", properties.getInternalToken());
+        }
+        Map<String, Object> response = request.bodyValue(Map.of("userId", userId, "appId", appId, "runId", runId))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .timeout(properties.getRouteTimeout())
+                .onErrorMap(WebClientResponseException.class, this::mapPythonResponseException)
+                .onErrorMap(TimeoutException.class,
+                        exception -> new BusinessException(ErrorCode.PYTHON_SERVICE_TIMEOUT))
+                .block();
+        if (response == null) {
+            throw new BusinessException(ErrorCode.PYTHON_SERVICE_UNAVAILABLE);
+        }
+        return response;
     }
 
     public String routeCodeGenType(String prompt) {
@@ -113,6 +149,12 @@ public class PythonAiClient {
         }
         if (status == HttpStatus.GATEWAY_TIMEOUT) {
             return new BusinessException(ErrorCode.PYTHON_SERVICE_TIMEOUT);
+        }
+        if (status == HttpStatus.NOT_FOUND) {
+            return new BusinessException(ErrorCode.NOT_FOUND_ERROR, "生成任务不存在");
+        }
+        if (status == HttpStatus.CONFLICT) {
+            return new BusinessException(ErrorCode.OPERATION_ERROR, "生成任务状态已变化，请刷新后重试");
         }
         if (exception.getStatusCode().is5xxServerError()) {
             return new BusinessException(ErrorCode.PYTHON_SERVICE_UNAVAILABLE);

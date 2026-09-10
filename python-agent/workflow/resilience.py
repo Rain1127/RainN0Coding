@@ -251,7 +251,8 @@ async def _run_phase_runner(phase: str, state: dict, runner):
     if inspect.iscoroutinefunction(runner):
         return await asyncio.wait_for(runner(working_state), timeout=timeout_seconds)
 
-    return await asyncio.wait_for(asyncio.to_thread(runner, working_state), timeout=timeout_seconds)
+    from workflow.run_control import run_owned_worker
+    return await asyncio.wait_for(run_owned_worker(runner, working_state), timeout=timeout_seconds)
 
 
 async def guarded_phase_call(phase: str, state: dict, runner):

@@ -26,6 +26,43 @@ import static org.mockito.Mockito.when;
 class AiCodeGeneratorFacadeTest {
 
     @Test
+    void resumedStreamSavesFullCodeAndBuildsThroughExistingPipeline() throws Exception {
+        AiCodeGeneratorFacade facade = new AiCodeGeneratorFacade();
+        PythonAiClient python = mock(PythonAiClient.class);
+        VueProjectBuilder builder = mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(facade, "pythonAiClient", python);
+        ReflectionTestUtils.setField(facade, "vueProjectBuilder", builder);
+        long appId = Math.abs(java.util.UUID.randomUUID().getMostSignificantBits());
+        Path outputDir = Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR, "vue_project_" + appId);
+        String event = "{\"type\":\"code_file\",\"path\":\"index.html\",\"content\":\"resumed\"}";
+        when(python.streamCodeGen("1", Long.toString(appId), "", "vue_project", "user", null, "run", null, true))
+                .thenReturn(Flux.just(event, "{\"type\":\"done\",\"status\":\"success\"}"));
+        when(builder.buildProject(AppConstant.CODE_OUTPUT_ROOT_DIR + "/vue_project_" + appId)).thenReturn(true);
+        try {
+            facade.generateAndSaveCodeStream("", CodeGenTypeEnum.VUE_PROJECT, appId, 1L, "user", "run", null, true)
+                    .collectList().block();
+            assertThat(Files.readString(outputDir.resolve("index.html"))).isEqualTo("resumed");
+            verify(builder).buildProject(AppConstant.CODE_OUTPUT_ROOT_DIR + "/vue_project_" + appId);
+        } finally {
+            deleteDirectory(outputDir);
+        }
+    }
+
+    @Test
+    void pausedStreamDoesNotBuildUnfinishedProject() {
+        AiCodeGeneratorFacade facade = new AiCodeGeneratorFacade();
+        PythonAiClient python = mock(PythonAiClient.class);
+        VueProjectBuilder builder = mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(facade, "pythonAiClient", python);
+        ReflectionTestUtils.setField(facade, "vueProjectBuilder", builder);
+        when(python.streamCodeGen("1", "12", "hello", "vue_project", "user", null, "run", "run"))
+                .thenReturn(Flux.just("{\"type\":\"paused\"}", "{\"type\":\"done\",\"status\":\"paused\"}"));
+        facade.generateAndSaveCodeStream("hello", CodeGenTypeEnum.VUE_PROJECT, 12L, 1L, "user", "run", "run")
+                .collectList().block();
+        verifyNoInteractions(builder);
+    }
+
+    @Test
     void generateAndSaveCodeStreamPersistsCodeFileEvents() throws Exception {
         AiCodeGeneratorFacade facade = new AiCodeGeneratorFacade();
         PythonAiClient pythonAiClient = mock(PythonAiClient.class);

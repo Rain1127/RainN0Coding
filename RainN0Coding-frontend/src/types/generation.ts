@@ -14,6 +14,8 @@ export type GenerationStatus =
   | 'idle'
   | 'connecting'
   | 'running'
+  | 'pausing'
+  | 'paused'
   | 'success'
   | 'failed'
   | 'cancelled'

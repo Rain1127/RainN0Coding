@@ -53,6 +53,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
@@ -117,10 +118,38 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
         //1.参数校验
         ThrowUtils.throwIf(appId == null || appId<=0 , ErrorCode.PARAMS_ERROR, "应用id错误");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "提示词消息不能为空");
-        return Flux.defer(() -> doChatToGenCode(appId, message, loginUser, requestId, idempotencyKey));
+        return Flux.defer(() -> doChatToGenCode(appId, message, loginUser, requestId, idempotencyKey, false));
     }
 
-    private Flux<String> doChatToGenCode(Long appId, String message, User loginUser, String requestId, String idempotencyKey) {
+    @Override
+    public Flux<String> resumeGeneration(Long appId, String runId, User loginUser) {
+        validateGenerationOwner(appId, runId, loginUser);
+        return Flux.defer(() -> doChatToGenCode(appId, "", loginUser, runId, null, true));
+    }
+
+    @Override
+    public Map<String, Object> pauseGeneration(Long appId, String runId, User loginUser) {
+        validateGenerationOwner(appId, runId, loginUser);
+        return pythonAiClient.pauseGeneration(loginUser.getId().toString(), appId.toString(), runId);
+    }
+
+    @Override
+    public Map<String, Object> generationStatus(Long appId, String runId, User loginUser) {
+        validateGenerationOwner(appId, runId, loginUser);
+        return pythonAiClient.generationStatus(loginUser.getId().toString(), appId.toString(), runId);
+    }
+
+    private void validateGenerationOwner(Long appId, String runId, User loginUser) {
+        ThrowUtils.throwIf(appId == null || appId <= 0 || StrUtil.isBlank(runId) || runId.length() > 128,
+                ErrorCode.PARAMS_ERROR, "应用或生成任务标识错误");
+        ThrowUtils.throwIf(loginUser == null || loginUser.getId() == null, ErrorCode.NOT_LOGIN_ERROR);
+        App app = getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()), ErrorCode.NO_AUTH_ERROR, "没有权限操作该应用");
+    }
+
+    private Flux<String> doChatToGenCode(Long appId, String message, User loginUser, String requestId,
+                                        String idempotencyKey, boolean resume) {
         //2.获取分布式锁，防止同应用并发对话
         String lockKey = "ai:chat:lock:" + appId + ":" + loginUser.getId();
         RLock lock = redissonClient.getLock(lockKey);
@@ -153,7 +182,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
             CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
             ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用代码生成类型错误");
             //6.在调用AI前，先保存用户消息到数据库中
-            chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+            if (!resume) {
+                chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+            }
             //7.设置监控上下文（含全链路 traceId）
             String traceId = traceIdResolver.resolveCurrentTraceId();
             log.info("全链路追踪 traceId: {}", traceId);
@@ -180,18 +211,29 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
                         });
             }
             AiGenerationPermitService.PermitHandle acquiredPermit = permit;
-            Flux<String> codeStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(
+            Flux<String> codeStream = resume ? aiCodeGeneratorFacade.generateAndSaveCodeStream(
+                    message, codeGenTypeEnum, appId, loginUser.getId(), loginUser.getUserRole(), requestId, null, true)
+                    : aiCodeGeneratorFacade.generateAndSaveCodeStream(
                     message, codeGenTypeEnum, appId, loginUser.getId(), loginUser.getUserRole(), requestId, idempotencyKey);
             //9.流完成后保存 AI 响应到对话历史
             AtomicReference<String> semanticFailure = new AtomicReference<>();
+            AtomicBoolean paused = new AtomicBoolean();
             return codeStream
                     .doOnNext(chunk -> {
+                        JSONObject payload = parseSsePayload(chunk);
+                        if (payload != null && "done".equals(payload.getStr("type"))
+                                && "paused".equals(payload.getStr("status"))) {
+                            paused.set(true);
+                        }
                         String failure = semanticFailureMessage(chunk);
                         if (failure != null) {
                             semanticFailure.compareAndSet(null, failure);
                         }
                     })
                     .doOnComplete(() -> {
+                        if (paused.get() && semanticFailure.get() == null) {
+                            return;
+                        }
                         String failure = semanticFailure.get();
                         if (failure != null) {
                             chatHistoryService.addChatMessage(appId,
@@ -232,7 +274,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
             return StrUtil.blankToDefault(payload.getStr("message"), StrUtil.blankToDefault(status, "error"));
         }
         if ("done".equals(type) && StrUtil.isNotBlank(status)) {
-            if ("partial_success".equals(status) || "degraded_success".equals(status)) {
+            if ("partial_success".equals(status) || "degraded_success".equals(status) || "paused".equals(status)) {
                 return null;
             }
             if (!"success".equals(status)) {

@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-import config as config_module
+import importlib
 
 
 logger = logging.getLogger("server")
@@ -11,7 +11,7 @@ _cleanup_task: asyncio.Task | None = None
 
 
 def _config():
-    return config_module.config
+    return importlib.import_module("config").config
 
 
 def get_cleanup_task() -> asyncio.Task | None:

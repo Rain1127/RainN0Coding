@@ -57,7 +57,7 @@ function statusText(index: number) {
   if (props.phase === 'done' && props.status === 'failed') return '未完成'
   const status = stepStatus(index)
   if (status === 'complete') return '已完成'
-  if (status === 'current') return '进行中'
+  if (status === 'current') return props.status === 'paused' ? '已暂停' : props.status === 'pausing' ? '正在完成当前步骤' : '进行中'
   if (status === 'failed') return '执行失败'
   return '待处理'
 }
@@ -70,7 +70,7 @@ function statusText(index: number) {
         <p class="agent-progress__eyebrow">Agent workflow</p>
         <h2 id="agent-progress-title">生成进度</h2>
       </div>
-      <span class="agent-progress__run-status" role="status" aria-live="polite" aria-atomic="true">{{ status === 'connecting' ? '正在连接…' : status === 'cancelled' ? '已取消' : status === 'failed' ? '需要处理' : status === 'success' ? '已完成' : status === 'running' ? '生成中…' : '等待开始' }}</span>
+      <span class="agent-progress__run-status" role="status" aria-live="polite" aria-atomic="true">{{ status === 'paused' ? '已暂停' : status === 'pausing' ? '正在暂停…' : status === 'connecting' ? '正在连接…' : status === 'cancelled' ? '已取消' : status === 'failed' ? '需要处理' : status === 'success' ? '已完成' : status === 'running' ? '生成中…' : '等待开始' }}</span>
     </div>
 
     <ol class="agent-progress__list">

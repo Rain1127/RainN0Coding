@@ -22,6 +22,16 @@ export interface StartGenerationOptions {
   preserve?: boolean
 }
 
+function newRequestId(): string {
+  // Public IP deployments use HTTP, where randomUUID may be unavailable.
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 function eventError(event: GenerationEvent): string {
   if (event.message) return event.message
   if (event.detail) return event.detail
@@ -89,7 +99,7 @@ export function applyGenerationEvent(
 
   if (typeof event.phase === 'string') {
     next.phase = event.phase
-    if (state.status !== 'failed' && state.status !== 'cancelled') {
+    if (!['failed', 'cancelled', 'pausing', 'paused'].includes(state.status)) {
       next.status = 'running'
     }
   }
@@ -118,6 +128,12 @@ export function applyGenerationEvent(
   }
 
   if (event.type === 'done') {
+    if (event.status === 'paused' && next.status !== 'failed' && next.status !== 'cancelled') {
+      next.status = 'paused'
+      next.phase = state.phase
+      next.error = null
+      return next
+    }
     next.phase = 'done'
     if (event.status && SUCCESSFUL_DONE_STATUSES.has(event.status)) {
       if (next.status !== 'failed' && next.status !== 'cancelled') {
@@ -174,9 +190,23 @@ export const useGenerationStore = defineStore('generation', () => {
   const files = ref<GeneratedFile[]>([])
   const error = ref<string | null>(null)
   const runId = ref(0)
+  const requestId = ref<string | null>(null)
+  const controlError = ref<string | null>(null)
 
   let activeController: AbortController | null = null
   let currentAppId: EntityId | null = null
+  let statusTimer: ReturnType<typeof setTimeout> | undefined
+  const pointerKey = (appId: EntityId) => `generation-run:${appId}`
+
+  function retainRun() {
+    if (currentAppId === null || !requestId.value) return
+    try { localStorage.setItem(pointerKey(currentAppId), requestId.value) } catch { /* Storage is optional. */ }
+  }
+
+  function forgetRun() {
+    if (currentAppId === null) return
+    try { localStorage.removeItem(pointerKey(currentAppId)) } catch { /* Storage is optional. */ }
+  }
 
   function snapshot(): GenerationState {
     return {
@@ -196,12 +226,14 @@ export const useGenerationStore = defineStore('generation', () => {
     error.value = next.error
   }
 
-  async function start(
+  async function stream(
     appId: EntityId,
     prompt: string,
     options: StartGenerationOptions = {},
+    resuming = false,
   ): Promise<void> {
     const currentRunId = ++runId.value
+    clearTimeout(statusTimer)
     activeController?.abort()
 
     const controller = new AbortController()
@@ -209,15 +241,21 @@ export const useGenerationStore = defineStore('generation', () => {
 
     const preserve = options.preserve === true && sameEntityId(currentAppId, appId)
     currentAppId = appId
+    if (!resuming) requestId.value = newRequestId()
+    controlError.value = null
+    retainRun()
     replaceState({
       ...initialState(),
       status: 'connecting',
+      phase: resuming ? phase.value : null,
       events: preserve ? events.value : [],
       files: preserve ? files.value : [],
     })
 
     const baseUrl = import.meta.env.VITE_API_BASE ?? ''
-    const url =
+    const url = resuming
+      ? `${baseUrl}/app/chat/gen/resume?appId=${encodeURIComponent(String(appId))}&runId=${encodeURIComponent(requestId.value!)}`
+      :
       `${baseUrl}/app/chat/gen/code` +
       `?appId=${encodeURIComponent(String(appId))}` +
       `&message=${encodeURIComponent(prompt)}`
@@ -227,7 +265,7 @@ export const useGenerationStore = defineStore('generation', () => {
         method: 'GET',
         signal: controller.signal,
         credentials: 'include',
-        headers: { Accept: 'text/event-stream' },
+        headers: { Accept: 'text/event-stream', 'Idempotency-Key': requestId.value! },
       })
 
       if (!response.ok) {
@@ -243,10 +281,23 @@ export const useGenerationStore = defineStore('generation', () => {
 
       let validEventCount = 0
       let malformedFrameCount = 0
+      let resumeRejected = false
       const parser = createSseParser((event) => {
         if (currentRunId !== runId.value || controller.signal.aborted) return
         if (!isTransportCompletion(event)) validEventCount += 1
+        if (typeof event.request_id === 'string' && event.request_id) {
+          requestId.value = event.request_id
+          retainRun()
+        }
+        if (resuming && event.type === 'error') {
+          resumeRejected = true
+          controlError.value = eventError(event)
+          status.value = 'paused'
+          return
+        }
+        if (resumeRejected) return
         replaceState(applyGenerationEvent(snapshot(), event))
+        if (event.type === 'done' && event.status !== 'paused') forgetRun()
       }, () => {
         if (currentRunId === runId.value && !controller.signal.aborted) {
           malformedFrameCount += 1
@@ -267,6 +318,10 @@ export const useGenerationStore = defineStore('generation', () => {
       parser.flush()
 
       if (currentRunId !== runId.value || controller.signal.aborted) return
+      if (resumeRejected) {
+        scheduleStatus()
+        return
+      }
       if (validEventCount === 0) {
         if (malformedFrameCount > 0) {
           throw new Error(
@@ -278,6 +333,9 @@ export const useGenerationStore = defineStore('generation', () => {
       if (status.value === 'connecting' || status.value === 'running') {
         status.value = 'success'
         error.value = null
+        forgetRun()
+      } else if (status.value === 'pausing') {
+        scheduleStatus()
       }
     } catch (caught) {
       if (currentRunId !== runId.value) return
@@ -285,7 +343,10 @@ export const useGenerationStore = defineStore('generation', () => {
         if (status.value !== 'cancelled') status.value = 'cancelled'
         return
       }
-      if (status.value !== 'failed') {
+      if (resuming && status.value !== 'failed') {
+        status.value = 'paused'
+        controlError.value = errorMessage(caught)
+      } else if (status.value !== 'failed') {
         status.value = 'failed'
         error.value = errorMessage(caught)
       }
@@ -295,6 +356,82 @@ export const useGenerationStore = defineStore('generation', () => {
         activeController = null
       }
     }
+  }
+
+  async function start(appId: EntityId, prompt: string, options: StartGenerationOptions = {}) {
+    if (['connecting', 'running', 'pausing', 'paused'].includes(status.value) && sameEntityId(currentAppId, appId)) return
+    return stream(appId, prompt, options)
+  }
+
+  async function control(action: 'pause' | 'status', appId: EntityId, id: string) {
+    const base = import.meta.env.VITE_API_BASE ?? ''
+    const response = await fetch(action === 'pause'
+      ? `${base}/app/chat/gen/pause`
+      : `${base}/app/chat/gen/status?appId=${encodeURIComponent(String(appId))}&runId=${encodeURIComponent(id)}`, {
+      method: action === 'pause' ? 'POST' : 'GET',
+      credentials: 'include',
+      ...(action === 'pause' ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId, runId: id }) } : {}),
+    })
+    const body = await response.json() as { code?: number; message?: string; data?: { run_id: string; status: string } }
+    if (!response.ok || body.code !== 0 || !body.data) throw new Error(body.message || '暂停状态查询失败，请重试。')
+    return body.data
+  }
+
+  function scheduleStatus() {
+    clearTimeout(statusTimer)
+    statusTimer = setTimeout(() => { void refreshStatus() }, 2000)
+  }
+
+  async function refreshStatus() {
+    if (currentAppId === null || !requestId.value) return
+    const epoch = runId.value
+    try {
+      const result = await control('status', currentAppId, requestId.value)
+      if (epoch !== runId.value) return
+      controlError.value = null
+      if (result.status === 'paused' || result.status === 'interrupted') status.value = 'paused'
+      else if (result.status === 'running' || result.status === 'pausing') {
+        status.value = result.status
+        scheduleStatus()
+      } else {
+        status.value = SUCCESSFUL_DONE_STATUSES.has(result.status) || result.status === 'completed' ? 'success' : 'failed'
+        if (status.value === 'failed') error.value = '此任务已结束，无法继续。'
+        forgetRun()
+      }
+    } catch (caught) {
+      if (epoch === runId.value) controlError.value = errorMessage(caught)
+    }
+  }
+
+  async function restore(appId: EntityId) {
+    let saved: string | null = null
+    try { saved = localStorage.getItem(pointerKey(appId)) } catch { return }
+    if (!saved) return
+    currentAppId = appId
+    requestId.value = saved
+    status.value = 'connecting'
+    await refreshStatus()
+  }
+
+  async function pause() {
+    if (currentAppId === null || !requestId.value || !['connecting', 'running'].includes(status.value)) return
+    const previousStatus = status.value
+    const epoch = runId.value
+    status.value = 'pausing'
+    controlError.value = null
+    try {
+      await control('pause', currentAppId, requestId.value)
+      if (epoch === runId.value && !activeController && status.value === 'pausing') scheduleStatus()
+    } catch (caught) {
+      if (epoch !== runId.value) return
+      if (status.value === 'pausing') status.value = previousStatus
+      controlError.value = errorMessage(caught)
+    }
+  }
+
+  async function resume() {
+    if (status.value !== 'paused' || currentAppId === null || !requestId.value) return
+    return stream(currentAppId, '', { preserve: true }, true)
   }
 
   function cancel() {
@@ -307,10 +444,13 @@ export const useGenerationStore = defineStore('generation', () => {
   }
 
   function reset() {
+    clearTimeout(statusTimer)
     runId.value += 1
     activeController?.abort()
     activeController = null
     currentAppId = null
+    requestId.value = null
+    controlError.value = null
     replaceState(initialState())
   }
 
@@ -321,6 +461,12 @@ export const useGenerationStore = defineStore('generation', () => {
     files,
     error,
     runId,
+    requestId,
+    controlError,
+    pause,
+    resume,
+    restore,
+    refreshStatus,
     start,
     cancel,
     reset,

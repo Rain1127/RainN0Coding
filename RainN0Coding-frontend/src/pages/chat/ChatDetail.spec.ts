@@ -14,7 +14,12 @@ const generationState = vi.hoisted(() => ({
   events: [] as Array<Record<string, unknown>>,
   files: [] as Array<{ path: string; language: string; size?: number | string }>,
   error: null as string | null,
+  controlError: null as string | null,
   start: vi.fn(),
+  pause: vi.fn(),
+  resume: vi.fn(),
+  restore: vi.fn(),
+  refreshStatus: vi.fn(),
   cancel: vi.fn(),
   reset: vi.fn(),
 }))
@@ -86,10 +91,14 @@ describe('ChatDetail', () => {
       events: [],
       files: [],
       error: null,
+      controlError: null,
     })
     vi.mocked(getAppVO).mockResolvedValue(app)
     vi.mocked(getChatHistory).mockResolvedValue(page())
     generationState.start.mockResolvedValue(undefined)
+    generationState.restore.mockResolvedValue(undefined)
+    generationState.pause.mockImplementation(async () => { mockedGeneration.status = 'pausing' })
+    generationState.resume.mockImplementation(async () => { mockedGeneration.status = 'connecting' })
     generationState.cancel.mockImplementation(() => {
       mockedGeneration.status = 'cancelled'
     })
@@ -247,7 +256,7 @@ describe('ChatDetail', () => {
     expect(mockedGeneration.error).toBeNull()
   })
 
-  it('cancels active generation and retries the last prompt without clearing progress', async () => {
+  it('pauses active generation and resumes without creating another user prompt', async () => {
     vi.mocked(getChatHistory).mockResolvedValue(page([{
       id: 1,
       appId: 7,
@@ -262,14 +271,35 @@ describe('ChatDetail', () => {
     await flushPromises()
     vi.mocked(generationState.cancel).mockClear()
 
-    await wrapper.get('[data-action="cancel-generation"]').trigger('click')
-    expect(generationState.cancel).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-action="pause-generation"]').trigger('click')
+    expect(generationState.pause).toHaveBeenCalledTimes(1)
+    expect(generationState.cancel).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-action="pause-generation"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('当前步骤完成后暂停')
+    mockedGeneration.status = 'paused'
+    await flushPromises()
+    expect(wrapper.get('textarea').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-action="resume-generation"]').trigger('click')
+    expect(generationState.resume).toHaveBeenCalledTimes(1)
+    expect(generationState.start).not.toHaveBeenCalled()
 
     mockedGeneration.status = 'failed'
     mockedGeneration.error = '模型暂时不可用'
     await flushPromises()
     await wrapper.get('[data-action="retry-generation"]').trigger('click')
     expect(generationState.start).toHaveBeenLastCalledWith(7, '创建看板', { preserve: true })
+  })
+
+  it('restores a retained run after app ownership is loaded', async () => {
+    const { wrapper } = await mountPage()
+    await flushPromises()
+    expect(generationState.restore).toHaveBeenCalledWith(7)
+    mockedGeneration.controlError = '暂停暂时不可用'
+    mockedGeneration.status = 'running'
+    await flushPromises()
+    expect(wrapper.text()).toContain('暂停暂时不可用')
+    expect(wrapper.find('[data-action="retry-generation"]').exists()).toBe(false)
+    expect(wrapper.find('[data-action="pause-generation"]').exists()).toBe(true)
   })
 
   it('only links safe deployment URLs and blocks repeated deploy requests', async () => {
