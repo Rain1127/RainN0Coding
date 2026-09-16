@@ -51,7 +51,7 @@ public class GenerationQueueRuntime {
                 try {
                     kafka.send(config.getTopic(),String.valueOf(d.appId()),JSONUtil.toJsonStr(Map.of("version",1,"taskId",d.taskId())))
                             .get(12,TimeUnit.SECONDS);
-                    store.dispatched(d.taskId());
+                    store.dispatched(d);
                 } catch(Exception e) {
                     if(e instanceof InterruptedException)Thread.currentThread().interrupt();
                     store.dispatchFailed(d);
@@ -76,8 +76,14 @@ public class GenerationQueueRuntime {
             ack.acknowledge(); return;
         }
         long start=System.nanoTime();
+        var before=store.get(id);
+        if(before!=null&&"QUEUED".equals(before.status()))
+            meters.timer("generation.queue.wait").record(store.waitMillis(id),TimeUnit.MILLISECONDS);
         executor.execute(id);
         meters.timer("generation.queue.delivery.duration").record(System.nanoTime()-start,TimeUnit.NANOSECONDS);
+        var after=store.get(id);
+        if(before!=null&&after!=null&&!before.settled()&&after.settled())
+            meters.counter("generation.queue.finished","status",after.status().toLowerCase()).increment();
         ack.acknowledge();
     }
     @Scheduled(fixedDelay=30000)
@@ -85,7 +91,7 @@ public class GenerationQueueRuntime {
         if(!ready)return;
         try {
             executor.expireQueued();
-            queued.set(store.count("QUEUED"));running.set(store.count("RUNNING"));
+            queued.set(store.count("QUEUED"));running.set(store.count("RUNNING")+store.count("PAUSING"));
         } catch(Exception e) {log.warn("Generation queue maintenance failed: {}",e.toString());}
     }
     @Scheduled(fixedDelay=3600000)

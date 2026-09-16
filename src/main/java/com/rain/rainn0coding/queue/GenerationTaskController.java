@@ -33,6 +33,15 @@ public class GenerationTaskController {
     public BaseResponse<GenerationQueueService.Snapshot> get(@PathVariable String id,HttpServletRequest request) {
         return ResultUtils.success(queue.get(id,users.getLoginUser(request)));
     }
+    @PostMapping("/{id}/pause")
+    public BaseResponse<GenerationQueueService.Snapshot> pause(@PathVariable String id,HttpServletRequest request) {
+        return ResultUtils.success(queue.pause(id,users.getLoginUser(request)));
+    }
+    @PostMapping("/{id}/resume")
+    @RateLimit(limitType=RateLimitType.USER,rate=10,rateInterval=60,message="继续任务请求过于频繁")
+    public BaseResponse<GenerationQueueService.Snapshot> resume(@PathVariable String id,HttpServletRequest request) {
+        return ResultUtils.success(queue.resume(id,users.getLoginUser(request)));
+    }
     @GetMapping(value="/{id}/events",produces=MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> events(@PathVariable String id,@RequestParam(defaultValue="0") long after,
             @RequestHeader(value="Last-Event-ID",required=false) Long lastEventId,HttpServletRequest request) {

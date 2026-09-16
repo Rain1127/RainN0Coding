@@ -88,4 +88,27 @@ class GenerationTaskStoreTest {
         store.setPaused(false);
         assertTrue(store.claim(first.taskId(),"worker"));
     }
+    @Test void pausedRunRetainsOwnershipAndResumesThroughOutboxWithoutNewTask() {
+        var t=submit(1,"a",()->{});store.dispatched(t.taskId());store.claim(t.taskId(),"w");
+        store.pauseCompleted(t.taskId(),true);
+        assertEquals("PAUSED",store.get(t.taskId()).status());
+        assertThrows(RuntimeException.class,()->submit(1,"new",()->{}));
+        var resumed=store.resume(t.taskId(),true);
+        assertEquals(t.taskId(),resumed.taskId());assertEquals("QUEUED",resumed.status());
+        assertEquals(1,store.pendingDispatches().size());assertTrue(store.shouldResume(t.taskId()));
+        assertTrue(store.claim(t.taskId(),"next"));
+    }
+    @Test void queuedPauseDoesNotPretendToHavePythonCheckpoint() {
+        var t=submit(1,"a",()->{});assertTrue(store.pauseQueued(t.taskId()));
+        assertFalse(store.shouldResume(t.taskId()));
+        assertFalse(store.claim(t.taskId(),"w"));
+        store.resume(t.taskId(),false);assertTrue(store.claim(t.taskId(),"w"));
+    }
+    @Test void delayedPublisherAckCannotHideAResumedDispatch() {
+        var t=submit(1,"a",()->{});var original=store.pendingDispatches().getFirst();
+        store.pauseQueued(t.taskId());store.resume(t.taskId(),false);
+        store.dispatched(original);
+        assertEquals(1,store.pendingDispatches().size());
+        assertEquals(1,store.pendingDispatches().getFirst().epoch());
+    }
 }

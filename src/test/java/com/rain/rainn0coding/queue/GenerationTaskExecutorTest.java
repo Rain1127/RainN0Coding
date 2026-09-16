@@ -48,4 +48,13 @@ class GenerationTaskExecutorTest {
         assertThrows(IllegalStateException.class,()->executor.execute("id"));
         verify(store,never()).claim(anyString(),anyString());
     }
+    @Test void pausedCheckpointIsNotSuccessOrFailureAndDoesNotWriteCompletionHistory() {
+        ready(Flux.just("{\"type\":\"done\",\"status\":\"paused\"}"));executor.execute("id");
+        verify(store).pauseCompleted("id",true);
+        verify(store,never()).finish(anyString(),anyString(),any(),any());
+        verify(work,never()).completeHistory(any(),anyString(),any());
+    }
+    @Test void pausedDuplicateDoesNotResumeWithoutExplicitUserRequest() {
+        when(store.get("id")).thenReturn(task("PAUSED"));executor.execute("id");verifyNoInteractions(work);
+    }
 }

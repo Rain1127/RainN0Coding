@@ -35,8 +35,6 @@ public class GenerationQueueService {
             throw new BusinessException(ErrorCode.PARAMS_ERROR,"消息或幂等键不合法");
         var app=ownedApp(appId,user);
         if(CodeGenTypeEnum.getEnumByValue(app.getCodeGenType())==null)throw new BusinessException(ErrorCode.PARAMS_ERROR);
-        var active=store.active(appId);
-        if(active!=null&&"INTERRUPTED".equals(active.status())&&!busyOrUnavailable(appId))store.releaseInterrupted(appId);
         var task=store.submit(appId,user.getId(),message,app.getCodeGenType(),key,UUID.randomUUID().toString().replace("-",""),()->{
             if(!history.addChatMessage(appId,message,"user",user.getId()))throw new IllegalStateException("用户消息保存失败");
         });
@@ -45,6 +43,57 @@ public class GenerationQueueService {
     public Snapshot get(String id,User user) {return snapshot(ownedTask(id,user));}
     public Snapshot latest(Long app,User user) {
         ownedApp(app,user);var task=store.latest(app,user.getId());return task==null?null:snapshot(task);
+    }
+    public boolean exists(String id) {return store.get(id)!=null;}
+    public String resolveLegacyId(Long appId,String runId,User user) {
+        ownedApp(appId,user);
+        var direct=store.get(runId);
+        if(direct!=null) {
+            if(direct.appId()!=appId||direct.userId()!=user.getId())throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+            return runId;
+        }
+        var alias=store.byRequest(appId,user.getId(),runId);
+        return alias==null?runId:alias.taskId();
+    }
+    public Snapshot pause(String id,User user) {
+        var task=ownedTask(id,user);
+        if(task.settled())return snapshot(task);
+        if(store.pauseQueued(id))return snapshot(store.get(id));
+        work.pause(task);
+        store.markPausing(id);
+        return snapshot(store.get(id));
+    }
+    public Snapshot resume(String id,User user) {
+        var task=ownedTask(id,user);
+        if(!List.of("PAUSED","INTERRUPTED").contains(task.status()))return snapshot(task);
+        if(busyOrUnavailable(task.appId()))throw new BusinessException(ErrorCode.CHAT_IN_PROGRESS,"原执行仍在结束中，请稍后继续");
+        boolean checkpoint=store.shouldResume(id);
+        if("INTERRUPTED".equals(task.status())) {
+            // A task interrupted after claim may not have reached Python. Only an
+            // authenticated 404 can establish that starting fresh is appropriate.
+            try {
+                var state=work.status(task.userId(),task.appId(),id);
+                checkpoint=state.get("status")!=null;
+            } catch(BusinessException e) {
+                if(e.getCode()!=ErrorCode.NOT_FOUND_ERROR.getCode())throw e;
+                checkpoint=false;
+            }
+        }
+        return snapshot(store.resume(id,checkpoint));
+    }
+    public Snapshot importAndResume(Long appId,String runId,User user) {
+        var app=ownedApp(appId,user);
+        runId=resolveLegacyId(appId,runId,user);
+        try {UUID.fromString(runId);}catch(Exception e){throw new BusinessException(ErrorCode.PARAMS_ERROR);}
+        if(!exists(runId)) {
+            var state=work.status(user.getId(),appId,runId);
+            if(!List.of("paused","interrupted").contains(Objects.toString(state.get("status"),"")))
+                throw new BusinessException(ErrorCode.CHAT_IN_PROGRESS,"原任务尚不可继续");
+            store.importLegacyPaused(runId,appId,user.getId(),app.getCodeGenType());
+        } else if(ownedTask(runId,user).appId()!=appId) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR,"应用与任务不匹配");
+        }
+        return resume(runId,user);
     }
     private GenerationTaskStore.Task ownedTask(String id,User user) {
         var task=store.get(id);
@@ -88,7 +137,7 @@ public class GenerationQueueService {
         }
         var task=store.get(id);
         if(task==null)throw new IllegalStateException("任务不存在");
-        boolean terminal=task.terminal()&&(cursor.get()>=task.lastEventId()||events.isEmpty());
+        boolean terminal=task.settled()&&(cursor.get()>=task.lastEventId()||events.isEmpty());
         if(terminal&&events.isEmpty()) {
             String status="SUCCEEDED".equals(task.status())?"success":task.status().toLowerCase();
             out.add(ServerSentEvent.<String>builder().id(String.valueOf(task.lastEventId()))

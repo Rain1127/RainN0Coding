@@ -56,7 +56,12 @@ public class AiCodeGeneratorFacade {
     }
 
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum,
-            Long appId, Long userId, String userRole, String requestId, String idempotencyKey, boolean strictTerminal) {
+            Long appId, Long userId, String userRole, String requestId, String idempotencyKey, boolean resume) {
+        return generateAndSaveCodeStream(userMessage,codeGenTypeEnum,appId,userId,userRole,requestId,idempotencyKey,resume,false);
+    }
+
+    public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum,
+            Long appId, Long userId, String userRole, String requestId, String idempotencyKey, boolean resume,boolean strictTerminal) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "code generation type cannot be null");
         }
@@ -67,7 +72,10 @@ public class AiCodeGeneratorFacade {
             log.info("Pass traceId to Python Agent: {}", traceId);
         }
 
-        Flux<String> sseStream = pythonAiClient.streamCodeGen(
+        Flux<String> sseStream = resume ? pythonAiClient.streamCodeGen(
+                String.valueOf(userId), String.valueOf(appId), userMessage,
+                codeGenTypeEnum.getValue(), userRole, traceId, requestId, idempotencyKey, true)
+                : pythonAiClient.streamCodeGen(
                 String.valueOf(userId), String.valueOf(appId), userMessage,
                 codeGenTypeEnum.getValue(), userRole, traceId, requestId, idempotencyKey);
 

@@ -50,6 +50,8 @@ ChromeDriver 必须与 Chrome 版本匹配。当前 `152.0.7977.82`，驱动来�
 
 本次实测记录见 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
+Kafka 代码生成队列的独立部署、资源预算、发布维护锁与回滚步骤见 [kafka/README.md](kafka/README.md)。Kafka 上线状态以新增验收记录为准，不能用旧部署记录代替。
+
 ## 日常访问与维护
 
 Windows PowerShell 中建立监控隧道（保持终端开启）：

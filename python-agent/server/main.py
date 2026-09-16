@@ -30,7 +30,7 @@ from tracing import (
     get_current_trace_id,
     setup_tracing,
 )
-from workflow.sse_stream import stream_workflow
+from workflow.sse_stream import stream_persistent_workflow as stream_workflow
 
 
 def _config():
@@ -119,6 +119,7 @@ class CodeGenRequest(BaseModel):
     request_id: str = Field(default="", alias="requestId", description="gateway request id")
     trace_id: str = Field(default="", alias="traceId", description="distributed trace id from Java")
     history: list = Field(default_factory=list, description="conversation history")
+    resume: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -128,6 +129,32 @@ class RouteCodeGenTypeRequest(BaseModel):
     user_id: str | None = Field(default=None, alias="userId", description="user id")
 
     model_config = {"populate_by_name": True}
+
+
+class GenerationControlRequest(BaseModel):
+    user_id: str = Field(alias="userId", min_length=1, max_length=128)
+    app_id: str = Field(alias="appId", min_length=1, max_length=128)
+    run_id: str = Field(alias="runId", min_length=1, max_length=128)
+    model_config = {"populate_by_name": True}
+
+
+def _control(request, action):
+    from workflow.run_control import default_run_store, RunControlError
+    try:
+        store = default_run_store()
+        return getattr(store, action)(request.run_id, request.user_id, request.app_id)
+    except RunControlError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status_code)
+
+
+@app.post("/api/generation/pause")
+def pause_generation(request: GenerationControlRequest):
+    return _control(request, "pause")
+
+
+@app.post("/api/generation/status")
+def generation_status(request: GenerationControlRequest):
+    return _control(request, "public_status")
 
 
 class RouteCodeGenTypeResponse(BaseModel):

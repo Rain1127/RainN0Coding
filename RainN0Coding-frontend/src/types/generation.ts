@@ -15,6 +15,8 @@ export type GenerationStatus =
   | 'connecting'
   | 'queued'
   | 'running'
+  | 'pausing'
+  | 'paused'
   | 'success'
   | 'failed'
   | 'cancelled'
@@ -43,7 +45,7 @@ export interface GenerationEvent {
 export interface GenerationTask {
   taskId: string
   appId: string
-  status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED'
+  status: 'QUEUED' | 'RUNNING' | 'PAUSING' | 'PAUSED' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED'
   errorMessage: string | null
   lastEventId: string
   retryAllowed: boolean

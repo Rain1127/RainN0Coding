@@ -1,10 +1,8 @@
 package com.rain.rainn0coding.core.builder;
 
-import cn.hutool.core.util.RuntimeUtil;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -26,12 +24,13 @@ class VueProjectBuilderTest {
         when(process.waitFor(anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(process.exitValue()).thenReturn(0);
         List<List<String>> commands = new ArrayList<>();
-        try (var runtime = mockStatic(RuntimeUtil.class)) {
-            runtime.when(() -> RuntimeUtil.exec(isNull(), any(File.class), any(String[].class)))
-                    .thenAnswer(call -> {
-                        commands.add(List.of((String[]) call.getRawArguments()[2]));
-                        return process;
-                    });
+        try (var builders = mockConstruction(ProcessBuilder.class, (builder, context) -> {
+            commands.add(List.of((String[]) context.arguments().getFirst()));
+            when(builder.directory(any())).thenReturn(builder);
+            when(builder.redirectErrorStream(true)).thenReturn(builder);
+            when(builder.redirectOutput(any(ProcessBuilder.Redirect.class))).thenReturn(builder);
+            when(builder.start()).thenReturn(process);
+        })) {
             assertThat(new VueProjectBuilder().buildProject(directory.toString())).isTrue();
         }
         assertThat(commands).hasSize(2);

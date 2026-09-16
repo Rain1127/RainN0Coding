@@ -65,3 +65,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Isolated queue regression artifacts
+python-agent/.test-tmp-*/

@@ -60,6 +60,15 @@ idempotency:
   success-ttl-hours: ${IDEMPOTENCY_SUCCESS_TTL_HOURS:24}
   failure-ttl-minutes: ${IDEMPOTENCY_FAILURE_TTL_MINUTES:5}
 app:
+  generation-queue:
+    enabled: ${APP_GENERATION_QUEUE_ENABLED:false}
+    bootstrap-servers: ${APP_GENERATION_QUEUE_BOOTSTRAP_SERVERS:127.0.0.1:9092}
+    topic: ${APP_GENERATION_QUEUE_TOPIC:rain-code-generation-v1}
+    group-id: ${APP_GENERATION_QUEUE_GROUP_ID:rain-code-generation-workers-v1}
+    max-pending: ${APP_GENERATION_QUEUE_MAX_PENDING:100}
+    max-wait-hours: ${APP_GENERATION_QUEUE_MAX_WAIT_HOURS:24}
+    task-timeout-minutes: ${APP_GENERATION_QUEUE_TASK_TIMEOUT_MINUTES:30}
+    event-retention-days: ${APP_GENERATION_QUEUE_EVENT_RETENTION_DAYS:7}
   deploy-host: ${APP_DEPLOY_HOST:http://localhost:8123/api/static}
   cors:
     allowed-origin-patterns: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}

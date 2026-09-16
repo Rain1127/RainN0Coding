@@ -4,6 +4,8 @@ SSE stream wrapper for the LangGraph workflow.
 import json
 import sys
 import time
+from contextlib import aclosing
+from uuid import uuid4
 from typing import AsyncGenerator
 
 from guardrails.audit import audit_from_decision
@@ -25,6 +27,7 @@ async def stream_workflow(
     user_role: str = "user",
     trace_id: str = "",
     request_id: str = "",
+    session=None,
 ) -> AsyncGenerator[str, None]:
     """Yield SSE events from the async workflow."""
 
@@ -81,259 +84,279 @@ async def stream_workflow(
             parts.append(f"[当前请求] {user_request}")
             enriched_request = "\n".join(parts)
 
-        yield _event("workflow_start", message=f"开始处理需求: {user_request[:50]}")
+        yield _event("workflow_resumed" if session and session.resume else "workflow_start",
+                     message=f"开始处理需求: {user_request[:50]}")
         if summary:
             yield _event("memory_loaded", summary=summary[:200], recent_count=len(recent))
 
         phase_start_times: dict[str, float] = {}
 
         try:
-            phase_start_times["intent"] = time.time()
-            yield _event("phase_start", phase="intent", message="正在理解你的需求...")
-            seen_phases.add("intent_done")
+            if not (session and session.resume):
+                phase_start_times["intent"] = time.time()
+                yield _event("phase_start", phase="intent", message="正在理解你的需求...")
+                seen_phases.add("intent_done")
 
-            async for state in run_workflow_async(
+            terminal_sent = False
+            replay_files = bool(session and session.resume)
+
+            async with aclosing(run_workflow_async(
                 enriched_request,
                 user_id,
                 app_id,
                 code_gen_type,
                 user_role,
                 trace_id,
-            ):
-                phase = state.get("phase", "")
-                error = state.get("error")
-                retry_count = state.get("retry_count", 0)
+                **({"session": session} if session else {}),
+            )) as states:
+                async for state in states:
+                    if state.get("__paused__"):
+                        yield _event("paused", message="已保存进度，可继续生成")
+                        yield _event("done", status="paused")
+                        continue
+                    if terminal_sent:
+                        continue
+                    phase = state.get("phase", "")
+                    error = state.get("error")
+                    retry_count = state.get("retry_count", 0)
 
-                if error:
-                    yield _event("error", message=str(error))
-                    yield _event("done", status="error")
-                    return
+                    if error:
+                        yield _event("error", message=str(error))
+                        yield _event("done", status="error")
+                        terminal_sent = True
+                        continue
 
-                if phase == "mode_detected" and "mode_detected" not in seen_phases:
-                    seen_phases.add("mode_detected")
-                    mode = state.get("mode", "new")
-                    mode_messages = {
-                        "new": "正在启动全新代码生成...",
-                        "modify": "检测到已有代码，正在基于现有代码进行增量修改...",
-                        "rebuild": "正在重新构建项目...",
-                    }
-                    yield _event("mode_detected", mode=mode, message=mode_messages.get(mode, ""))
+                    if phase == "mode_detected" and "mode_detected" not in seen_phases:
+                        seen_phases.add("mode_detected")
+                        mode = state.get("mode", "new")
+                        mode_messages = {
+                            "new": "正在启动全新代码生成...",
+                            "modify": "检测到已有代码，正在基于现有代码进行增量修改...",
+                            "rebuild": "正在重新构建项目...",
+                        }
+                        yield _event("mode_detected", mode=mode, message=mode_messages.get(mode, ""))
 
-                if phase == "intent_done" and "intent_done" not in seen_phases:
-                    seen_phases.add("intent_done")
-                    intent = state.get("intent") or {}
-                    clarification = state.get("clarification")
-                    mode = state.get("mode", "new")
-                    yield _event(
-                        "phase_complete",
-                        phase="intent",
-                        output={
-                            "primary_intent": intent.get("primary_intent", ""),
-                            "confidence": intent.get("confidence", 0),
-                            "should_clarify": intent.get("should_clarify", False),
-                            "note": clarification.get("note") if clarification else None,
-                        },
-                    )
-                    if mode == "modify":
-                        phase_start_times["code"] = time.time()
+                    if phase == "intent_done" and "intent_done" not in seen_phases:
+                        seen_phases.add("intent_done")
+                        intent = state.get("intent") or {}
+                        clarification = state.get("clarification")
+                        mode = state.get("mode", "new")
                         yield _event(
-                            "phase_start",
-                            phase="code",
-                            message="程序员正在基于现有代码进行增量修改...",
+                            "phase_complete",
+                            phase="intent",
+                            output={
+                                "primary_intent": intent.get("primary_intent", ""),
+                                "confidence": intent.get("confidence", 0),
+                                "should_clarify": intent.get("should_clarify", False),
+                                "note": clarification.get("note") if clarification else None,
+                            },
                         )
-                        seen_phases.add("code_done")
-                    else:
-                        phase_start_times["pm"] = time.time()
+                        if mode == "modify":
+                            phase_start_times["code"] = time.time()
+                            yield _event(
+                                "phase_start",
+                                phase="code",
+                                message="程序员正在基于现有代码进行增量修改...",
+                            )
+                            seen_phases.add("code_done")
+                        else:
+                            phase_start_times["pm"] = time.time()
+                            yield _event(
+                                "phase_start",
+                                phase="pm",
+                                message="产品经理正在分析需求...",
+                            )
+                            seen_phases.add("prd_done")
+
+                    if phase == "clarify" and "clarify" not in seen_phases:
+                        seen_phases.add("clarify")
+                        clarification = state.get("clarification") or {}
                         yield _event(
-                            "phase_start",
-                            phase="pm",
-                            message="产品经理正在分析需求...",
+                            "clarify",
+                            questions=clarification.get("questions", []),
+                            missing_slots=clarification.get("missing_slots", []),
                         )
+                        yield _event("done", status="clarify_needed")
+                        terminal_sent = True
+                        continue
+
+                    if phase == "prd_done" and "prd_done" not in seen_phases:
                         seen_phases.add("prd_done")
-
-                if phase == "clarify" and "clarify" not in seen_phases:
-                    seen_phases.add("clarify")
-                    clarification = state.get("clarification") or {}
-                    yield _event(
-                        "clarify",
-                        questions=clarification.get("questions", []),
-                        missing_slots=clarification.get("missing_slots", []),
-                    )
-                    yield _event("done", status="clarify_needed")
-                    return
-
-                if phase == "prd_done" and "prd_done" not in seen_phases:
-                    seen_phases.add("prd_done")
-                    prd = state.get("prd") or {}
-                    yield _event(
-                        "phase_complete",
-                        phase="pm",
-                        output={
-                            "page_name": prd.get("page_name", ""),
-                            "page_type": prd.get("page_type", ""),
-                            "feature_count": len(prd.get("features", [])),
-                        },
-                    )
-                    phase_start_times["arch"] = time.time()
-                    yield _event("phase_start", phase="arch", message="架构师正在设计代码结构...")
-
-                if phase == "arch_done" and "arch_done" not in seen_phases:
-                    seen_phases.add("arch_done")
-                    arch = state.get("architecture") or {}
-                    yield _event(
-                        "phase_complete",
-                        phase="arch",
-                        output={
-                            "component_count": len(arch.get("component_tree", [])),
-                            "file_count": len(arch.get("file_list", [])),
-                        },
-                    )
-                    phase_start_times["code"] = time.time()
-                    yield _event("phase_start", phase="code", message="程序员正在编写代码...")
-
-                if phase == "code_done":
-                    is_retry = retry_count > prev_retry_count
-                    if is_retry:
-                        prev_retry_count = retry_count
-                        phase_start_times["code_retry"] = time.time()
+                        prd = state.get("prd") or {}
                         yield _event(
-                            "phase_start",
-                            phase="code_retry",
-                            retry=retry_count,
-                            message=f"正在修复审查发现的问题（第 {retry_count} 次重试）...",
+                            "phase_complete",
+                            phase="pm",
+                            output={
+                                "page_name": prd.get("page_name", ""),
+                                "page_type": prd.get("page_type", ""),
+                                "feature_count": len(prd.get("features", [])),
+                            },
                         )
+                        phase_start_times["arch"] = time.time()
+                        yield _event("phase_start", phase="arch", message="架构师正在设计代码结构...")
 
-                    code_files = state.get("code_files", [])
-                    for file_info in code_files:
-                        decision = evaluate_output_event(
-                            OutputEvent(
-                                event_type="code_file",
-                                path=file_info.get("path", ""),
-                                content=file_info.get("content", ""),
+                    if phase == "arch_done" and "arch_done" not in seen_phases:
+                        seen_phases.add("arch_done")
+                        arch = state.get("architecture") or {}
+                        yield _event(
+                            "phase_complete",
+                            phase="arch",
+                            output={
+                                "component_count": len(arch.get("component_tree", [])),
+                                "file_count": len(arch.get("file_list", [])),
+                            },
+                        )
+                        phase_start_times["code"] = time.time()
+                        yield _event("phase_start", phase="code", message="程序员正在编写代码...")
+
+                    if phase == "code_done" or (replay_files and state.get("code_files")):
+                        replay_files = False
+                        is_retry = retry_count > prev_retry_count
+                        if is_retry:
+                            prev_retry_count = retry_count
+                            phase_start_times["code_retry"] = time.time()
+                            yield _event(
+                                "phase_start",
+                                phase="code_retry",
+                                retry=retry_count,
+                                message=f"正在修复审查发现的问题（第 {retry_count} 次重试）...",
+                            )
+
+                        code_files = state.get("code_files", [])
+                        for file_info in code_files:
+                            decision = evaluate_output_event(
+                                OutputEvent(
+                                    event_type="code_file",
+                                    path=file_info.get("path", ""),
+                                    content=file_info.get("content", ""),
+                                    request_id=request_id,
+                                    trace_id=trace_id,
+                                )
+                            )
+                            audit_from_decision(
+                                decision,
                                 request_id=request_id,
                                 trace_id=trace_id,
+                                user_id=user_id,
+                                app_id=app_id,
+                                path=file_info.get("path", ""),
                             )
-                        )
-                        audit_from_decision(
-                            decision,
-                            request_id=request_id,
-                            trace_id=trace_id,
-                            user_id=user_id,
-                            app_id=app_id,
-                            path=file_info.get("path", ""),
-                        )
-                        if decision.action == "block":
+                            if decision.action == "block":
+                                if session:
+                                    session.store.update_status(session.run_id, "failed")
+                                    session.finished = True
+                                yield _event(
+                                    "error",
+                                    status="guardrail_blocked",
+                                    rule_id=decision.rule_id,
+                                    message=decision.message,
+                                )
+                                yield _event("done", status="guardrail_blocked")
+                                return
                             yield _event(
-                                "error",
-                                status="guardrail_blocked",
-                                rule_id=decision.rule_id,
-                                message=decision.message,
+                                "code_file",
+                                path=file_info.get("path", ""),
+                                content=file_info.get("content", ""),
                             )
-                            yield _event("done", status="guardrail_blocked")
-                            return
+
                         yield _event(
-                            "code_file",
-                            path=file_info.get("path", ""),
-                            content=file_info.get("content", ""),
+                            "phase_complete",
+                            phase="code_retry" if is_retry else "code",
+                            output={
+                                "file_count": len(code_files),
+                                "total_lines": sum(len(f.get("content", "").split("\n")) for f in code_files),
+                            },
                         )
 
-                    yield _event(
-                        "phase_complete",
-                        phase="code_retry" if is_retry else "code",
-                        output={
-                            "file_count": len(code_files),
-                            "total_lines": sum(len(f.get("content", "").split("\n")) for f in code_files),
-                        },
-                    )
+                        if not is_retry:
+                            phase_start_times["review"] = time.time()
+                            yield _event("phase_start", phase="review", message="代码审查中...")
 
-                    if not is_retry:
-                        phase_start_times["review"] = time.time()
-                        yield _event("phase_start", phase="review", message="代码审查中...")
+                    if phase == "review_done":
+                        review = state.get("review") or {}
+                        passed = review.get("passed", False)
+                        issues = review.get("issues", [])
 
-                if phase == "review_done":
-                    review = state.get("review") or {}
-                    passed = review.get("passed", False)
-                    issues = review.get("issues", [])
-
-                    yield _event(
-                        "phase_complete",
-                        phase="review",
-                        output={
-                            "score": review.get("score"),
-                            "passed": passed,
-                            "issue_count": len(issues),
-                            "retry_count": retry_count,
-                        },
-                    )
-
-                    for issue in issues[:10]:
                         yield _event(
-                            "review_issue",
-                            file=issue.get("file", ""),
-                            severity=issue.get("severity", "info"),
-                            description=issue.get("description", ""),
+                            "phase_complete",
+                            phase="review",
+                            output={
+                                "score": review.get("score"),
+                                "passed": passed,
+                                "issue_count": len(issues),
+                                "retry_count": retry_count,
+                            },
                         )
 
-                    if not passed and retry_count < state.get("max_retries", 3):
-                        phase_start_times["code"] = time.time()
-                        phase_start_times["code_retry"] = time.time()
-                    else:
-                        phase_start_times["build"] = time.time()
+                        for issue in issues[:10]:
+                            yield _event(
+                                "review_issue",
+                                file=issue.get("file", ""),
+                                severity=issue.get("severity", "info"),
+                                description=issue.get("description", ""),
+                            )
 
-                if phase == "build_done":
-                    build = state.get("build_result") or {}
-                    yield _event("phase_complete", phase="build", output={"success": build.get("success")})
-
-                if phase == "completed" or phase == "error":
-                    final = state.get("final_result") or {}
-                    review = state.get("review") or {}
-                    final_status = final.get("status") or "success"
-
-                    code_files = state.get("code_files", [])
-                    yield _event(
-                        "trace_summary",
-                        trace={
-                            "thread_id": thread_id,
-                            "phases": sorted(seen_phases),
-                            "file_count": len(code_files),
-                            "retry_count": retry_count,
-                            "review_score": review.get("score"),
-                            "intent": (state.get("intent") or {}).get("primary_intent", ""),
-                        },
-                    )
-
-                    try:
-                        conversation_memory.add_message(thread_id, "user", user_request)
-                        if code_files:
-                            file_list = ", ".join(f.get("path", "") for f in code_files[:5])
-                            resp = f"[{len(code_files)}个文件] {file_list}"
+                        if not passed and retry_count < state.get("max_retries", 3):
+                            phase_start_times["code"] = time.time()
+                            phase_start_times["code_retry"] = time.time()
                         else:
-                            resp = final.get("phase", "completed")
-                        conversation_memory.add_message(thread_id, "assistant", resp)
-                    except Exception as ex:
-                        print(f"[Memory] save failed: {ex}")
+                            phase_start_times["build"] = time.time()
 
-                    if final.get("degraded"):
-                        for reason in final.get("degraded_reasons", []):
-                            yield _event(
-                                "warning",
-                                status="degraded",
-                                phase=final.get("failed_phase") or state.get("phase"),
-                                reason=reason,
-                                message=final.get("recovery_hint") or "Workflow completed with a degraded path.",
-                            )
+                    if phase == "build_done":
+                        build = state.get("build_result") or {}
+                        yield _event("phase_complete", phase="build", output={"success": build.get("success")})
 
-                    yield _event(
-                        "done",
-                        status=final_status,
-                        failed_phase=final.get("failed_phase"),
-                        degraded=final.get("degraded", False),
-                        degraded_reasons=final.get("degraded_reasons", []),
-                        partial_code_available=final.get("partial_code_available", False),
-                        recovery_hint=final.get("recovery_hint"),
-                        result=final,
-                    )
-                    return
+                    if phase == "completed" or phase == "error":
+                        final = state.get("final_result") or {}
+                        review = state.get("review") or {}
+                        final_status = final.get("status") or "success"
+
+                        code_files = state.get("code_files", [])
+                        yield _event(
+                            "trace_summary",
+                            trace={
+                                "thread_id": thread_id,
+                                "phases": sorted(seen_phases),
+                                "file_count": len(code_files),
+                                "retry_count": retry_count,
+                                "review_score": review.get("score"),
+                                "intent": (state.get("intent") or {}).get("primary_intent", ""),
+                            },
+                        )
+
+                        try:
+                            if not session or session.store.claim_effect(session.run_id, "conversation_memory"):
+                                conversation_memory.add_message(thread_id, "user", user_request)
+                                if code_files:
+                                    file_list = ", ".join(f.get("path", "") for f in code_files[:5])
+                                    resp = f"[{len(code_files)}个文件] {file_list}"
+                                else:
+                                    resp = final.get("phase", "completed")
+                                conversation_memory.add_message(thread_id, "assistant", resp)
+                        except Exception as ex:
+                            print(f"[Memory] save failed: {ex}")
+
+                        if final.get("degraded"):
+                            for reason in final.get("degraded_reasons", []):
+                                yield _event(
+                                    "warning",
+                                    status="degraded",
+                                    phase=final.get("failed_phase") or state.get("phase"),
+                                    reason=reason,
+                                    message=final.get("recovery_hint") or "Workflow completed with a degraded path.",
+                                )
+
+                        yield _event(
+                            "done",
+                            status=final_status,
+                            failed_phase=final.get("failed_phase"),
+                            degraded=final.get("degraded", False),
+                            degraded_reasons=final.get("degraded_reasons", []),
+                            partial_code_available=final.get("partial_code_available", False),
+                            recovery_hint=final.get("recovery_hint"),
+                            result=final,
+                        )
+                        terminal_sent = True
 
         except Exception as exc:
             try:
@@ -343,3 +366,31 @@ async def stream_workflow(
                 pass
             yield _event("error", message=str(exc))
             yield _event("done", status="error")
+
+
+async def stream_persistent_workflow(
+    user_request: str, user_id: str = "", app_id: str = "",
+    code_gen_type: str = "vue_project", user_role: str = "user",
+    trace_id: str = "", request_id: str = "", resume: bool = False,
+):
+    """Production entry: lock and register the run before publishing workflow_start."""
+    from workflow.run_control import RunSession, default_run_store
+
+    request_id = request_id or str(uuid4())
+    try:
+        async with RunSession(
+            default_run_store(), request_id, user_id, app_id, resume=resume,
+            payload={"prompt": user_request, "code_gen_type": code_gen_type},
+        ) as session:
+            session.user_role = user_role
+            async with aclosing(stream_workflow(
+                session.payload["prompt"], user_id, app_id,
+                session.payload["code_gen_type"], user_role, trace_id, request_id,
+                session=session,
+            )) as events:
+                async for event in events:
+                    yield event
+    except Exception as exc:
+        yield json.dumps({"type": "error", "status": "run_control_error", "message": str(exc),
+                          "request_id": request_id, "trace_id": trace_id}, ensure_ascii=False)
+        yield json.dumps({"type": "done", "status": "error", "request_id": request_id, "trace_id": trace_id})

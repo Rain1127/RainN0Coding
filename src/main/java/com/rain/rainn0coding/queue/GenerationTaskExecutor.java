@@ -27,8 +27,8 @@ public class GenerationTaskExecutor {
     }
     public void execute(String id) {
         var task=store.get(id);
-        if(task==null||task.terminal())return;
-        if("RUNNING".equals(task.status())) {
+        if(task==null||task.settled())return;
+        if("RUNNING".equals(task.status())||"PAUSING".equals(task.status())) {
             finish(task,"INTERRUPTED","执行中断，原执行结束后可以重试");
             return;
         }
@@ -39,6 +39,7 @@ public class GenerationTaskExecutor {
             return;
         }
         var successfulDone=new AtomicBoolean(false);
+        var pausedDone=new AtomicBoolean(false);
         var failure=new AtomicReference<String>();
         String status="SUCCEEDED";
         String message=null;
@@ -50,16 +51,24 @@ public class GenerationTaskExecutor {
                         var event=JSONUtil.parseObj(json);
                         String type=event.getStr("type");
                         if("done".equals(type)) {
+                            if("paused".equals(event.getStr("status"))) {pausedDone.set(true);return;}
                             successfulDone.set(SUCCESS.contains(event.getStr("status","")));
                             if(!successfulDone.get())failure.compareAndSet(null,event.getStr("message","生成未成功完成"));
                             return; // The durable terminal event follows save/build and history commit.
                         }
                         if("error".equals(type))failure.compareAndSet(null,event.getStr("message","生成失败"));
+                        if("code_file".equals(type)) {
+                            String content=event.getStr("content");
+                            if(content!=null&&!event.containsKey("size"))event.set("size",content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+                            event.remove("content");event.remove("source");
+                            json=event.toString();
+                        }
                         store.append(id,json);
                     })
                     .takeUntilOther(Mono.delay(Duration.ofMinutes(config.getTaskTimeoutMinutes()))
                             .flatMap(ignored->Mono.error(new IllegalStateException("任务超过最长执行时间"))))
                     .blockLast();
+            if(pausedDone.get()&&failure.get()==null) {store.pauseCompleted(id,true);return;}
             if(!successfulDone.get()||failure.get()!=null) {
                 status="FAILED"; message=failure.get()!=null?failure.get():"生成连接结束但没有成功结果";
             }

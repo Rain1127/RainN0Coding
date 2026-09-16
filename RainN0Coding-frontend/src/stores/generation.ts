@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useLegacyGenerationStore } from './generationLegacy'
 import { createSseParser } from '@/services/sseParser'
-import { createGenerationTask, getGenerationTask, getLatestGenerationTask, generationTaskUrl, GenerationRequestError } from '@/api/generation'
+import { createGenerationTask, getGenerationTask, getLatestGenerationTask, generationTaskUrl, GenerationRequestError, controlGenerationTask } from '@/api/generation'
 import type {
   GeneratedFile,
   GenerationEvent,
@@ -22,6 +23,16 @@ const SUCCESSFUL_DONE_STATUSES = new Set([
 
 export interface StartGenerationOptions {
   preserve?: boolean
+}
+
+function newRequestId(): string {
+  // Public IP deployments use HTTP, where randomUUID may be unavailable.
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 function eventError(event: GenerationEvent): string {
@@ -91,12 +102,12 @@ export function applyGenerationEvent(
 
   if (typeof event.phase === 'string') {
     next.phase = event.phase
-    if (state.status !== 'failed' && state.status !== 'cancelled') {
+    if (!['failed', 'cancelled', 'pausing', 'paused'].includes(state.status)) {
       next.status = 'running'
     }
   }
 
-  if (event.type === 'queued') next.status = 'queued'
+  if (event.type === 'queued') { next.status = 'queued'; next.error = null }
 
   const file = generatedFile(event)
   if (file) {
@@ -122,6 +133,12 @@ export function applyGenerationEvent(
   }
 
   if (event.type === 'done') {
+    if (event.status === 'paused' && next.status !== 'failed' && next.status !== 'cancelled') {
+      next.status = 'paused'
+      next.phase = state.phase
+      next.error = null
+      return next
+    }
     next.phase = 'done'
     if (event.status && SUCCESSFUL_DONE_STATUSES.has(event.status)) {
       if (next.status !== 'failed' && next.status !== 'cancelled') {
@@ -177,7 +194,7 @@ function reconnectDelay(signal: AbortSignal, delay: number): Promise<void> {
 }
 
 function isTerminal(task: GenerationTask) {
-  return task.status === 'SUCCEEDED' || task.status === 'FAILED' || task.status === 'INTERRUPTED'
+  return task.status === 'PAUSED' || task.status === 'SUCCEEDED' || task.status === 'FAILED' || task.status === 'INTERRUPTED'
 }
 
 export const useGenerationStore = defineStore('generation', () => {
@@ -187,6 +204,10 @@ export const useGenerationStore = defineStore('generation', () => {
   const files = ref<GeneratedFile[]>([])
   const error = ref<string | null>(null)
   const runId = ref(0)
+  const legacy = useLegacyGenerationStore()
+  const legacyMode = ref(false)
+  const requestId = ref<string | null>(null)
+  const controlError = ref<string | null>(null)
   const task = ref<GenerationTask | null>(null)
   const lastEventId = ref('0')
   const retryAllowed = ref(false)
@@ -209,7 +230,16 @@ export const useGenerationStore = defineStore('generation', () => {
     error.value = next.error
   }
 
+  watch(() => [legacy.status, legacy.phase, legacy.events, legacy.files, legacy.error, legacy.controlError, legacy.requestId], () => {
+    if (!legacyMode.value) return
+    replaceState({ status: legacy.status, phase: legacy.phase, events: legacy.events, files: legacy.files, error: legacy.error })
+    requestId.value = legacy.requestId
+    controlError.value = legacy.controlError
+    retryAllowed.value = legacy.status === 'failed'
+  }, { flush: 'sync' })
+
   function applyTask(next: GenerationTask) {
+    requestId.value = next.taskId
     task.value = next
     retryAllowed.value = next.retryAllowed
     if (next.status === 'SUCCEEDED') {
@@ -220,13 +250,17 @@ export const useGenerationStore = defineStore('generation', () => {
       status.value = 'failed'
       error.value = next.errorMessage || (next.status === 'INTERRUPTED' ? '生成任务已中断' : '生成失败')
     } else {
-      status.value = next.status === 'QUEUED' ? 'queued' : 'running'
+      status.value = next.status === 'QUEUED' ? 'queued' : next.status === 'PAUSING' ? 'pausing' : next.status === 'PAUSED' ? 'paused' : 'running'
       if (next.status === 'QUEUED') phase.value = 'queued'
       error.value = null
     }
   }
 
   function begin(appId: EntityId, preserve = false) {
+    legacyMode.value = false
+    legacy.reset()
+    controlError.value = null
+    requestId.value = null
     const id = ++runId.value
     activeController?.abort()
     const controller = new AbortController()
@@ -321,7 +355,7 @@ export const useGenerationStore = defineStore('generation', () => {
     try {
       const next = await load()
       if (!context.current()) return
-      if (!next) { replaceState(initialState()); return }
+      if (!next) { if (!legacyMode.value) replaceState(initialState()); return }
       applyTask(next)
       await subscribe(next, context)
     } catch (caught) {
@@ -337,11 +371,19 @@ export const useGenerationStore = defineStore('generation', () => {
   async function start(appId: EntityId, prompt: string, options: StartGenerationOptions = {}): Promise<void> {
     const context = begin(appId, options.preserve)
     if (!pendingSubmission || pendingSubmission.appId !== String(appId) || pendingSubmission.prompt !== prompt) {
-      pendingSubmission = { appId: String(appId), prompt, key: crypto.randomUUID() }
+      pendingSubmission = { appId: String(appId), prompt, key: newRequestId() }
     }
     const submission = pendingSubmission
     await runTask(context, async () => {
-      const next = await createGenerationTask(appId, prompt, submission.key, context.controller.signal)
+      let next: GenerationTask
+      try {
+        next = await createGenerationTask(appId, prompt, submission.key, context.controller.signal)
+      } catch (caught) {
+        if (!(caught instanceof GenerationRequestError) || caught.httpStatus !== 404 || !context.current()) throw caught
+        legacyMode.value = true
+        await legacy.start(appId, prompt, options)
+        return null
+      }
       if (pendingSubmission === submission) pendingSubmission = null
       return next
     })
@@ -349,16 +391,86 @@ export const useGenerationStore = defineStore('generation', () => {
 
   async function restore(appId: EntityId): Promise<void> {
     const context = begin(appId)
-    await runTask(context, () => getLatestGenerationTask(appId, context.controller.signal))
+    await runTask(context, async () => {
+      let next: GenerationTask | null
+      try { next = await getLatestGenerationTask(appId, context.controller.signal) }
+      catch (caught) {
+        if (!(caught instanceof GenerationRequestError) || caught.httpStatus !== 404) throw caught
+        next = null
+      }
+      if (!context.current()) return null
+      if (!next) {
+        replaceState(initialState())
+        legacyMode.value = true
+        await legacy.restore(appId)
+      }
+      return next
+    })
+  }
+
+  async function pause() {
+    if (legacyMode.value) return legacy.pause()
+    if (!task.value || !['queued', 'running'].includes(status.value)) return
+    const epoch = runId.value
+    const previous = status.value
+    status.value = 'pausing'
+    controlError.value = null
+    try {
+      const next = await controlGenerationTask(task.value.taskId, 'pause', new AbortController().signal)
+      if (epoch === runId.value) applyTask(next)
+    } catch (caught) {
+      if (epoch === runId.value) {
+        if (status.value === 'pausing') status.value = previous
+        controlError.value = errorMessage(caught)
+      }
+    }
+  }
+
+  async function refreshStatus() {
+    if (legacyMode.value) return legacy.refreshStatus()
+    if (currentAppId === null) return
+    return restore(currentAppId)
+  }
+
+  async function resume() {
+    if (legacyMode.value) {
+      await legacy.resume()
+      return
+    }
+    if (!task.value || currentAppId === null || !['PAUSED', 'INTERRUPTED'].includes(task.value.status)) return
+    const previousTask = task.value
+    const previousState = snapshot()
+    const context = begin(currentAppId, true)
+    try {
+      const next = await controlGenerationTask(previousTask.taskId, 'resume', context.controller.signal)
+      if (!context.current()) return
+      // Replay the newly appended queued event, never an older paused terminal.
+      lastEventId.value = String(BigInt(next.lastEventId) > 0n ? BigInt(next.lastEventId) - 1n : 0n)
+      applyTask(next)
+      await subscribe(next, context)
+    } catch (caught) {
+      if (context.current()) {
+        task.value = previousTask
+        replaceState(previousState)
+        controlError.value = errorMessage(caught)
+      }
+    } finally {
+      if (context.id === runId.value) activeController = null
+    }
   }
 
   // Compatibility name: this cancels the local subscription, never the server task.
   function cancel() {
+    if (legacyMode.value) legacy.cancel()
     activeController?.abort()
     activeController = null
   }
 
   function reset() {
+    legacyMode.value = false
+    legacy.reset()
+    requestId.value = null
+    controlError.value = null
     runId.value += 1
     cancel()
     currentAppId = null
@@ -369,5 +481,5 @@ export const useGenerationStore = defineStore('generation', () => {
     replaceState(initialState())
   }
 
-  return { status, phase, events, files, error, runId, task, lastEventId, retryAllowed, connectionMessage, start, restore, cancel, reset }
+  return { requestId, controlError, pause, resume, refreshStatus, status, phase, events, files, error, runId, task, lastEventId, retryAllowed, connectionMessage, start, restore, cancel, reset }
 })

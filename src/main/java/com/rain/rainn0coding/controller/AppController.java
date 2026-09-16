@@ -48,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 应用 控制层。
@@ -131,8 +132,14 @@ public class AppController {
             throw e;
         }
         AtomicReference<SseFailure> semanticFailure = new AtomicReference<>();
+        AtomicBoolean paused = new AtomicBoolean();
         return contentFlux
                 .map(chunk->{
+                    JSONObject payload = parseSsePayload(chunk);
+                    if (payload != null && "done".equals(payload.getStr("type"))
+                            && "paused".equals(payload.getStr("status"))) {
+                        paused.set(true);
+                    }
                     SseFailure failure = detectSemanticFailure(chunk);
                     if (failure != null) {
                         semanticFailure.compareAndSet(null, failure);
@@ -149,7 +156,7 @@ public class AppController {
                     if (failure != null) {
                         idempotencyService.markFailed(decision.redisKey(), fingerprint,
                                 failure.errorCode(), failure.message());
-                    } else {
+                    } else if (!paused.get()) {
                         idempotencyService.markSuccess(decision.redisKey(), fingerprint,
                                 JSONUtil.toJsonStr(Map.of("type", "done", "status", "success")), 200);
                     }
@@ -167,6 +174,55 @@ public class AppController {
                                 .data("")//返回空数据，表示事件已经结束
                                 .build()
                 ));
+    }
+
+    @PostMapping("/chat/gen/pause")
+    public BaseResponse<Map<String, Object>> pauseGeneration(@RequestBody GenerationControlRequest control,
+                                                            HttpServletRequest request) {
+        ThrowUtils.throwIf(control == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        if (generationQueueService != null) {
+            String id = generationQueueService.resolveLegacyId(control.appId(), control.runId(), loginUser);
+            if (generationQueueService.exists(id)) {
+                var task = generationQueueService.pause(id, loginUser);
+                return ResultUtils.success(Map.of("run_id", control.runId(), "status", task.status().toLowerCase()));
+            }
+        }
+        return ResultUtils.success(appService.pauseGeneration(control.appId(), control.runId(), loginUser));
+    }
+
+    @GetMapping("/chat/gen/status")
+    public BaseResponse<Map<String, Object>> generationStatus(@RequestParam Long appId, @RequestParam String runId,
+                                                             HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        if (generationQueueService != null) {
+            String id = generationQueueService.resolveLegacyId(appId, runId, loginUser);
+            if (generationQueueService.exists(id)) {
+                var task = generationQueueService.get(id, loginUser);
+                String status = "SUCCEEDED".equals(task.status()) ? "completed" : task.status().toLowerCase();
+                return ResultUtils.success(Map.of("run_id", runId, "status", status));
+            }
+        }
+        return ResultUtils.success(appService.generationStatus(appId, runId, loginUser));
+    }
+
+    @GetMapping(value = "/chat/gen/resume", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RateLimit(limitType = RateLimitType.USER, rate = 5, rateInterval = 60, message = "AI对话请求过于频繁，请稍后再试")
+    public Flux<ServerSentEvent<String>> resumeGeneration(@RequestParam Long appId, @RequestParam String runId,
+                                                          HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        if (generationQueueService != null) {
+            var task = generationQueueService.importAndResume(appId, runId, loginUser);
+            return generationQueueService.events(task.taskId(), Math.max(0, Long.parseLong(task.lastEventId()) - 1), loginUser)
+                    .map(event -> event.data() == null ? event : ServerSentEvent.<String>builder()
+                            .id(event.id()).data(JSONUtil.toJsonStr(Map.of("d", event.data()))).build());
+        }
+        // The stable run ID belongs to the original request. Python checkpoints and the
+        // service generation lock control resumption independently of that request's cache.
+        return appService.resumeGeneration(appId, runId, loginUser)
+                .map(chunk -> ServerSentEvent.<String>builder()
+                        .data(JSONUtil.toJsonStr(Map.of("d", chunk))).build())
+                .concatWith(Mono.just(ServerSentEvent.<String>builder().event("done").data("").build()));
     }
 
     /**
@@ -596,7 +652,7 @@ public class AppController {
             return new SseFailure(errorCodeForStatus(status), semanticFailureMessage(payload, status));
         }
         if ("done".equals(type) && StrUtil.isNotBlank(status) && !"success".equals(status)) {
-            if ("partial_success".equals(status) || "degraded_success".equals(status)) {
+            if ("partial_success".equals(status) || "degraded_success".equals(status) || "paused".equals(status)) {
                 return null;
             }
             return new SseFailure(errorCodeForStatus(status), semanticFailureMessage(payload, status));

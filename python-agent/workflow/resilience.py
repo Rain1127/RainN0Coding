@@ -257,10 +257,8 @@ async def _run_phase_runner(phase: str, state: dict, runner):
 
         return await asyncio.wait_for(tracked_runner(), timeout=timeout_seconds)
 
-    return await asyncio.wait_for(
-        execution_registry.run_sync(working_state.get("app_id", ""), runner, working_state),
-        timeout=timeout_seconds,
-    )
+    from workflow.run_control import run_owned_worker
+    return await asyncio.wait_for(run_owned_worker(runner, working_state), timeout=timeout_seconds)
 
 
 async def guarded_phase_call(phase: str, state: dict, runner):

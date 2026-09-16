@@ -89,7 +89,11 @@ async def orchestrate_generate_code(
     resolved_trace_id = resolve_trace_id(request.trace_id)
     set_current_trace_id(resolved_trace_id)
 
-    if _config().GUARDRAILS_ENABLED:
+    if getattr(request, "resume", False) and not request.request_id:
+        return GenerateCodeOrchestrationResult(immediate_response=ImmediateResponse(
+            body={"detail": "Resuming requires the original requestId"}, status_code=400))
+
+    if _config().GUARDRAILS_ENABLED and not getattr(request, "resume", False):
         prompt_decision = evaluate_prompt(
             PromptContext(
                 prompt=request.prompt,
@@ -146,6 +150,7 @@ async def orchestrate_generate_code(
                 user_role=request.user_role,
                 trace_id=resolved_trace_id,
                 request_id=request.request_id,
+                **({"resume": True} if getattr(request, "resume", False) else {}),
             ):
                 event_status = _status_from_sse_event(event)
                 if event_status and status == "success":
@@ -167,4 +172,19 @@ async def orchestrate_generate_code(
     # idle gap before SSE starts. An abandoned, never-iterated generator cannot
     # run its finally; collection safely releases that reservation instead.
     weakref.finalize(events, release_execution)
-    return GenerateCodeOrchestrationResult(event_generator=events)
+    from server.generation_stream_transport import detached_stream
+
+    def pause_disconnected_run():
+        from workflow.run_control import default_run_store, RunControlError
+        try:
+            default_run_store().pause(request.request_id, request.user_id, request.app_id)
+            return True
+        except RunControlError:
+            # Disconnect may arrive before the producer registered the run.
+            return False
+        except Exception:
+            logger.exception("Unable to record pause after SSE disconnect")
+            return False
+
+    return GenerateCodeOrchestrationResult(
+        event_generator=detached_stream(events, pause_disconnected_run))

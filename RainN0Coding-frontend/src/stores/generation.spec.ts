@@ -7,8 +7,15 @@ import type { GenerationState } from '@/types/generation'
 import {
   MAX_GENERATION_EVENTS,
   applyGenerationEvent,
-  useGenerationStore,
-} from './generation'
+  useLegacyGenerationStore,
+} from './generationLegacy'
+
+// Exercise the compatibility wrapper against the legacy transport contract.
+// Durable task and fallback integration are covered by generationQueue.spec.ts.
+vi.mock('@/stores/generation', async () => {
+  const legacy = await import('./generationLegacy')
+  return { ...legacy, useGenerationStore: legacy.useLegacyGenerationStore }
+})
 
 function generationState(
   overrides: Partial<GenerationState> = {},
@@ -338,7 +345,7 @@ describe('generation store stream lifecycle', () => {
       ]),
     )
     vi.stubGlobal('fetch', fetchMock)
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     const run = store.start(7, 'build a dashboard & tests')
 
@@ -373,7 +380,7 @@ describe('generation store stream lifecycle', () => {
         ]),
       ),
     )
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(8, 'build a service')
 
@@ -396,7 +403,7 @@ describe('generation store stream lifecycle', () => {
         ]),
       ),
     )
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(8, 'requires login')
 
@@ -429,7 +436,7 @@ describe('generation store stream lifecycle', () => {
         }),
       )
     vi.stubGlobal('fetch', fetchMock)
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(9, 'first')
     expect(store.status).toBe('failed')
@@ -450,7 +457,7 @@ describe('generation store stream lifecycle', () => {
         }),
       ),
     )
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(9, 'wrong response type')
 
@@ -471,7 +478,7 @@ describe('generation store stream lifecycle', () => {
         ]),
       ),
     )
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(9, 'malformed response')
 
@@ -487,7 +494,7 @@ describe('generation store stream lifecycle', () => {
         streamResponse(['event: done\ndata: {}\n\n']),
       ),
     )
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(9, 'transport only')
 
@@ -501,7 +508,7 @@ describe('generation store stream lifecycle', () => {
       'fetch',
       vi.fn<typeof fetch>().mockResolvedValue(streamResponse([])),
     )
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(9, 'empty response')
 
@@ -521,7 +528,7 @@ describe('generation store stream lifecycle', () => {
         )
       }),
     )
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(9, 'oversized response')
 
@@ -541,7 +548,7 @@ describe('generation store stream lifecycle', () => {
         ),
       ),
     )
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(10, 'build a CLI')
 
@@ -560,7 +567,7 @@ describe('generation store stream lifecycle', () => {
       ),
     )
     vi.stubGlobal('fetch', fetchMock)
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     const run = store.start(11, 'build a parser')
     await vi.waitFor(() => expect(store.files).toHaveLength(1))
@@ -585,7 +592,7 @@ describe('generation store stream lifecycle', () => {
         Promise.resolve(abortableStreamResponse(init?.signal as AbortSignal)),
       )
     vi.stubGlobal('fetch', fetchMock)
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(12, 'first attempt')
     const retry = store.start(12, 'retry', { preserve: true })
@@ -612,7 +619,7 @@ describe('generation store stream lifecycle', () => {
         streamResponse(['data: {"type":"done","status":"success"}\n\n']),
       )
     vi.stubGlobal('fetch', fetchMock)
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await store.start(13, 'old run')
     await store.start(14, 'new run', { preserve: true })
@@ -636,7 +643,7 @@ describe('generation store stream lifecycle', () => {
         streamResponse(['data: {"type":"done","status":"success"}\n\n']),
       )
     vi.stubGlobal('fetch', fetchMock)
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     const olderRun = store.start(15, 'old')
     await vi.waitFor(() => expect(store.phase).toBe('old_agent'))
@@ -658,7 +665,7 @@ describe('generation store stream lifecycle', () => {
       ),
     )
     vi.stubGlobal('fetch', fetchMock)
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     const run = store.start(17, 'active run')
     await vi.waitFor(() => expect(store.events).toHaveLength(1))
@@ -961,7 +968,7 @@ describe('useSSE compatibility wrapper', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
     const wrapper = useSSE()
-    const store = useGenerationStore()
+    const store = useLegacyGenerationStore()
 
     await wrapper.startStream(23, 'first', vi.fn(), vi.fn(), vi.fn())
     await wrapper.startStream(23, 'retry', vi.fn(), vi.fn(), vi.fn(), {

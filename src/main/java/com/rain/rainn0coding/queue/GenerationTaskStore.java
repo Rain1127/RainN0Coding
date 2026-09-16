@@ -24,10 +24,11 @@ public class GenerationTaskStore {
     public record Task(String taskId, long appId, long userId, String prompt, String codeGenType,
                        String idempotencyKey, String traceId, String status, String errorMessage,
                        long lastEventId, Instant createdAt, String ownerId) {
-        public boolean terminal() { return !"QUEUED".equals(status) && !"RUNNING".equals(status); }
+        public boolean terminal() { return List.of("SUCCEEDED","FAILED","INTERRUPTED").contains(status); }
+        public boolean settled() { return terminal() || "PAUSED".equals(status); }
     }
     public record Event(long id, String data) {}
-    public record Dispatch(String taskId, long appId, int attempts) {}
+    public record Dispatch(String taskId, long appId, int attempts, int epoch) {}
     private static final RowMapper<Task> TASK = (rs, n) -> new Task(rs.getString("task_id"),
             rs.getLong("app_id"),rs.getLong("user_id"),rs.getString("prompt"),rs.getString("code_gen_type"),
             rs.getString("idempotency_key"),rs.getString("trace_id"),rs.getString("status"),
@@ -54,7 +55,7 @@ public class GenerationTaskStore {
             if(paused())throw new BusinessException(ErrorCode.AI_GENERATION_OVERLOADED,"生成服务正在维护，请稍后再试");
             if(jdbc.queryForObject("SELECT COUNT(*) FROM generation_task WHERE active_app_id=?",Long.class,appId)>0)
                 throw new BusinessException(ErrorCode.CHAT_IN_PROGRESS,"该应用已有生成任务，请等待完成");
-            if(jdbc.queryForObject("SELECT COUNT(*) FROM generation_task WHERE status IN ('QUEUED','RUNNING')",Long.class)>=config.getMaxPending())
+            if(jdbc.queryForObject("SELECT COUNT(*) FROM generation_task WHERE active_app_id IS NOT NULL",Long.class)>=config.getMaxPending())
                 throw new BusinessException(ErrorCode.AI_GENERATION_OVERLOADED,"生成队列已满，请稍后再试");
             String id=UUID.randomUUID().toString();
             jdbc.update("INSERT INTO generation_task(task_id,app_id,user_id,prompt,code_gen_type,idempotency_key,trace_id,status,active_app_id) VALUES(?,?,?,?,?,?,?,'QUEUED',?)",id,appId,userId,prompt,type,key,trace,appId);
@@ -72,6 +73,10 @@ public class GenerationTaskStore {
         var rows=jdbc.query("SELECT * FROM generation_task WHERE app_id=? AND user_id=? ORDER BY created_at DESC, task_id DESC LIMIT 1",TASK,app,user);
         return rows.isEmpty()?null:rows.getFirst();
     }
+    public Task byRequest(long app,long user,String key) {
+        var rows=jdbc.query("SELECT * FROM generation_task WHERE app_id=? AND user_id=? AND idempotency_key=?",TASK,app,user,key);
+        return rows.isEmpty()?null:rows.getFirst();
+    }
     public Task active(long app) {
         var rows=jdbc.query("SELECT * FROM generation_task WHERE active_app_id=?",TASK,app);
         return rows.isEmpty()?null:rows.getFirst();
@@ -87,6 +92,62 @@ public class GenerationTaskStore {
     }
     public boolean paused() {return jdbc.queryForObject("SELECT paused FROM generation_queue_lock WHERE id=1",Integer.class)!=0;}
     public void setPaused(boolean paused) {jdbc.update("UPDATE generation_queue_lock SET paused=? WHERE id=1",paused?1:0);}
+    public boolean shouldResume(String id) {
+        return jdbc.queryForObject("SELECT resume_requested FROM generation_task WHERE task_id=?",Integer.class,id)!=0;
+    }
+    public boolean pauseQueued(String id) {
+        return Boolean.TRUE.equals(tx.execute(s->{
+            var rows=jdbc.query("SELECT * FROM generation_task WHERE task_id=? FOR UPDATE",TASK,id);
+            if(rows.isEmpty()||!"QUEUED".equals(rows.getFirst().status()))return false;
+            pauseLocked(id,false);return true;
+        }));
+    }
+    public void markPausing(String id) {
+        tx.executeWithoutResult(s->{
+            if(jdbc.update("UPDATE generation_task SET status='PAUSING' WHERE task_id=? AND status='RUNNING'",id)>0)
+                appendLocked(id,JSONUtil.toJsonStr(Map.of("type","progress","phase","pausing","message","正在保存暂停检查点")));
+        });
+    }
+    public void pauseCompleted(String id,boolean checkpoint) {
+        tx.executeWithoutResult(s->{
+            var rows=jdbc.query("SELECT * FROM generation_task WHERE task_id=? FOR UPDATE",TASK,id);
+            if(!rows.isEmpty()&&List.of("RUNNING","PAUSING").contains(rows.getFirst().status()))pauseLocked(id,checkpoint);
+        });
+    }
+    private void pauseLocked(String id,boolean checkpoint) {
+        jdbc.update("UPDATE generation_task SET status='PAUSED',resume_requested=CASE WHEN ?=1 THEN 1 ELSE resume_requested END WHERE task_id=?",checkpoint?1:0,id);
+        appendLocked(id,JSONUtil.toJsonStr(Map.of("type","done","status","paused","message","任务已暂停")));
+    }
+    public Task resume(String id,boolean checkpoint) {
+        return tx.execute(s->{
+            jdbc.queryForObject("SELECT id FROM generation_queue_lock WHERE id=1 FOR UPDATE",Integer.class);
+            var task=jdbc.query("SELECT * FROM generation_task WHERE task_id=? FOR UPDATE",TASK,id).getFirst();
+            if(List.of("QUEUED","RUNNING","PAUSING").contains(task.status()))return task;
+            if(!List.of("PAUSED","INTERRUPTED").contains(task.status()))throw new BusinessException(ErrorCode.PARAMS_ERROR,"任务不可继续");
+            if(paused())throw new BusinessException(ErrorCode.AI_GENERATION_OVERLOADED,"生成服务正在维护");
+            jdbc.update("UPDATE generation_task SET status='QUEUED',resume_requested=?,owner_id=NULL,error_message=NULL,ended_at=NULL,queued_at=CURRENT_TIMESTAMP(6) WHERE task_id=?",checkpoint?1:0,id);
+            jdbc.update("UPDATE generation_outbox SET published=0,attempts=0,dispatch_epoch=dispatch_epoch+1,next_attempt_at=CURRENT_TIMESTAMP WHERE task_id=?",id);
+            appendLocked(id,JSONUtil.toJsonStr(Map.of("type","queued","phase","queued","message","继续任务已排队")));
+            return get(id);
+        });
+    }
+    public Task importLegacyPaused(String id,long appId,long userId,String type) {
+        return tx.execute(s->{
+            jdbc.queryForObject("SELECT id FROM generation_queue_lock WHERE id=1 FOR UPDATE",Integer.class);
+            var existing=get(id);
+            if(existing!=null) {
+                if(existing.appId()!=appId||existing.userId()!=userId)throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+                return existing;
+            }
+            if(active(appId)!=null)throw new BusinessException(ErrorCode.CHAT_IN_PROGRESS);
+            if(jdbc.queryForObject("SELECT COUNT(*) FROM generation_task WHERE active_app_id IS NOT NULL",Long.class)>=config.getMaxPending())
+                throw new BusinessException(ErrorCode.AI_GENERATION_OVERLOADED);
+            jdbc.update("INSERT INTO generation_task(task_id,app_id,user_id,prompt,code_gen_type,idempotency_key,status,active_app_id,resume_requested) VALUES(?,?,?,'',?,?,'PAUSED',?,1)",id,appId,userId,type,"legacy:"+id,appId);
+            jdbc.update("INSERT INTO generation_outbox(task_id,app_id,published) VALUES(?,?,1)",id,appId);
+            appendLocked(id,JSONUtil.toJsonStr(Map.of("type","done","status","paused","message","已恢复原任务")));
+            return get(id);
+        });
+    }
     public void append(String id,String data) {
         tx.executeWithoutResult(s -> {
             var t=jdbc.query("SELECT * FROM generation_task WHERE task_id=? FOR UPDATE",TASK,id).getFirst();
@@ -111,7 +172,7 @@ public class GenerationTaskStore {
         if(!List.of("SUCCEEDED","FAILED","INTERRUPTED").contains(status))throw new IllegalArgumentException("invalid terminal state");
         return Boolean.TRUE.equals(tx.execute(s -> {
             var rows=jdbc.query("SELECT * FROM generation_task WHERE task_id=? FOR UPDATE",TASK,id);
-            if(rows.isEmpty()||rows.getFirst().terminal())return false;
+            if(rows.isEmpty()||rows.getFirst().settled())return false;
             if(queuedOnly&&!"QUEUED".equals(rows.getFirst().status()))return false;
             String safe=message==null?null:message.substring(0,Math.min(message.length(),1000));
             // Interrupted runs retain the app reservation until Python is confirmed idle.
@@ -122,27 +183,29 @@ public class GenerationTaskStore {
             return true;
         }));
     }
-    public void releaseInterrupted(long app) {
-        jdbc.update("UPDATE generation_task SET active_app_id=NULL WHERE active_app_id=? AND status='INTERRUPTED'",app);
-    }
-    public List<Task> running() {return jdbc.query("SELECT * FROM generation_task WHERE status='RUNNING'",TASK);}
+    public List<Task> running() {return jdbc.query("SELECT * FROM generation_task WHERE status IN ('RUNNING','PAUSING')",TASK);}
     public List<Task> expired() {
-        return jdbc.query("SELECT * FROM generation_task WHERE status='QUEUED' AND created_at<? LIMIT 100",TASK,Timestamp.from(Instant.now().minus(config.getMaxWaitHours(),ChronoUnit.HOURS)));
+        return jdbc.query("SELECT * FROM generation_task WHERE status='QUEUED' AND queued_at<? LIMIT 100",TASK,Timestamp.from(Instant.now().minus(config.getMaxWaitHours(),ChronoUnit.HOURS)));
     }
     public List<Event> events(String id,long after) {
         return jdbc.query("SELECT event_id,data FROM generation_event WHERE task_id=? AND event_id>? ORDER BY event_id LIMIT 100",(r,n)->new Event(r.getLong(1),r.getString(2)),id,after);
     }
     public List<Dispatch> pendingDispatches() {
-        return jdbc.query("SELECT o.task_id,o.app_id,o.attempts FROM generation_outbox o JOIN generation_task t ON t.task_id=o.task_id WHERE o.published=0 AND o.next_attempt_at<=CURRENT_TIMESTAMP AND t.status='QUEUED' ORDER BY t.created_at LIMIT 20",(r,n)->new Dispatch(r.getString(1),r.getLong(2),r.getInt(3)));
+        return jdbc.query("SELECT o.task_id,o.app_id,o.attempts,o.dispatch_epoch FROM generation_outbox o JOIN generation_task t ON t.task_id=o.task_id WHERE o.published=0 AND o.next_attempt_at<=CURRENT_TIMESTAMP AND t.status='QUEUED' ORDER BY t.queued_at LIMIT 20",(r,n)->new Dispatch(r.getString(1),r.getLong(2),r.getInt(3),r.getInt(4)));
     }
     public void dispatched(String id) {jdbc.update("UPDATE generation_outbox SET published=1 WHERE task_id=?",id);}
+    public void dispatched(Dispatch dispatch) {jdbc.update("UPDATE generation_outbox SET published=1 WHERE task_id=? AND dispatch_epoch=?",dispatch.taskId(),dispatch.epoch());}
     public void dispatchFailed(Dispatch d) {
         long wait=Math.min(60,1L<<Math.min(d.attempts(),6));
-        jdbc.update("UPDATE generation_outbox SET attempts=attempts+1,next_attempt_at=? WHERE task_id=?",Timestamp.from(Instant.now().plusSeconds(wait)),d.taskId());
+        jdbc.update("UPDATE generation_outbox SET attempts=attempts+1,next_attempt_at=? WHERE task_id=? AND dispatch_epoch=?",Timestamp.from(Instant.now().plusSeconds(wait)),d.taskId(),d.epoch());
     }
     public long count(String status) {return jdbc.queryForObject("SELECT COUNT(*) FROM generation_task WHERE status=?",Long.class,status);}
+    public long waitMillis(String id) {
+        Timestamp queued=jdbc.queryForObject("SELECT queued_at FROM generation_task WHERE task_id=?",Timestamp.class,id);
+        return Math.max(0,java.time.Duration.between(queued.toInstant(),Instant.now()).toMillis());
+    }
     public void cleanupEvents() {
-        var tasks=jdbc.queryForList("SELECT task_id FROM generation_task WHERE status IN ('SUCCEEDED','FAILED','INTERRUPTED') AND ended_at<? LIMIT 100",String.class,Timestamp.from(Instant.now().minus(config.getEventRetentionDays(),ChronoUnit.DAYS)));
+        var tasks=jdbc.queryForList("SELECT t.task_id FROM generation_task t WHERE status IN ('SUCCEEDED','FAILED') AND ended_at<? AND EXISTS (SELECT 1 FROM generation_event e WHERE e.task_id=t.task_id) LIMIT 100",String.class,Timestamp.from(Instant.now().minus(config.getEventRetentionDays(),ChronoUnit.DAYS)));
         for(String id:tasks) jdbc.update("DELETE FROM generation_event WHERE task_id=?",id);
     }
 }

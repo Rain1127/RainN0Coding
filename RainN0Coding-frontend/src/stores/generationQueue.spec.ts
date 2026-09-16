@@ -19,6 +19,7 @@ const frame = (id: string, event: object) => `id: ${id}\ndata: ${JSON.stringify(
 describe('durable generation task lifecycle', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    localStorage.clear()
     vi.stubEnv('VITE_API_BASE', '/api')
   })
   afterEach(() => {
@@ -144,4 +145,74 @@ describe('durable generation task lifecycle', () => {
     expect(store.error).toBe('文件保存失败')
     expect(store.retryAllowed).toBe(true)
   })
+  it('pauses a queued task without cancelling its progress subscription', async () => {
+    let finish!: () => void
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(json(task()))
+      .mockImplementationOnce(async () => new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode(frame('1', { type: 'queued' })))
+        finish = () => controller.close()
+      } }), { headers: { 'Content-Type': 'text/event-stream' } }))
+      .mockResolvedValueOnce(json(task('PAUSED', { lastEventId: '2' })))
+      .mockResolvedValueOnce(json(task('PAUSED', { lastEventId: '2' })))
+    vi.stubGlobal('fetch', fetchMock)
+    const store = useGenerationStore()
+    const running = store.start(7, 'pause me')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await store.pause()
+    expect(store.status).toBe('paused')
+    expect(fetchMock.mock.calls[1]![1]?.signal?.aborted).toBe(false)
+    expect(fetchMock.mock.calls[2]![0]).toContain('/pause')
+    finish(); await running
+  })
+
+  it('resumes the same paused task once and skips its previous paused terminal', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(json(task('PAUSED', { lastEventId: '2' })))
+      .mockResolvedValueOnce(stream(frame('1', { type: 'queued' }) + frame('2', { type: 'done', status: 'paused' })))
+      .mockResolvedValueOnce(json(task('PAUSED', { lastEventId: '2' })))
+      .mockResolvedValueOnce(json(task('QUEUED', { lastEventId: '3' })))
+      .mockResolvedValueOnce(stream(frame('3', { type: 'queued' }) + frame('4', { type: 'done', status: 'success' })))
+      .mockResolvedValueOnce(json(task('SUCCEEDED', { lastEventId: '4' })))
+    vi.stubGlobal('fetch', fetchMock)
+    const store = useGenerationStore()
+    await store.restore(7)
+    expect(store.status).toBe('paused')
+    await Promise.all([store.resume(), store.resume()])
+    expect(store.status).toBe('success')
+    expect(fetchMock.mock.calls[3]![0]).toContain('/9007199254740993123/resume')
+    expect(fetchMock.mock.calls[4]![0]).toContain('after=2')
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+  })
+
+  it('falls back to the legacy transport only for a missing queue endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 404 }))
+      .mockResolvedValueOnce(stream('data: {"type":"done","status":"success"}\n\n'))
+    vi.stubGlobal('fetch', fetchMock)
+    const store = useGenerationStore()
+    await store.start(7, 'legacy')
+    expect(fetchMock.mock.calls[1]![0]).toContain('/app/chat/gen/code')
+    expect(store.status).toBe('success')
+  })
+
+  it.each([500, 503])('never resubmits via legacy after HTTP %s', async (code) => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: code }))
+    vi.stubGlobal('fetch', fetchMock)
+    await useGenerationStore().start(7, 'uncertain response')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores a pre-upgrade paused run when no queue record exists', async () => {
+    localStorage.setItem('generation-run:7', 'legacy-id')
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(json(null))
+      .mockResolvedValueOnce(json({ run_id: 'legacy-id', status: 'paused' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const store = useGenerationStore()
+    await store.restore(7)
+    expect(store.status).toBe('paused')
+    expect(store.requestId).toBe('legacy-id')
+    expect(fetchMock.mock.calls[1]![0]).toContain('/chat/gen/status')
+  })
+
 })
