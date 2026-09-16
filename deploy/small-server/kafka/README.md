@@ -1,5 +1,7 @@
 # 单节点 Kafka 代码生成队列
 
+已部署版本、校验和、实测结果及未完成的浏览器人工验收见 [ACCEPTANCE.md](ACCEPTANCE.md)。
+
 仅用于现有 Linux 演示服务器；Java 由宿主机 systemd 运行。官方 `apache/kafka:4.3.1` 使用 KRaft broker/controller 合并模式。没有 ZooKeeper、额外服务器或本机 Docker Desktop。
 
 两个 Kafka listener 均显式绑定 `127.0.0.1`，使用 host 网络使 Java 与 advertised listener 保持一致。不要为 9092/9093 开放公网防火墙。数据卷固定为 `rainn0coding_kafka_data`，cluster ID 与该卷一起保持不变；重启、重建容器和回滚时都不能删除卷。
@@ -16,7 +18,7 @@
 1. 核对当前发布和源码。2026-09-16 现网为 `20260910-pause-resume`，manifest commit `4ed388f2ddc5a0579fb4991859835d14ee6fbef1`。新发布须合并已有暂停/恢复功能，不能直接覆盖为 9 月 8 日旧版本。保留 `/opt/rainn0coding/shared/checkpoints` 和 `/etc/rainn0coding`。
 2. 备份 MySQL、`java.env`、当前发布 manifest、检查点目录和代码文件。先停止新生成请求并等待现有执行结束；备份中包含凭据的文件仅存放在服务器受限目录。保留旧发布路径和校验和。队列版本后续发布时设置 `generation_queue_lock` 中 `id=1` 的 `paused=1`，原子停止新提交和新认领；等待 `generation_task` 的 `RUNNING`、`PAUSING` 数量为 0 后切换版本。保留 `QUEUED` 待消费记录和 `PAUSED` 检查点/占位，健康检查通过后再解除维护锁。首次接入队列前仍通过现有生成状态排空旧执行。
 3. 将本目录上传到 `/opt/rainn0coding/deployment/kafka`，保持脚本 LF 换行。运行 `sudo bash /opt/rainn0coding/deployment/kafka/start.sh`。脚本检查资源/端口、拉取固定镜像、启动容器、创建 topic 并核验；它不修改现有数据库或应用环境。
-4. 应用增量 SQL 迁移，检查表和约束；部署通过前后端/Python测试的队列版本。将 `java-queue.env.example` 中三个键合并到现有 `/etc/rainn0coding/java.env`，保留所有其他值与权限，不运行旧的全量 `configure-runtime.py` 覆盖后续部署配置。配置前缀为 `app.generation-queue`。
+4. 应用增量 SQL 迁移，检查表和约束；部署通过前后端/Python测试的队列版本。将 `java-queue.env.example` 中的队列配置键合并到现有 `/etc/rainn0coding/java.env`，保留所有其他值与权限，不运行旧的全量 `configure-runtime.py` 覆盖后续部署配置。配置前缀为 `app.generation-queue`。
 5. 确认 Java 优雅停止时限覆盖当前任务收尾；原 systemd `TimeoutStopSec=45` 不能用于强行重启正在运行的长任务。实际发布必须先暂停接收、排空再切换，不能依赖 kill 后自动重跑。
 6. 重启应用并检查原健康检查、旧页面、暂停/恢复、队列指标与以下验收。记录镜像实际 digest、发布 SHA256 和测试结果。
 
