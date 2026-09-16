@@ -155,7 +155,7 @@ assert resumed['taskId'] == task_id
 cursor, final = events(cursor)
 assert request(task_path)['status'] == 'SUCCEEDED', 'Generation did not succeed'
 assert any(e.get('type') == 'code_file' for e in final), 'No code file events'
-history = request('/chatHistory/app/' + str(app_id) + '?pageSize=100')['records']
+history = request('/chatHistory/app/' + str(app_id) + '?pageSize=50')['records']
 assert len(history) == 2, 'Expected exactly one user and one completion message'
 record(generated_successfully=True, history_messages=len(history), reconnect_cursor=cursor)
 
@@ -167,7 +167,7 @@ subprocess.run(['docker', 'exec', '-i', '-e', 'KAFKA_HEAP_OPTS=-Xms32m -Xmx64m',
                capture_output=True, timeout=60)
 time.sleep(5)
 assert int(request(task_path)['lastEventId']) == cursor
-assert len(request('/chatHistory/app/' + str(app_id) + '?pageSize=100')['records']) == 2
+assert len(request('/chatHistory/app/' + str(app_id) + '?pageSize=50')['records']) == 2
 record(duplicate_delivery_no_repeat=True)
 preview_url = request('/app/deploy', {'appId': app_id})
 preview = client.get(preview_url)
