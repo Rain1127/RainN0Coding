@@ -57,6 +57,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @RestController
 @RequestMapping("/app")
 public class AppController {
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.rain.rainn0coding.queue.GenerationQueueService generationQueueService;
 
     private static final long USER_PAGE_SIZE_LIMIT = 20;
 
@@ -99,6 +101,12 @@ public class AppController {
         //2.获取当前登录用户
         User loginUser = userService.getLoginUser(request);
         String requestId = StrUtil.isNotBlank(idempotencyKey) ? idempotencyKey : UUID.randomUUID().toString();
+        if (generationQueueService != null) {
+            var task = generationQueueService.submit(appId, message, requestId, loginUser);
+            return generationQueueService.events(task.taskId(), 0, loginUser)
+                    .map(event -> event.data() == null ? event : ServerSentEvent.<String>builder()
+                            .id(event.id()).data(JSONUtil.toJsonStr(Map.of("d", event.data()))).build());
+        }
         String fingerprint = idempotencyService.fingerprint("app:chat:gen-code", appId, message);
         IdempotencyDecision decision = idempotencyService.start(
                 "app:chat:gen-code", loginUser.getId(), idempotencyKey, fingerprint, idempotencyProperties.aiProcessingTtl());
@@ -304,6 +312,7 @@ public class AppController {
         if (!oldApp.getUserId().equals(loginUser.getId()) && !UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole())) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
+        if (generationQueueService != null) generationQueueService.assertNoActiveTask(id);
         boolean result = appService.removeById(id);
         return ResultUtils.success(result);
     }

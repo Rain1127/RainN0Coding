@@ -1,10 +1,12 @@
 import json
 import importlib
+import weakref
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from logging import Logger
 from typing import Any
 
+from core.execution_registry import execution_registry
 from guardrails.audit import audit_from_decision
 from guardrails.engine import evaluate_prompt
 from guardrails.models import PromptContext
@@ -131,6 +133,8 @@ async def orchestrate_generate_code(
         f"request_id={request.request_id}, trace_id={resolved_trace_id}, prompt={request.prompt[:60]}..."
     )
 
+    release_execution = execution_registry.acquire(request.app_id)
+
     async def event_generator():
         status = "success"
         try:
@@ -151,8 +155,16 @@ async def orchestrate_generate_code(
             status = "error"
             raise
         finally:
-            active_requests_metric.dec()
-            record_request(request.user_id, request.app_id, request.code_gen_type, status)
-            semaphore.release()
+            try:
+                active_requests_metric.dec()
+                record_request(request.user_id, request.app_id, request.code_gen_type, status)
+            finally:
+                semaphore.release()
+                release_execution()
 
-    return GenerateCodeOrchestrationResult(event_generator=event_generator())
+    events = event_generator()
+    # Register before returning the response so another probe cannot observe an
+    # idle gap before SSE starts. An abandoned, never-iterated generator cannot
+    # run its finally; collection safely releases that reservation instead.
+    weakref.finalize(events, release_execution)
+    return GenerateCodeOrchestrationResult(event_generator=events)

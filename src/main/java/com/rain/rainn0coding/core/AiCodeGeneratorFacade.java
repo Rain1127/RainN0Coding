@@ -27,6 +27,9 @@ import java.util.concurrent.atomic.AtomicReference;
 @Service
 @Slf4j
 public class AiCodeGeneratorFacade {
+    private final java.util.concurrent.ConcurrentHashMap<Long, Boolean> finalizingApps = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public boolean isFinalizing(long appId) { return finalizingApps.containsKey(appId); }
 
     @Resource
     private VueProjectBuilder vueProjectBuilder;
@@ -49,6 +52,11 @@ public class AiCodeGeneratorFacade {
                                                   String userRole,
                                                   String requestId,
                                                   String idempotencyKey) {
+        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, userId, userRole, requestId, idempotencyKey, false);
+    }
+
+    public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum,
+            Long appId, Long userId, String userRole, String requestId, String idempotencyKey, boolean strictTerminal) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "code generation type cannot be null");
         }
@@ -79,7 +87,7 @@ public class AiCodeGeneratorFacade {
             if ("done".equals(type)) {
                 terminalStatus.updateAndGet(current -> current != null && !"success".equals(current)
                         ? current
-                        : successfulStatus(obj.getStr("status")));
+                        : strictTerminal && obj.getStr("status") == null ? "missing_success" : successfulStatus(obj.getStr("status")));
                 return;
             }
             if ("code_file".equals(type)) {
@@ -90,8 +98,14 @@ public class AiCodeGeneratorFacade {
                 }
             }
         })
-                .concatWith(Mono.fromRunnable(() -> finalizeGeneratedCode(
-                                codeFiles, codeGenTypeEnum, appId, terminalStatus.get()))
+                .concatWith(Mono.fromRunnable(() -> {
+                            finalizingApps.put(appId, true);
+                            try {
+                                if (strictTerminal && terminalStatus.get() == null)
+                                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "生成连接结束但没有成功结果");
+                                finalizeGeneratedCode(codeFiles, codeGenTypeEnum, appId, terminalStatus.get());
+                            } finally { finalizingApps.remove(appId); }
+                        }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
                         .then(Mono.empty()))
                 .doOnError(e -> log.error("Python Agent code generation failed: {}", e.getMessage()));
     }
@@ -198,7 +212,7 @@ public class AiCodeGeneratorFacade {
         if (status == null || status.isBlank()) {
             return "success";
         }
-        return status;
+        return java.util.Set.of("success", "partial_success", "degraded_success").contains(status) ? "success" : status;
     }
 
     private record CodeFileDto(String path, String content) {}

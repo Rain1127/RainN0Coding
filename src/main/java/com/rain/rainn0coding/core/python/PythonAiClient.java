@@ -80,6 +80,19 @@ public class PythonAiClient {
                         exception -> new BusinessException(ErrorCode.PYTHON_SERVICE_TIMEOUT));
     }
 
+    public boolean isExecutionBusy(long appId) {
+        var request = webClient.get().uri("/api/execution-status/{appId}", appId);
+        if (StringUtils.hasText(properties.getInternalToken())) {
+            request.header("X-Internal-Token", properties.getInternalToken());
+        }
+        Map<?, ?> response = request.retrieve().bodyToMono(Map.class)
+                .block(java.time.Duration.ofSeconds(5));
+        if (response == null || !(response.get("busy") instanceof Boolean)) {
+            throw new BusinessException(ErrorCode.PYTHON_SERVICE_UNAVAILABLE);
+        }
+        return Boolean.TRUE.equals(response.get("busy"));
+    }
+
     public String routeCodeGenType(String prompt) {
         Map<String, Object> body = Map.of("prompt", prompt);
         WebClient.RequestBodySpec request = webClient.post()

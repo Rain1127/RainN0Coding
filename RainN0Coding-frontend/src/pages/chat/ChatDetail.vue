@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   CloudDownloadOutlined,
   CloudUploadOutlined,
-  PauseCircleOutlined,
   SendOutlined,
 } from '@ant-design/icons-vue'
 import { deployApp, downloadApp } from '@/api/app'
@@ -46,7 +45,7 @@ const hasCurrentApp = computed(() => (
 ))
 
 const isGenerating = computed(() => (
-  generation.status === 'connecting' || generation.status === 'running'
+  generation.status === 'connecting' || generation.status === 'queued' || generation.status === 'running'
 ))
 
 const safeEventMessages = computed(() => generation.events
@@ -117,7 +116,15 @@ function scrollToBottom() {
 
 async function maybeConsumeInitialPrompt(targetAppId: EntityId, requestSequence: number) {
   const prompt = await consumeInitialPrompt(targetAppId, requestSequence)
-  if (prompt && viewActive && requestSequence === navigationSequence) {
+  if (!viewActive || requestSequence !== navigationSequence) return
+  await generation.restore(targetAppId)
+  if (!viewActive || requestSequence !== navigationSequence) return
+  if (generation.status === 'success') {
+    await refreshAfterSuccess(targetAppId)
+  } else if (generation.status === 'failed') {
+    chat.setStreamError(generation.error)
+  }
+  if (prompt && !generation.task && generation.status === 'idle') {
     void startGeneration(prompt, false, true, targetAppId, requestSequence)
   }
 }
@@ -213,11 +220,8 @@ function handleComposerKeydown(event: KeyboardEvent) {
   submit()
 }
 
-function cancelGeneration() {
-  generation.cancel()
-}
-
 function retryGeneration() {
+  if (!generation.retryAllowed) return
   const prompt = lastPrompt.value || [...chat.messages].reverse().find((message) => message.role === 'user')?.content || ''
   if (prompt) void startGeneration(prompt, true, false)
 }
@@ -406,8 +410,11 @@ onBeforeUnmount(() => {
 
           <div v-if="generation.error || chat.streamError" class="generation-error" role="alert">
             <span>{{ generation.error || chat.streamError }}</span>
-            <button type="button" data-action="retry-generation" @click="retryGeneration">保留进度并重试</button>
+            <button v-if="generation.retryAllowed" type="button" data-action="retry-generation" @click="retryGeneration">保留进度并重试</button>
           </div>
+
+          <p v-if="isGenerating" class="generation-notice" role="status">{{ generation.status === 'queued' ? '任务已排队。' : '' }}关闭页面后任务仍会继续，重新打开可恢复进度。</p>
+          <p v-if="generation.connectionMessage" class="generation-notice" role="status">{{ generation.connectionMessage }}</p>
 
           <form class="composer" @submit.prevent="submit">
             <label for="workbench-prompt">继续描述需求</label>
@@ -424,10 +431,7 @@ onBeforeUnmount(() => {
             />
             <div class="composer__footer">
               <span>Enter 发送，Shift + Enter 换行</span>
-              <button v-if="isGenerating" type="button" class="button button--danger" data-action="cancel-generation" @click="cancelGeneration">
-                <PauseCircleOutlined aria-hidden="true" />取消生成
-              </button>
-              <button v-else type="submit" class="button" :disabled="!input.trim() || !hasCurrentApp">
+              <button type="submit" class="button" :disabled="isGenerating || !input.trim() || !hasCurrentApp">
                 <SendOutlined aria-hidden="true" />发送需求
               </button>
             </div>
@@ -560,6 +564,7 @@ onBeforeUnmount(() => {
 
 .generation-error { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-5); color: var(--color-danger); background: var(--color-danger-soft); }
 .generation-error button { min-height: 44px; border: 0; color: inherit; background: transparent; font-weight: 800; text-decoration: underline; }
+.generation-notice { margin: 0; padding: var(--space-3) var(--space-5); color: var(--color-text-muted); font-size: 0.8rem; }
 
 .composer { display: grid; gap: var(--space-2); padding: var(--space-5); border-top: 1px solid var(--color-border); }
 .composer label { font-weight: 800; }

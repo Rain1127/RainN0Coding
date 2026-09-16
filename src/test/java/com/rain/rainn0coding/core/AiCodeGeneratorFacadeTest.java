@@ -24,6 +24,18 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AiCodeGeneratorFacadeTest {
+    @Test
+    void queuedGenerationRequiresExplicitSuccessBeforeSavingOrBuilding() {
+        var facade = new AiCodeGeneratorFacade();
+        var python = mock(PythonAiClient.class);
+        var builder = mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(facade,"pythonAiClient",python);
+        ReflectionTestUtils.setField(facade,"vueProjectBuilder",builder);
+        when(python.streamCodeGen("2","900","prompt","vue_project","user",null,"task","task"))
+                .thenReturn(Flux.just("{\"type\":\"progress\"}"));
+        assertThrows(BusinessException.class,()->facade.generateAndSaveCodeStream("prompt",CodeGenTypeEnum.VUE_PROJECT,900L,2L,"user","task","task",true).blockLast());
+        verifyNoInteractions(builder);
+    }
 
     @Test
     void generateAndSaveCodeStreamPersistsCodeFileEvents() throws Exception {

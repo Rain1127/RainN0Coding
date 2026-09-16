@@ -43,7 +43,7 @@ const phaseAliases: Record<string, typeof agents[number]['id'] | 'done'> = {
 
 const normalizedPhase = computed(() => props.phase ? phaseAliases[props.phase] : null)
 const currentIndex = computed(() => agents.findIndex((agent) => agent.id === normalizedPhase.value))
-const knownPhase = computed(() => props.phase === null || normalizedPhase.value !== undefined)
+const knownPhase = computed(() => props.phase === null || props.phase === 'queued' || normalizedPhase.value !== undefined)
 
 function stepStatus(index: number) {
   if (props.status === 'success') return 'complete'
@@ -70,7 +70,7 @@ function statusText(index: number) {
         <p class="agent-progress__eyebrow">Agent workflow</p>
         <h2 id="agent-progress-title">生成进度</h2>
       </div>
-      <span class="agent-progress__run-status" role="status" aria-live="polite" aria-atomic="true">{{ status === 'connecting' ? '正在连接…' : status === 'cancelled' ? '已取消' : status === 'failed' ? '需要处理' : status === 'success' ? '已完成' : status === 'running' ? '生成中…' : '等待开始' }}</span>
+      <span class="agent-progress__run-status" role="status" aria-live="polite" aria-atomic="true">{{ status === 'queued' ? '排队中…' : status === 'connecting' ? '正在连接…' : status === 'cancelled' ? '已断开订阅' : status === 'failed' ? '需要处理' : status === 'success' ? '已完成' : status === 'running' ? '生成中…' : '等待开始' }}</span>
     </div>
 
     <ol class="agent-progress__list">
