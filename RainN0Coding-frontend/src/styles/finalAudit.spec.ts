@@ -89,4 +89,10 @@ describe('final interface audit contracts', () => {
     expect(config).toContain("'../src/main/resources/static'")
     expect(config).toContain('emptyOutDir: true')
   })
+
+  it('keeps the HTML entry template LF-only for reproducible production output', async () => {
+    const template = await source('index.html')
+
+    expect(template).not.toContain('\r')
+  })
 })
