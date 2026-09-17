@@ -31,6 +31,25 @@ def test_execution_status_route_is_internal_and_returns_only_busy(monkeypatch):
         assert response.json() == {"busy": True}
 
 
+def test_internal_auth_uses_replaced_config_module(monkeypatch):
+    main = load_main(monkeypatch, token="old-secret")
+    original_config_module = sys.modules["config"]
+
+    monkeypatch.setenv("INTERNAL_API_TOKEN", "new-secret")
+    sys.modules.pop("config", None)
+    try:
+        importlib.import_module("config")
+        client = TestClient(main.app)
+
+        assert client.get(
+            "/api/execution-status/status-app",
+            headers={"X-Internal-Token": "new-secret"},
+        ).status_code == 200
+        assert client.get("/api/execution-status/status-app").status_code == 401
+    finally:
+        sys.modules["config"] = original_config_module
+
+
 @pytest.mark.parametrize("raises", [False, True])
 def test_generation_request_is_busy_between_phases_and_cleans_up(monkeypatch, raises):
     from core.execution_registry import execution_registry
