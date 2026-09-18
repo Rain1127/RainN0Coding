@@ -110,6 +110,9 @@ def test_operational_scripts_cover_preflight_and_verification() -> None:
     assert "print(key" not in provision
     assert "expect_json=False" in provision
     assert "os.chown" in provision
+    assert "stat.S_IMODE" in provision
+    assert "arguments.python_env.stat()" in provision
+    assert "arguments.candidate_env.chmod" in provision
     assert "0o640" in provision
     assert "code-reasoning-glm" in provision
     assert "urllib.error.HTTPError" in provision

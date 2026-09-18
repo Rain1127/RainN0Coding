@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import urllib.error
 import urllib.request
 
@@ -158,6 +159,14 @@ def main() -> None:
         }
     )
     write_env(arguments.candidate_env, candidate)
+    python_env_stat = arguments.python_env.stat()
+    if hasattr(os, "chown"):
+        os.chown(
+            arguments.candidate_env,
+            python_env_stat.st_uid,
+            python_env_stat.st_gid,
+        )
+    arguments.candidate_env.chmod(stat.S_IMODE(python_env_stat.st_mode))
     arguments.metrics_token.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary_token = arguments.metrics_token.with_suffix(".tmp")
     descriptor = os.open(temporary_token, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
