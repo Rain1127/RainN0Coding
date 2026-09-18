@@ -95,6 +95,7 @@ export function createSseParser(
     const data: string[] = []
     let hasDataField = false
     let sseEvent: string | undefined
+    let eventId: string | undefined
 
     for (const line of frame.split(/\r\n|\r|\n/)) {
       if (!line || line.startsWith(':')) continue
@@ -109,6 +110,7 @@ export function createSseParser(
         data.push(value)
       }
       if (field === 'event') sseEvent = value
+      if (field === 'id' && !value.includes('\0')) eventId = value
     }
 
     if (!hasDataField) return
@@ -135,7 +137,7 @@ export function createSseParser(
       return
     }
 
-    onEvent(sseEvent ? { ...event, sse_event: sseEvent } : event)
+    onEvent({ ...event, ...(sseEvent ? { sse_event: sseEvent } : {}), ...(eventId !== undefined ? { id: eventId } : {}) })
   }
 
   function drainFrames() {

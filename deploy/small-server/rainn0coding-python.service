@@ -1,0 +1,32 @@
+[Unit]
+Description=RainN0Coding Python Agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=rainn0coding
+Group=rainn0coding
+WorkingDirectory=/opt/rainn0coding/current/python-agent
+EnvironmentFile=/etc/rainn0coding/python.env
+Environment=PATH=/opt/rainn0coding/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Environment=CHECKPOINT_DB_PATH=/opt/rainn0coding/shared/checkpoints/generation.db
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=TOKENIZERS_PARALLELISM=false
+Environment=NODE_OPTIONS=--max-old-space-size=384
+Environment=HF_HOME=/opt/rainn0coding/cache/huggingface
+Environment=XDG_CACHE_HOME=/opt/rainn0coding/cache
+ExecStart=/opt/rainn0coding/venv/bin/python -m uvicorn server.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+MemoryHigh=1400M
+MemoryMax=1800M
+MemorySwapMax=1024M
+TasksMax=512
+NoNewPrivileges=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

@@ -5,6 +5,7 @@ import inspect
 from copy import deepcopy
 
 import config as config_module
+from core.execution_registry import execution_registry
 
 
 FINAL_SUCCESS = "success"
@@ -242,16 +243,22 @@ async def _run_phase_runner(phase: str, state: dict, runner):
     cfg = _config()
     working_state = copy_state(state)
     if not getattr(cfg, "AGENT_RESILIENCE_ENABLED", True):
-        result = runner(working_state)
-        if inspect.isawaitable(result):
-            return await result
-        return result
+        with execution_registry.track(working_state.get("app_id", "")):
+            result = runner(working_state)
+            if inspect.isawaitable(result):
+                return await result
+            return result
 
     timeout_seconds = phase_timeout_seconds(phase, cfg)
     if inspect.iscoroutinefunction(runner):
-        return await asyncio.wait_for(runner(working_state), timeout=timeout_seconds)
+        async def tracked_runner():
+            with execution_registry.track(working_state.get("app_id", "")):
+                return await runner(working_state)
 
-    return await asyncio.wait_for(asyncio.to_thread(runner, working_state), timeout=timeout_seconds)
+        return await asyncio.wait_for(tracked_runner(), timeout=timeout_seconds)
+
+    from workflow.run_control import run_owned_worker
+    return await asyncio.wait_for(run_owned_worker(runner, working_state), timeout=timeout_seconds)
 
 
 async def guarded_phase_call(phase: str, state: dict, runner):

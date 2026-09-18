@@ -13,12 +13,16 @@ export type GenerationPhase = KnownGenerationPhase | (string & {})
 export type GenerationStatus =
   | 'idle'
   | 'connecting'
+  | 'queued'
   | 'running'
+  | 'pausing'
+  | 'paused'
   | 'success'
   | 'failed'
   | 'cancelled'
 
 export interface GenerationEvent {
+  id?: string
   type?: string
   sse_event?: string
   error?: boolean
@@ -36,6 +40,15 @@ export interface GenerationEvent {
   language?: string
   size?: number | string
   [key: string]: unknown
+}
+
+export interface GenerationTask {
+  taskId: string
+  appId: string
+  status: 'QUEUED' | 'RUNNING' | 'PAUSING' | 'PAUSED' | 'SUCCEEDED' | 'FAILED' | 'INTERRUPTED'
+  errorMessage: string | null
+  lastEventId: string
+  retryAllowed: boolean
 }
 
 export interface GeneratedFile {

@@ -1,9 +1,9 @@
 import hmac
+import importlib
 import time
 from collections.abc import Collection
 from logging import Logger
 
-import config as config_module
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -12,7 +12,7 @@ DEFAULT_PUBLIC_PATHS = frozenset({"/api/health", "/metrics"})
 
 
 def _config():
-    return config_module.config
+    return importlib.import_module("config").config
 
 
 def register_middleware(

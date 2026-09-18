@@ -1,6 +1,5 @@
 package com.rain.rainn0coding.core.builder;
 
-import cn.hutool.core.util.RuntimeUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -51,7 +50,8 @@ public class VueProjectBuilder {
 
     private boolean executeNpmBuild(File projectDir) {
         log.info("执行 npm run build...");
-        String command = String.format("%s run build", buildCommand("npm"));
+        // Generated Vite apps are served below /api/static/{deployKey}/.
+        String command = String.format("%s run build -- --base=./", buildCommand("npm"));
         return executeCommand(projectDir, command, 180);
     }
 
@@ -67,17 +67,15 @@ public class VueProjectBuilder {
     }
 
     private boolean executeCommand(File workingDir, String command, int timeoutSeconds) {
+        Process process = null;
         try {
             log.info("在目录 {} 中执行命令: {}", workingDir.getAbsolutePath(), command);
-            Process process = RuntimeUtil.exec(
-                    null,
-                    workingDir,
-                    command.split("\\s+")
-            );
+            process = new ProcessBuilder(command.split("\\s+"))
+                    .directory(workingDir).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 log.error("命令执行超时（{}秒），强制终止进程", timeoutSeconds);
-                process.destroyForcibly();
                 return false;
             }
             int exitCode = process.exitValue();
@@ -87,9 +85,18 @@ public class VueProjectBuilder {
             }
             log.error("命令执行失败，退出码: {}", exitCode);
             return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("构建被中断，终止构建进程");
+            return false;
         } catch (Exception e) {
             log.error("执行命令失败: {}, 错误信息: {}", command, e.getMessage());
             return false;
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+            }
         }
     }
 }

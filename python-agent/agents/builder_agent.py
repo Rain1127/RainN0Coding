@@ -306,8 +306,9 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
 
         lc = get_lang_config(code_gen_type)
 
-        # 2. 前端项目补充脚手架文件（Coder 可能未生成配置文件）
-        if lc.get("is_frontend"):
+        # Static HTML needs no Vue shell: a root scaffold would shadow src/index.html.
+        # Only frontend projects that actually build with npm need these defaults.
+        if lc.get("is_frontend") and lc.get("needs_npm_build"):
             if not os.path.exists(os.path.join(project_dir, "package.json")):
                 _create_default_package_json(project_dir)
             if not os.path.exists(os.path.join(project_dir, "vite.config.ts")) and \
@@ -333,8 +334,12 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                     build_log = "npm install failed:\n" + result.stderr[-2000:]
                     build_log_mode = "npm_install_failed"
                 else:
+                    build_command = ["npm", "run", "build"]
+                    if lc.get("is_frontend"):
+                        # Vite assets must resolve under the app's preview/publish directory.
+                        build_command += ["--", "--base=./"]
                     result = subprocess.run(
-                        ["npm", "run", "build"], cwd=project_dir,
+                        build_command, cwd=project_dir,
                         capture_output=True, text=True, timeout=180,
                     )
                     if result.returncode != 0:

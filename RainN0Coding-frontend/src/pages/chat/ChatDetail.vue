@@ -4,8 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   CloudDownloadOutlined,
   CloudUploadOutlined,
-  PauseCircleOutlined,
   SendOutlined,
+  PauseCircleOutlined,
 } from '@ant-design/icons-vue'
 import { deployApp, downloadApp } from '@/api/app'
 import AgentProgress from '@/components/generation/AgentProgress.vue'
@@ -46,8 +46,10 @@ const hasCurrentApp = computed(() => (
 ))
 
 const isGenerating = computed(() => (
-  generation.status === 'connecting' || generation.status === 'running'
+  generation.status === 'queued' || generation.status === 'connecting' || generation.status === 'running' || generation.status === 'pausing'
 ))
+const hasUnfinishedRun = computed(() => isGenerating.value || generation.status === 'paused')
+const isPaused = computed(() => generation.status === 'paused')
 
 const safeEventMessages = computed(() => generation.events
   .filter((event) => event.type !== 'code_file' && typeof event.message === 'string' && event.message.trim())
@@ -117,7 +119,15 @@ function scrollToBottom() {
 
 async function maybeConsumeInitialPrompt(targetAppId: EntityId, requestSequence: number) {
   const prompt = await consumeInitialPrompt(targetAppId, requestSequence)
-  if (prompt && viewActive && requestSequence === navigationSequence) {
+  if (!viewActive || requestSequence !== navigationSequence) return
+  await generation.restore(targetAppId)
+  if (!viewActive || requestSequence !== navigationSequence) return
+  if (generation.status === 'success') {
+    await refreshAfterSuccess(targetAppId)
+  } else if (generation.status === 'failed') {
+    chat.setStreamError(generation.error)
+  }
+  if (prompt && !generation.task && generation.status === 'idle') {
     void startGeneration(prompt, false, true, targetAppId, requestSequence)
   }
 }
@@ -135,6 +145,7 @@ async function loadApp(
       sameEntityId(appId.value, targetAppId) &&
       sameEntityId(chat.currentApp?.id, targetAppId)
     ) {
+      if (!viewActive || requestSequence !== navigationSequence) return false
       await maybeConsumeInitialPrompt(targetAppId, requestSequence)
     }
     return true
@@ -174,7 +185,7 @@ async function startGeneration(
     !sameEntityId(chat.currentApp?.id, targetAppId) ||
     !sameEntityId(appId.value, targetAppId) ||
     requestSequence !== navigationSequence ||
-    isGenerating.value
+    hasUnfinishedRun.value
   ) return
   lastPrompt.value = normalized
   chat.setStreamError(null)
@@ -213,11 +224,24 @@ function handleComposerKeydown(event: KeyboardEvent) {
   submit()
 }
 
-function cancelGeneration() {
-  generation.cancel()
+function pauseGeneration() {
+  void generation.pause()
+}
+
+async function resumeGeneration() {
+  if ((!isPaused.value && generation.task?.status !== 'INTERRUPTED') || appId.value === null) return
+  const targetAppId = appId.value
+  const requestSequence = navigationSequence
+  chat.setStreamError(null)
+  await generation.resume()
+  if (!viewActive || requestSequence !== navigationSequence || !sameEntityId(appId.value, targetAppId)) return
+  if (generation.status === 'success') await refreshAfterSuccess(targetAppId)
+  else if (generation.status === 'failed') chat.setStreamError(generation.error ?? '生成失败，请稍后重试。')
 }
 
 function retryGeneration() {
+  if (!generation.retryAllowed) return
+  if (generation.task?.status === 'INTERRUPTED') { void resumeGeneration(); return }
   const prompt = lastPrompt.value || [...chat.messages].reverse().find((message) => message.role === 'user')?.content || ''
   if (prompt) void startGeneration(prompt, true, false)
 }
@@ -406,8 +430,17 @@ onBeforeUnmount(() => {
 
           <div v-if="generation.error || chat.streamError" class="generation-error" role="alert">
             <span>{{ generation.error || chat.streamError }}</span>
-            <button type="button" data-action="retry-generation" @click="retryGeneration">保留进度并重试</button>
+            <button v-if="generation.retryAllowed" type="button" data-action="retry-generation" @click="retryGeneration">保留进度并重试</button>
           </div>
+          <div v-if="generation.controlError" class="generation-error" role="alert">
+            <span>{{ generation.controlError }}</span>
+            <button type="button" data-action="refresh-generation-status" @click="generation.refreshStatus()">重新检查状态</button>
+          </div>
+          <p v-if="generation.status === 'pausing'" class="generation-notice" role="status">正在等待当前步骤完成后暂停，已生成的内容会保留。</p>
+          <p v-else-if="generation.status === 'paused'" class="generation-notice" role="status">已保存进度，继续生成将从上次保存的位置执行。</p>
+
+          <p v-if="isGenerating" class="generation-notice" role="status">{{ generation.status === 'queued' ? '任务已排队。' : '' }}关闭页面后任务仍会继续，重新打开可恢复进度。</p>
+          <p v-if="generation.connectionMessage" class="generation-notice" role="status">{{ generation.connectionMessage }}</p>
 
           <form class="composer" @submit.prevent="submit">
             <label for="workbench-prompt">继续描述需求</label>
@@ -418,14 +451,17 @@ onBeforeUnmount(() => {
               rows="4"
               autocomplete="off"
               required
-              :disabled="!hasCurrentApp || isGenerating"
+              :disabled="!hasCurrentApp || hasUnfinishedRun"
               placeholder="例如：增加项目筛选、空状态和移动端布局…"
               @keydown="handleComposerKeydown"
             />
             <div class="composer__footer">
               <span>Enter 发送，Shift + Enter 换行</span>
-              <button v-if="isGenerating" type="button" class="button button--danger" data-action="cancel-generation" @click="cancelGeneration">
-                <PauseCircleOutlined aria-hidden="true" />取消生成
+              <button v-if="isGenerating" type="button" class="button button--secondary" data-action="pause-generation" :disabled="generation.status === 'pausing'" @click="pauseGeneration">
+                <PauseCircleOutlined aria-hidden="true" />{{ generation.status === 'pausing' ? '正在暂停…' : '暂停生成' }}
+              </button>
+              <button v-else-if="generation.status === 'paused'" type="button" class="button" data-action="resume-generation" @click="resumeGeneration">
+                继续生成
               </button>
               <button v-else type="submit" class="button" :disabled="!input.trim() || !hasCurrentApp">
                 <SendOutlined aria-hidden="true" />发送需求
@@ -560,6 +596,7 @@ onBeforeUnmount(() => {
 
 .generation-error { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-5); color: var(--color-danger); background: var(--color-danger-soft); }
 .generation-error button { min-height: 44px; border: 0; color: inherit; background: transparent; font-weight: 800; text-decoration: underline; }
+.generation-notice { margin: 0; padding: var(--space-3) var(--space-5); color: var(--color-text-muted); background: var(--color-surface-subtle); }
 
 .composer { display: grid; gap: var(--space-2); padding: var(--space-5); border-top: 1px solid var(--color-border); }
 .composer label { font-weight: 800; }

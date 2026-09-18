@@ -19,6 +19,7 @@ LangGraph 工作流 - 将 8 个 Agent 组装为状态图
 """
 import asyncio
 import os
+from contextlib import aclosing
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
@@ -84,7 +85,7 @@ def end_node(state: CodeGenState) -> CodeGenState:
     return finalize_state(state)
 
 
-def create_code_gen_workflow() -> StateGraph:
+def create_code_gen_workflow(session=None) -> StateGraph:
     """构建 LangGraph 状态图。"""
     wf = StateGraph(CodeGenState)
 
@@ -102,36 +103,46 @@ def create_code_gen_workflow() -> StateGraph:
     wf.add_node("end", end_node)
 
     # ===== 固定边 =====
-    wf.set_entry_point("mode_detector")
-    wf.add_edge("mode_detector", "intent_agent")
+    # Gates have no business side effects: resuming one cannot repeat a model call.
+    def entry(name):
+        return f"pause_before_{name}" if session else name
+
+    if session:
+        for name in list(wf.nodes):
+            if name not in ("end", "human_intervention"):
+                wf.add_node(entry(name), session.pause_gate)
+                wf.add_edge(entry(name), name)
+
+    wf.set_entry_point(entry("mode_detector"))
+    wf.add_edge("mode_detector", entry("intent_agent"))
     # Intent -> PM (new/rebuild) 或 Coder (modify 跳过 PM+Architect) 或 END (clarify/error)
     wf.add_conditional_edges(
         "intent_agent",
         _route_after_intent,
-        {"pm_agent": "pm_agent", "coder_agent": "coder_agent", "end": "end"},
+        {"pm_agent": entry("pm_agent"), "coder_agent": entry("coder_agent"), "end": "end"},
     )
-    wf.add_edge("pm_agent", "architect_agent")
-    wf.add_edge("architect_agent", "fork_coder_and_images")
-    wf.add_edge("fork_coder_and_images", "reviewer_agent")
+    wf.add_edge("pm_agent", entry("architect_agent"))
+    wf.add_edge("architect_agent", entry("fork_coder_and_images"))
+    wf.add_edge("fork_coder_and_images", entry("reviewer_agent"))
 
     # ===== 条件边：Reviewer -> Builder / AutoGen讨论 / Coder(重试) / HumanIntervention =====
     wf.add_conditional_edges(
         "reviewer_agent",
         supervisor_decision,
         {
-            "builder_agent": "builder_agent",
-            "autogen_discussion": "autogen_discussion",
-            "coder_agent": "coder_agent",
+            "builder_agent": entry("builder_agent"),
+            "autogen_discussion": entry("autogen_discussion"),
+            "coder_agent": entry("coder_agent"),
             "human_intervention": "human_intervention",
             "end": "end",
         },
     )
 
     # AutoGen 讨论后进入 Coder 重写
-    wf.add_edge("autogen_discussion", "coder_agent")
+    wf.add_edge("autogen_discussion", entry("coder_agent"))
 
     # 重试回路：Coder -> Reviewer
-    wf.add_edge("coder_agent", "reviewer_agent")
+    wf.add_edge("coder_agent", entry("reviewer_agent"))
 
     # 终止
     wf.add_edge("builder_agent", "end")
@@ -213,9 +224,15 @@ async def run_workflow_async(
     code_gen_type: str = "vue_project",
     user_role: str = "user",
     trace_id: str = "",
+    session=None,
 ) -> CodeGenState:
     """执行完整工作流（异步流式）。"""
     initial: CodeGenState = _build_initial_state(user_request, user_id, app_id, code_gen_type, user_role, trace_id)
+    if session is not None:
+        async with aclosing(session.states(create_code_gen_workflow(session), initial)) as states:
+            async for state in states:
+                yield state
+        return
     workflow = create_code_gen_workflow()
     compiled = workflow.compile(checkpointer=MemorySaver())
     config_dict = {"configurable": {"thread_id": f"{user_id}_{app_id}"}}

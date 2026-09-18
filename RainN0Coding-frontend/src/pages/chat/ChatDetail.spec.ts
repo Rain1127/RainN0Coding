@@ -14,7 +14,15 @@ const generationState = vi.hoisted(() => ({
   events: [] as Array<Record<string, unknown>>,
   files: [] as Array<{ path: string; language: string; size?: number | string }>,
   error: null as string | null,
+  controlError: null as string | null,
+  pause: vi.fn(),
+  resume: vi.fn(),
+  refreshStatus: vi.fn(),
+  task: null as unknown,
+  retryAllowed: false,
+  connectionMessage: '',
   start: vi.fn(),
+  restore: vi.fn(),
   cancel: vi.fn(),
   reset: vi.fn(),
 }))
@@ -86,10 +94,14 @@ describe('ChatDetail', () => {
       events: [],
       files: [],
       error: null,
+      task: null,
+      retryAllowed: false,
+      connectionMessage: '',
     })
     vi.mocked(getAppVO).mockResolvedValue(app)
     vi.mocked(getChatHistory).mockResolvedValue(page())
     generationState.start.mockResolvedValue(undefined)
+    generationState.restore.mockResolvedValue(undefined)
     generationState.cancel.mockImplementation(() => {
       mockedGeneration.status = 'cancelled'
     })
@@ -247,7 +259,7 @@ describe('ChatDetail', () => {
     expect(mockedGeneration.error).toBeNull()
   })
 
-  it('cancels active generation and retries the last prompt without clearing progress', async () => {
+  it('explains background execution and only offers an explicitly allowed retry', async () => {
     vi.mocked(getChatHistory).mockResolvedValue(page([{
       id: 1,
       appId: 7,
@@ -262,14 +274,30 @@ describe('ChatDetail', () => {
     await flushPromises()
     vi.mocked(generationState.cancel).mockClear()
 
-    await wrapper.get('[data-action="cancel-generation"]').trigger('click')
-    expect(generationState.cancel).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-action="cancel-generation"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('关闭页面后任务仍会继续')
 
     mockedGeneration.status = 'failed'
     mockedGeneration.error = '模型暂时不可用'
     await flushPromises()
+    expect(wrapper.find('[data-action="retry-generation"]').exists()).toBe(false)
+    mockedGeneration.retryAllowed = true
+    await flushPromises()
     await wrapper.get('[data-action="retry-generation"]').trigger('click')
     expect(generationState.start).toHaveBeenLastCalledWith(7, '创建看板', { preserve: true })
+  })
+
+  it('restores latest progress on entry and does not resubmit a retained navigation prompt', async () => {
+    generationState.restore.mockImplementationOnce(async () => {
+      Object.assign(mockedGeneration, { status: 'queued', task: { taskId: '123', status: 'QUEUED' } })
+    })
+    const { wrapper, router } = await mountPage('already accepted')
+    await flushPromises()
+    expect(generationState.restore).toHaveBeenCalledWith(7)
+    expect(generationState.start).not.toHaveBeenCalled()
+    expect(router.options.history.state.initialPrompt).toBeUndefined()
+    expect(wrapper.get('textarea').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('排队')
   })
 
   it('only links safe deployment URLs and blocks repeated deploy requests', async () => {

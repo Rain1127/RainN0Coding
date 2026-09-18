@@ -1,0 +1,57 @@
+name: rainn0coding-litellm
+
+x-service: &service
+  restart: unless-stopped
+  networks: [rainn0coding-cloud]
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '2'}
+
+services:
+  postgres:
+    <<: *service
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE is required}
+    container_name: rainn0coding-litellm-postgres
+    mem_limit: 256m
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - rainn0coding_litellm_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  litellm:
+    <<: *service
+    image: ${LITELLM_IMAGE:?LITELLM_IMAGE is required}
+    container_name: rainn0coding-litellm
+    mem_limit: 512m
+    env_file: ${LITELLM_RUNTIME_ENV:-/etc/rainn0coding/litellm.env}
+    command: [--config, /app/config.yaml, --port, '4000', --num_workers, '1']
+    ports:
+      - '127.0.0.1:4000:4000'
+    volumes:
+      - ../../../infrastructure/litellm/config.yaml:/app/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, 'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:4000/health/liveliness\", timeout=3)"']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+networks:
+  rainn0coding-cloud:
+    external: true
+    name: rainn0coding-cloud_default
+
+volumes:
+  rainn0coding_litellm_postgres_data:
+    name: rainn0coding_litellm_postgres_data

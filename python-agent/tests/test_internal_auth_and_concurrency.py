@@ -16,6 +16,102 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 pytestmark = [pytest.mark.integration, pytest.mark.harness]
 
 
+def test_execution_status_route_is_internal_and_returns_only_busy(monkeypatch):
+    main = load_main(monkeypatch, token="secret")
+    client = TestClient(main.app)
+    response = client.get("/api/execution-status/status-app", headers={"X-Internal-Token": "secret"})
+    assert response.status_code == 200
+    assert response.json() == {"busy": False}
+    assert client.get("/api/execution-status/status-app").status_code == 401
+    assert client.get("/api/execution-status/status-app", headers={"X-Internal-Token": "wrong"}).status_code == 401
+
+    from core.execution_registry import execution_registry
+    with execution_registry.track("status-app"):
+        response = client.get("/api/execution-status/status-app", headers={"X-Internal-Token": "secret"})
+        assert response.json() == {"busy": True}
+
+
+def test_internal_auth_uses_replaced_config_module(monkeypatch):
+    main = load_main(monkeypatch, token="old-secret")
+    original_config_module = sys.modules["config"]
+
+    monkeypatch.setenv("INTERNAL_API_TOKEN", "new-secret")
+    sys.modules.pop("config", None)
+    try:
+        importlib.import_module("config")
+        client = TestClient(main.app)
+
+        assert client.get(
+            "/api/execution-status/status-app",
+            headers={"X-Internal-Token": "new-secret"},
+        ).status_code == 200
+        assert client.get("/api/execution-status/status-app").status_code == 401
+    finally:
+        sys.modules["config"] = original_config_module
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_generation_request_is_busy_between_phases_and_cleans_up(monkeypatch, raises):
+    from core.execution_registry import execution_registry
+
+    main = load_main(monkeypatch, token="secret")
+
+    async def fake_stream_workflow(**kwargs):
+        assert execution_registry.is_busy("request-app")
+        yield json.dumps({"type": "phase_start", "phase": "coder"})
+        assert execution_registry.is_busy("request-app")
+        if raises:
+            raise ValueError("workflow failed")
+        yield json.dumps({"type": "done", "status": "success"})
+
+    async def scenario():
+        from server.generate_code_orchestrator import orchestrate_generate_code
+
+        result = await orchestrate_generate_code(
+            main.CodeGenRequest(prompt="hello", appId="request-app"),
+            semaphore=main.agent_semaphore,
+            stream_workflow=fake_stream_workflow,
+            record_request=lambda *args: None,
+            active_requests_metric=types.SimpleNamespace(inc=lambda: None, dec=lambda: None),
+            logger=main.logger,
+        )
+        assert execution_registry.is_busy("request-app")
+        if raises:
+            with pytest.raises(ValueError, match="workflow failed"):
+                async for _ in result.event_generator:
+                    pass
+        else:
+            async for _ in result.event_generator:
+                pass
+        assert not execution_registry.is_busy("request-app")
+
+    asyncio.run(scenario())
+
+
+def test_unstarted_generation_stream_does_not_leak_execution_occupancy(monkeypatch):
+    import gc
+    from core.execution_registry import execution_registry
+    from server.generate_code_orchestrator import orchestrate_generate_code
+
+    main = load_main(monkeypatch, token="secret")
+
+    async def scenario():
+        result = await orchestrate_generate_code(
+            main.CodeGenRequest(prompt="hello", appId="unstarted-app"),
+            semaphore=main.agent_semaphore,
+            stream_workflow=lambda **kwargs: None,
+            record_request=lambda *args: None,
+            active_requests_metric=types.SimpleNamespace(inc=lambda: None, dec=lambda: None),
+            logger=main.logger,
+        )
+        assert execution_registry.is_busy("unstarted-app")
+        del result
+        gc.collect()
+        assert not execution_registry.is_busy("unstarted-app")
+
+    asyncio.run(scenario())
+
+
 def load_main(
     monkeypatch,
     token="secret",

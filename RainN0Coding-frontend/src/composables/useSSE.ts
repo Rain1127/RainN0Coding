@@ -53,7 +53,7 @@ export function useSSE() {
   const isStreaming = computed(() => {
     const ownsActiveRun = ownedRunId.value === generation.runId
     const streamIsActive =
-      generation.status === 'connecting' || generation.status === 'running'
+      generation.status === 'connecting' || generation.status === 'queued' || generation.status === 'running'
     return ownsActiveRun && streamIsActive
   })
   const content = ref('')

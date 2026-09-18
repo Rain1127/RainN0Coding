@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from core.execution_registry import execution_registry
 from monitoring import ai_code_gen_active_requests, record_request, setup_monitoring
 from server.codegen_type_router import route_code_gen_type
 from server.generate_code_orchestrator import orchestrate_generate_code
@@ -30,7 +31,7 @@ from tracing import (
     get_current_trace_id,
     setup_tracing,
 )
-from workflow.sse_stream import stream_workflow
+from workflow.sse_stream import stream_persistent_workflow as stream_workflow
 
 
 def _config():
@@ -119,6 +120,7 @@ class CodeGenRequest(BaseModel):
     request_id: str = Field(default="", alias="requestId", description="gateway request id")
     trace_id: str = Field(default="", alias="traceId", description="distributed trace id from Java")
     history: list = Field(default_factory=list, description="conversation history")
+    resume: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -128,6 +130,32 @@ class RouteCodeGenTypeRequest(BaseModel):
     user_id: str | None = Field(default=None, alias="userId", description="user id")
 
     model_config = {"populate_by_name": True}
+
+
+class GenerationControlRequest(BaseModel):
+    user_id: str = Field(alias="userId", min_length=1, max_length=128)
+    app_id: str = Field(alias="appId", min_length=1, max_length=128)
+    run_id: str = Field(alias="runId", min_length=1, max_length=128)
+    model_config = {"populate_by_name": True}
+
+
+def _control(request, action):
+    from workflow.run_control import default_run_store, RunControlError
+    try:
+        store = default_run_store()
+        return getattr(store, action)(request.run_id, request.user_id, request.app_id)
+    except RunControlError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status_code)
+
+
+@app.post("/api/generation/pause")
+def pause_generation(request: GenerationControlRequest):
+    return _control(request, "pause")
+
+
+@app.post("/api/generation/status")
+def generation_status(request: GenerationControlRequest):
+    return _control(request, "public_status")
 
 
 class RouteCodeGenTypeResponse(BaseModel):
@@ -159,6 +187,11 @@ async def generate_code(request: CodeGenRequest):
 async def route_code_gen_type_api(request: RouteCodeGenTypeRequest):
     code_gen_type = route_code_gen_type(request.prompt, user_id=request.user_id)
     return RouteCodeGenTypeResponse(codeGenType=code_gen_type)
+
+
+async def execution_status(app_id: str):
+    """Internal probe of actual execution occupancy in this Python process."""
+    return {"busy": execution_registry.is_busy(app_id)}
 
 
 async def health():
@@ -221,6 +254,7 @@ register_routes(
     generate_code_handler=generate_code,
     route_code_gen_type_handler=route_code_gen_type_api,
     health_handler=health,
+    execution_status_handler=execution_status,
 )
 
 

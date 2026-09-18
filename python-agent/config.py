@@ -6,6 +6,12 @@ load_dotenv()
 
 
 class Config:
+    # Absolute by default so restarting from a different working directory keeps progress.
+    CHECKPOINT_DB_PATH: str = os.getenv(
+        "CHECKPOINT_DB_PATH",
+        os.path.join(os.path.dirname(__file__), "data", "checkpoints.db"),
+    )
+
     # ===== LiteLLM Gateway =====
     LITELLM_BASE_URL: str = os.getenv(
         "LITELLM_BASE_URL",

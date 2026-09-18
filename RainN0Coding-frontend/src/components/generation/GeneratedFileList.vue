@@ -31,6 +31,7 @@ function sizeLabel(size?: number | string) {
 function fileStatus(status: GenerationStatus) {
   if (status === 'success') return '已生成'
   if (status === 'failed') return '已保留'
+  if (status === 'paused' || status === 'pausing') return '已保留'
   if (status === 'cancelled') return '取消前已生成'
   return '生成中…'
 }

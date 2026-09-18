@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { MAX_SSE_BUFFER_SIZE, createSseParser } from './sseParser'
 
 describe('createSseParser', () => {
+  it('preserves an SSE cursor as a string without leaking it to another frame', () => {
+    const events: unknown[] = []
+    const parser = createSseParser((event) => events.push(event))
+    parser.push('id: 9007199254740993123\ndata: {"type":"queued"}\n\ndata: {"type":"progress"}\n\n')
+    expect(events).toEqual([
+      { type: 'queued', id: '9007199254740993123' },
+      { type: 'progress' },
+    ])
+  })
   it('reassembles a frame split across arbitrary chunks', () => {
     const events: unknown[] = []
     const parser = createSseParser((event) => events.push(event))
@@ -68,7 +77,7 @@ describe('createSseParser', () => {
     )
 
     expect(events).toEqual([
-      { type: 'phase', phase: 'pm', sse_event: 'progress' },
+      { type: 'phase', phase: 'pm', sse_event: 'progress', id: '7' },
     ])
     expect(malformed).toEqual([])
   })

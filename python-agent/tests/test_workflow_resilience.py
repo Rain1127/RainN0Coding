@@ -8,6 +8,164 @@ import pytest
 pytestmark = [pytest.mark.unit, pytest.mark.harness]
 
 
+@pytest.mark.parametrize("queued", [False, True])
+def test_cancelled_sync_runner_stays_busy_until_actual_worker_exit(monkeypatch, queued):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from core.execution_registry import execution_registry
+    from workflow.resilience import _run_phase_runner
+
+    app_id = "cancelled-queued" if queued else "cancelled-running"
+    started, release, pool_release = Event(), Event(), Event()
+
+    def runner(state):
+        started.set()
+        assert release.wait(5)
+        return state
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+        blocker = loop.run_in_executor(None, pool_release.wait, 5) if queued else None
+        task = asyncio.create_task(_run_phase_runner("coder", {"app_id": app_id}, runner))
+        try:
+            for _ in range(200):
+                if execution_registry.is_busy(app_id) and (queued or started.is_set()):
+                    break
+                await asyncio.sleep(0.005)
+            assert execution_registry.is_busy(app_id)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert execution_registry.is_busy(app_id)
+            pool_release.set()
+            for _ in range(200):
+                if started.is_set():
+                    break
+                await asyncio.sleep(0.005)
+            assert started.is_set()
+            assert execution_registry.is_busy(app_id)
+        finally:
+            release.set()
+            pool_release.set()
+            if blocker:
+                await blocker
+        for _ in range(200):
+            if not execution_registry.is_busy(app_id):
+                break
+            await asyncio.sleep(0.005)
+        assert not execution_registry.is_busy(app_id)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("raises", [False, True])
+def test_runner_registry_cleanup_on_success_and_error(asynchronous, raises):
+    from core.execution_registry import execution_registry
+    from workflow.resilience import _run_phase_runner
+
+    app_id = "runner-cleanup"
+
+    def sync_runner(state):
+        assert execution_registry.is_busy(app_id)
+        if raises:
+            raise ValueError("runner failed")
+        return state
+
+    async def async_runner(state):
+        return sync_runner(state)
+
+    async def scenario():
+        call = _run_phase_runner("coder", {"app_id": app_id}, async_runner if asynchronous else sync_runner)
+        if raises:
+            with pytest.raises(ValueError, match="runner failed"):
+                await call
+        else:
+            assert (await call)["app_id"] == app_id
+        assert not execution_registry.is_busy(app_id)
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_async_runner_cleans_up_registry_after_finally():
+    from core.execution_registry import execution_registry
+    from workflow.resilience import _run_phase_runner
+
+    async def scenario():
+        started = asyncio.Event()
+
+        async def runner(state):
+            try:
+                started.set()
+                await asyncio.Event().wait()
+            finally:
+                assert execution_registry.is_busy("async-cancel")
+
+        task = asyncio.create_task(_run_phase_runner("coder", {"app_id": "async-cancel"}, runner))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not execution_registry.is_busy("async-cancel")
+
+    asyncio.run(scenario())
+
+
+def test_timed_out_sync_runner_remains_busy_until_exit(monkeypatch):
+    from threading import Event
+    from core.execution_registry import execution_registry
+    import workflow.resilience as resilience
+
+    release = Event()
+    monkeypatch.setattr(resilience, "phase_timeout_seconds", lambda *args: 0.02)
+
+    def runner(state):
+        assert release.wait(5)
+        return state
+
+    async def scenario():
+        try:
+            with pytest.raises(TimeoutError):
+                await resilience._run_phase_runner("coder", {"app_id": "timeout-app"}, runner)
+            assert execution_registry.is_busy("timeout-app")
+        finally:
+            release.set()
+        for _ in range(200):
+            if not execution_registry.is_busy("timeout-app"):
+                break
+            await asyncio.sleep(0.005)
+        assert not execution_registry.is_busy("timeout-app")
+
+    asyncio.run(scenario())
+
+
+def test_failed_executor_submission_releases_occupancy(monkeypatch):
+    from core.execution_registry import execution_registry
+
+    async def scenario():
+        def reject(*args):
+            raise RuntimeError("executor unavailable")
+
+        monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", reject)
+        with pytest.raises(RuntimeError, match="executor unavailable"):
+            await execution_registry.run_sync("submission-app", lambda state: state, {})
+        assert not execution_registry.is_busy("submission-app")
+
+    asyncio.run(scenario())
+
+
+def test_overlapping_execution_scopes_release_independently():
+    from core.execution_registry import execution_registry
+
+    release = execution_registry.acquire("overlap-app")
+    with execution_registry.track("overlap-app"):
+        release()
+        release()
+        assert execution_registry.is_busy("overlap-app")
+    assert not execution_registry.is_busy("overlap-app")
+
+
 def test_codegen_state_supports_availability_fields():
     from state.code_gen_state import CodeGenState
 
