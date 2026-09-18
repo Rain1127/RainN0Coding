@@ -63,15 +63,24 @@ def api_request(
     return json.loads(body) if body else {}
 
 
-def generate_key(master_key: str, alias: str, models: list[str]) -> str:
+def generate_key(
+    master_key: str,
+    alias: str,
+    models: list[str],
+    *,
+    allowed_routes: list[str] | None = None,
+) -> str:
+    payload = {
+        "key_alias": alias,
+        "models": models,
+        "metadata": {"owner": "rainn0coding", "purpose": alias},
+    }
+    if allowed_routes is not None:
+        payload["allowed_routes"] = allowed_routes
     response = api_request(
         "/key/generate",
         master_key,
-        {
-            "key_alias": alias,
-            "models": models,
-            "metadata": {"owner": "rainn0coding", "purpose": alias},
-        },
+        payload,
     )
     if not isinstance(response, dict):
         raise SystemExit(f"LiteLLM returned an invalid response for {alias}")
@@ -133,7 +142,12 @@ def main() -> None:
         raise SystemExit("LITELLM_MASTER_KEY is missing")
 
     agent_key = generate_key(master_key, "python-agent", BUSINESS_MODELS)
-    metrics_key = generate_key(master_key, "prometheus", ["code-lightweight"])
+    metrics_key = generate_key(
+        master_key,
+        "prometheus",
+        [],
+        allowed_routes=["/metrics"],
+    )
     verify_restricted_key(agent_key)
     api_request(
         "/v1/chat/completions",

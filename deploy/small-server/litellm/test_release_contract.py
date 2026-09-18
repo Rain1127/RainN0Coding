@@ -107,6 +107,7 @@ def test_operational_scripts_cover_preflight_and_verification() -> None:
         assert alias in provision
     assert "python.env.litellm-candidate" in provision
     assert "litellm-metrics-token" in provision
+    assert 'allowed_routes=["/metrics"]' in provision
     assert "print(key" not in provision
     assert "expect_json=False" in provision
     assert "os.chown" in provision
