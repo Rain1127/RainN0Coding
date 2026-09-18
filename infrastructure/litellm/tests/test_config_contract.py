@@ -15,7 +15,7 @@ def test_gateway_config_exposes_only_stable_business_models():
     text = CONFIG.read_text(encoding="utf-8")
     for model in ("code-reasoning", "code-structured", "code-lightweight"):
         assert f"model_name: {model}" in text
-    assert "num_retries: 1" in text
+    assert "num_retries: 0" in text
     assert "code-reasoning: [code-reasoning-chat, code-reasoning-glm]" in text
     assert "callbacks: [prometheus]" in text
 

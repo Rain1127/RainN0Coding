@@ -154,14 +154,14 @@ def _completion(content: str) -> httpx.Response:
     )
 
 
-def test_primary_500_retries_once_then_falls_back():
+def test_primary_500_falls_back_without_same_deployment_retry():
     _reset_counts()
 
     response = _completion("ping")
 
     response.raise_for_status()
     assert response.json()["choices"][0]["message"]["content"] == "fallback-ok"
-    assert _request_count(PRIMARY_URL) == 2
+    assert _request_count(PRIMARY_URL) == 1
     assert _request_count(FALLBACK_URL) == 1
 
 
@@ -171,7 +171,7 @@ def test_both_providers_failing_returns_gateway_error():
     response = _completion("fail-all")
 
     assert response.status_code >= 400
-    assert _request_count(PRIMARY_URL) == 2
+    assert _request_count(PRIMARY_URL) == 1
     assert _request_count(FALLBACK_URL) >= 1
 
 
