@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import secrets
 import stat
 import urllib.error
 import urllib.request
@@ -68,12 +69,13 @@ def generate_key(
     alias: str,
     models: list[str],
     *,
+    purpose: str,
     allowed_routes: list[str] | None = None,
 ) -> str:
     payload = {
         "key_alias": alias,
         "models": models,
-        "metadata": {"owner": "rainn0coding", "purpose": alias},
+        "metadata": {"owner": "rainn0coding", "purpose": purpose},
     }
     if allowed_routes is not None:
         payload["allowed_routes"] = allowed_routes
@@ -141,11 +143,18 @@ def main() -> None:
     if not master_key:
         raise SystemExit("LITELLM_MASTER_KEY is missing")
 
-    agent_key = generate_key(master_key, "python-agent", BUSINESS_MODELS)
+    rotation = secrets.token_hex(6)
+    agent_key = generate_key(
+        master_key,
+        f"python-agent-{rotation}",
+        BUSINESS_MODELS,
+        purpose="python-agent",
+    )
     metrics_key = generate_key(
         master_key,
-        "prometheus",
+        f"prometheus-{rotation}",
         [],
+        purpose="prometheus",
         allowed_routes=["/metrics"],
     )
     verify_restricted_key(agent_key)
