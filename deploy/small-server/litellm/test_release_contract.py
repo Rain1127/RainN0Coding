@@ -109,6 +109,7 @@ def test_operational_scripts_cover_preflight_and_verification() -> None:
     assert "litellm-metrics-token" in provision
     assert 'allowed_routes=["/metrics"]' in provision
     assert "secrets.token_hex" in provision
+    assert '"LLM_TIMEOUT": "230"' in provision
     assert 'purpose="python-agent"' in provision
     assert 'purpose="prometheus"' in provision
     assert "print(key" not in provision

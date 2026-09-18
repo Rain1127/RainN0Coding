@@ -176,6 +176,7 @@ def main() -> None:
             "LITELLM_BASE_URL": f"{BASE_URL}/v1",
             "LITELLM_HEALTH_URL": f"{BASE_URL}/health/liveliness",
             "LITELLM_API_KEY": agent_key,
+            "LLM_TIMEOUT": "230",
             "LLM_REASONING_MODEL": "code-reasoning",
             "LLM_STRUCTURED_MODEL": "code-structured",
             "LLM_LIGHTWEIGHT_MODEL": "code-lightweight",
