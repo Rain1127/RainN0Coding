@@ -30,7 +30,7 @@ services:
     <<: *service
     image: ${LITELLM_IMAGE:?LITELLM_IMAGE is required}
     container_name: rainn0coding-litellm
-    mem_limit: 512m
+    mem_limit: 768m
     env_file: ${LITELLM_RUNTIME_ENV:-/etc/rainn0coding/litellm.env}
     command: [--config, /app/config.yaml, --port, '4000', --num_workers, '1']
     ports:

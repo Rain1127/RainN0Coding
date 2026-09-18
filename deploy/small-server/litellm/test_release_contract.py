@@ -40,7 +40,7 @@ def test_compose_keeps_gateway_private_and_state_persistent() -> None:
     assert "127.0.0.1:4000:4000" in compose
     assert "rainn0coding_litellm_postgres_data" in compose
     assert "mem_limit: 256m" in compose
-    assert "mem_limit: 512m" in compose
+    assert "mem_limit: 768m" in compose
     assert "5432:5432" not in compose
     assert "POSTGRES_IMAGE" in compose
     assert "LITELLM_IMAGE" in compose
