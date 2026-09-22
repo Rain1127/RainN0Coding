@@ -36,7 +36,7 @@ def build_report(metadata: RunMetadata, results: Iterable[CaseEvaluation], gate:
 
 def write_report(report: BenchmarkReport, path: str | Path) -> Path:
     destination = Path(path); destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(redact(report.model_dump(mode="json")), ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    destination.write_text(json.dumps(redact(report.model_dump(mode="json")), ensure_ascii=False, indent=2, allow_nan=False, sort_keys=True) + "\n", encoding="utf-8")
     return destination
 
 def read_report(path: str | Path) -> BenchmarkReport:

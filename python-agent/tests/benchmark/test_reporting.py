@@ -63,6 +63,29 @@ def test_write_report_redacts_nested_credentials_but_not_client_id(tmp_path):
     assert all(f'"{secret}"' not in text for secret in ("refresh", "auth", "key")) and "keep" in text
 
 
+def test_write_report_redacts_camel_case_credentials(tmp_path):
+    metadata = RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now")
+    result = _evaluation("a", 0, True, 10).model_copy(update={"output": {"refreshToken": "refresh-value", "authToken": "auth-value", "accessToken": "access-value", "apiKey": "api-value", "privateKey": "private-value", "clientId": "safe-id"}})
+    path = tmp_path / "report.json"
+    write_report(build_report(metadata, [result]), path)
+    text = path.read_text(encoding="utf-8")
+    assert all(value not in text for value in ("refresh-value", "auth-value", "access-value", "api-value", "private-value"))
+    assert "safe-id" in text
+
+
+def test_write_report_is_canonical_across_mapping_insertion_order(tmp_path):
+    metadata_a = RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={"z": "Z", "a": "A"}, offline=True, started_at="now")
+    metadata_b = metadata_a.model_copy(update={"model_aliases": {"a": "A", "z": "Z"}})
+    output_a = {"z": 1, "a": {"y": 2, "x": 3}}
+    output_b = {"a": {"x": 3, "y": 2}, "z": 1}
+    result_a = _evaluation("a", 0, True, 10).model_copy(update={"output": output_a})
+    result_b = _evaluation("a", 0, True, 10).model_copy(update={"output": output_b})
+    path_a, path_b = tmp_path / "a.json", tmp_path / "b.json"
+    write_report(build_report(metadata_a, [result_a], gate={"z": 1, "a": {"b": 2, "a": 3}}), path_a)
+    write_report(build_report(metadata_b, [result_b], gate={"a": {"a": 3, "b": 2}, "z": 1}), path_b)
+    assert path_a.read_bytes() == path_b.read_bytes()
+
+
 def test_report_is_deep_snapshot_and_canonical_sorted():
     metadata = RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now")
     first = _evaluation("b", 1, True, 20)
