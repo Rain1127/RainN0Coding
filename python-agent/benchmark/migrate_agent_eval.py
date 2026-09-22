@@ -9,6 +9,13 @@ from typing import Any
 import yaml
 
 
+def _source_error(source_file: Path, message: str, *, index: int | None = None, case_id: str | None = None) -> ValueError:
+    context = f"; case index {index}" if index is not None else ""
+    if case_id:
+        context += f"; case id {case_id}"
+    return ValueError(f"{source_file}{context}: {message}")
+
+
 def migrate_directory(
     source_directory: str | Path,
     destination: str | Path,
@@ -19,10 +26,44 @@ def migrate_directory(
     source = Path(source_directory)
     destination_path = Path(destination)
     migrated: list[dict[str, Any]] = []
+    seen_ids: dict[str, Path] = {}
 
     for source_file in sorted(source.rglob("*.json"), key=lambda path: path.as_posix()):
-        document = json.loads(source_file.read_text(encoding="utf-8"))
-        for old_case in document.get("cases", []):
+        try:
+            document = json.loads(source_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise _source_error(source_file, f"could not read JSON: {exc}") from exc
+        if not isinstance(document, dict):
+            raise _source_error(source_file, "top-level JSON must be an object")
+        if "version" in document and document["version"] != 1:
+            raise _source_error(source_file, f"unsupported source version: {document['version']!r}")
+        cases = document.get("cases")
+        if not isinstance(cases, list):
+            raise _source_error(source_file, "cases must be a list")
+        for index, old_case in enumerate(cases):
+            if not isinstance(old_case, dict):
+                raise _source_error(source_file, "case must be an object", index=index)
+            case_id = old_case.get("id")
+            case_id_text = case_id if isinstance(case_id, str) else None
+            required = ("id", "agent", "category", "input_state")
+            missing = [field for field in required if field not in old_case]
+            if missing:
+                raise _source_error(
+                    source_file,
+                    f"missing required field(s): {', '.join(missing)}",
+                    index=index,
+                    case_id=case_id_text,
+                )
+            if not isinstance(case_id, str) or not case_id.strip():
+                raise _source_error(source_file, "id must be a nonblank string", index=index)
+            if case_id in seen_ids:
+                raise _source_error(
+                    source_file,
+                    f"duplicate case id {case_id!r}; first defined in {seen_ids[case_id]}",
+                    index=index,
+                    case_id=case_id,
+                )
+            seen_ids[case_id] = source_file
             target = old_case["agent"]
             execution: dict[str, Any] = {"mode": "deterministic" if target == "supervisor" else "replay"}
             if target != "supervisor":
@@ -43,6 +84,8 @@ def migrate_directory(
                 }
             )
 
+    if not migrated:
+        raise ValueError(f"{source}: no migrated cases found")
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     document = {"schema_version": 1, "dataset_version": dataset_version, "cases": migrated}
     destination_path.write_text(
