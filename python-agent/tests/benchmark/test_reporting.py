@@ -16,8 +16,8 @@ def _evaluation(case_id: str, attempt: int, passed: bool, latency: float) -> Cas
 
 def test_run_metadata_carries_reproducibility_fields():
     metadata = RunMetadata(
-        report_schema_version=1, run_id="run-1", suite_version="suite-1", git_sha="abc123",
-        dataset_version="data-1", dataset_fingerprint="sha-data", prompt_fingerprint="sha-prompt",
+        report_schema_version=1, run_id="run-1", suite="suite-1", git_sha="abc123",
+        dataset_versions=["data-1"], dataset_fingerprint="sha-data", prompt_fingerprint="sha-prompt",
         model_aliases={"default": "offline"}, offline=True, started_at="2026-09-22T00:00:00+00:00",
     )
     assert metadata.run_id == "run-1" and metadata.offline is True
@@ -25,12 +25,12 @@ def test_run_metadata_carries_reproducibility_fields():
 
 def test_build_write_read_report_aggregates_cases_and_metrics(tmp_path):
     metadata = RunMetadata(
-        run_id="run-1", suite_version="suite-1", git_sha="abc", dataset_version="data-1",
+        run_id="run-1", suite="suite-1", git_sha="abc", dataset_versions=["data-1"],
         dataset_fingerprint="d", prompt_fingerprint="p", model_aliases={}, offline=True,
         started_at="2026-09-22T00:00:00+00:00",
     )
     report = build_report(metadata, [_evaluation("case-a", 0, True, 10), _evaluation("case-b", 0, False, 30)])
-    assert report.summary["case_pass_rate"] == 0.5
+    assert report.summary == {"cases": 2, "passed": 1, "case_pass_rate": 0.5, "observations": 2, "passed_observations": 1, "observation_pass_rate": 0.5, "assertion_pass_rate": 0.5}
     assert report.metrics["latency_ms"]["p50"] == 10
     assert report.metrics["latency_ms"]["p95"] == 30
     assert "cost_usd" not in report.metrics
@@ -50,8 +50,17 @@ def test_report_redacts_secrets_recursively():
     assert redacted["nested"][0]["password"] == "***REDACTED***"
 
 
+def test_write_report_redacts_secrets_in_persisted_json(tmp_path):
+    metadata = RunMetadata(run_id="run-1", suite="suite", git_sha="abc", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now")
+    result = _evaluation("case-a", 0, True, 10).model_copy(update={"output": {"api_key": "sk-secret-value", "message": "Bearer abcdef123456"}})
+    path = tmp_path / "report.json"
+    write_report(build_report(metadata, [result]), path)
+    text = path.read_text(encoding="utf-8")
+    assert "sk-secret-value" not in text and "abcdef123456" not in text
+
+
 def test_describe_uses_nearest_rank_percentiles():
     assert describe([10, 20, 30, 40]) == {
         "observations": 4, "sum": 100.0, "mean": 25.0, "min": 10.0,
-        "max": 40.0, "p50": 20.0, "p95": 40.0, "pstdev": 11.180339887498949,
+        "max": 40.0, "p50": 20.0, "p95": 40.0, "stdev": 11.180339887498949,
     }

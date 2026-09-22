@@ -145,9 +145,9 @@ class CaseEvaluation(StrictModel):
 class RunMetadata(StrictModel):
     report_schema_version: int = 1
     run_id: str
-    suite_version: str
+    suite: str
     git_sha: str
-    dataset_version: str
+    dataset_versions: list[str]
     dataset_fingerprint: str
     prompt_fingerprint: str
     model_aliases: dict[str, str] = Field(default_factory=dict)
@@ -157,9 +157,9 @@ class RunMetadata(StrictModel):
 
 class BenchmarkReport(StrictModel):
     metadata: RunMetadata
-    summary: dict[str, int | float | str | bool] = Field(default_factory=dict)
-    by_target: dict[str, dict[str, int | float | str | bool]] = Field(default_factory=dict)
-    by_category: dict[str, dict[str, int | float | str | bool]] = Field(default_factory=dict)
-    metrics: dict[str, dict[str, int | float | str | bool]] = Field(default_factory=dict)
+    summary: dict[str, int | float | str | bool]
+    by_target: dict[str, dict[str, int | float | str | bool]]
+    by_category: dict[str, dict[str, int | float | str | bool]]
+    metrics: dict[str, dict[str, int | float | str | bool]]
     gate: dict[str, Any] = Field(default_factory=dict)
-    results: list[CaseEvaluation] = Field(default_factory=list)
+    results: list[CaseEvaluation]

@@ -11,7 +11,9 @@ def _group_summary(results: list[CaseEvaluation]) -> dict[str, int | float]:
     for result in results: grouped.setdefault(result.case_id, []).append(result)
     cases, assertions_total = len(grouped), sum(item.assertions_total for item in results)
     assertions_passed, observations = sum(item.assertions_passed for item in results), len(results)
-    return {"case_pass_rate": sum(all(item.passed for item in attempts) for attempts in grouped.values()) / cases if cases else 0.0, "assertion_pass_rate": assertions_passed / assertions_total if assertions_total else 0.0, "observation_pass_rate": sum(item.passed for item in results) / observations if observations else 0.0, "cases": cases, "observations": observations}
+    passed_cases = sum(all(item.passed for item in attempts) for attempts in grouped.values())
+    passed_observations = sum(item.passed for item in results)
+    return {"cases": cases, "passed": passed_cases, "case_pass_rate": passed_cases / cases if cases else 0.0, "observations": observations, "passed_observations": passed_observations, "observation_pass_rate": passed_observations / observations if observations else 0.0, "assertion_pass_rate": assertions_passed / assertions_total if assertions_total else 0.0}
 
 def _group(results: list[CaseEvaluation], attr: str) -> dict[str, dict[str, int | float]]:
     grouped: dict[str, list[CaseEvaluation]] = {}
