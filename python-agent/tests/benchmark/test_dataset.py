@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -88,4 +89,31 @@ def test_rejects_schema_version_values_that_are_not_integer_one(
     )
 
     with pytest.raises(ValueError, match="schema_version must be exactly 1"):
+        load_cases(tmp_path)
+
+
+def test_rejects_unknown_case_fields(tmp_path: Path) -> None:
+    case = _case("unknown-field")
+    case["expectatons"] = {"equals": {"intent": "code_generation"}}
+    _write_yaml(tmp_path / "cases.yaml", "2026.09.1", [case])
+
+    with pytest.raises(ValueError, match="expectatons"):
+        load_cases(tmp_path)
+
+
+def test_explicit_asset_root_error_names_asset_root(tmp_path: Path) -> None:
+    source = tmp_path / "cases.yaml"
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    _write_yaml(source, "2026.09.1", [_case("asset-escape", record="outside.json")])
+
+    with pytest.raises(ValueError, match="outside asset root"):
+        load_cases(tmp_path, asset_root=assets)
+
+
+def test_malformed_yaml_error_includes_source_path(tmp_path: Path) -> None:
+    source = tmp_path / "malformed.yaml"
+    source.write_text("schema_version: [", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=re.escape(str(source))):
         load_cases(tmp_path)

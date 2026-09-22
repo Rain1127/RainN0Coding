@@ -12,14 +12,18 @@ def load_cases(dataset_path: str | Path, asset_root: str | Path | None = None) -
     dataset_root = Path(dataset_path).expanduser().resolve()
     if not dataset_root.is_dir():
         raise ValueError(f"dataset path must be an existing directory: {dataset_root}")
-    asset_boundary = Path(asset_root).expanduser().resolve() if asset_root is not None else dataset_root
+    explicit_asset_root = asset_root is not None
+    asset_boundary = Path(asset_root).expanduser().resolve() if explicit_asset_root else dataset_root
     if not asset_boundary.is_dir():
         raise ValueError(f"asset root must be an existing directory: {asset_boundary}")
     files = sorted((*dataset_root.rglob("*.yaml"), *dataset_root.rglob("*.yml")), key=lambda p: p.as_posix())
     loaded: list[LoadedCase] = []
     seen: set[str] = set()
     for source_path in files:
-        raw = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+        try:
+            raw = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise ValueError(f"failed to parse YAML file {source_path}: {exc}") from exc
         if not isinstance(raw, dict):
             raise ValueError(f"dataset file must contain a top-level object: {source_path}")
         if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
@@ -44,7 +48,8 @@ def load_cases(dataset_path: str | Path, asset_root: str | Path | None = None) -
                 try:
                     record_path.relative_to(asset_boundary)
                 except ValueError as exc:
-                    raise ValueError(f"record is outside dataset root: {case.execution.record}") from exc
+                    boundary_name = "asset root" if explicit_asset_root else "dataset root"
+                    raise ValueError(f"record is outside {boundary_name}: {case.execution.record}") from exc
                 if not record_path.is_file():
                     raise ValueError(f"record does not exist: {record_path}")
             loaded.append(LoadedCase(case=case, source_path=source_path.resolve(), record_path=record_path))
