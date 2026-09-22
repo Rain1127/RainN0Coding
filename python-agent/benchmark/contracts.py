@@ -98,11 +98,13 @@ class RawRunRecord(StrictModel):
     @field_validator("duration_ms", mode="before")
     @classmethod
     def finite_duration(cls, value: object) -> float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-            raise ValueError("duration_ms must be finite")
-        if value < 0:
+        try:
+            normalized = normalize_metric_value(value)
+        except ValueError as exc:
+            raise ValueError("duration_ms must be finite") from exc
+        if normalized is None or normalized < 0:
             raise ValueError("duration_ms must be non-negative")
-        return float(value)
+        return normalized
 
     @field_validator("observed_metrics", mode="before")
     @classmethod

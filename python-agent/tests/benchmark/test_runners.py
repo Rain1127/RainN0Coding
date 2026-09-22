@@ -131,6 +131,15 @@ def test_raw_run_record_rejects_overflowing_metric() -> None:
         )
 
 
+def test_raw_run_record_rejects_overflowing_duration() -> None:
+    with pytest.raises(ValueError):
+        RawRunRecord(
+            case_id="runner-001",
+            started_at="2026-09-22T00:00:00+00:00",
+            duration_ms=10**1000,
+        )
+
+
 @pytest.mark.parametrize(
     "field,value",
     [("case_id", ""), ("attempt_index", -1), ("duration_ms", -1), ("duration_ms", float("nan"))],
