@@ -62,7 +62,7 @@ def run_cases(cases: Iterable[LoadedCase], context: RunContext) -> list[CaseEval
             context.assert_mode_allowed(case.execution.mode)
             runner = RUNNERS.get(case.execution.mode)
             if runner is None:
-                raise ValueError(f"{case.id}: no runner for mode {case.execution.mode}")
+                raise ValueError(f"runner is not registered for mode: {case.execution.mode}")
             records = runner.run(loaded, context)
             for record in records:
                 if context.record_dir is not None:

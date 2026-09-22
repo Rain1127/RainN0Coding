@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from benchmark.cli import main
+from benchmark.cli import _load_cases, main
+from benchmark.config import load_suite
 from benchmark.contracts import BenchmarkCase, LoadedCase, RawRunRecord
 from benchmark.orchestrator import RUNNERS, run_cases
 from benchmark.runners.base import RunContext
@@ -14,7 +15,7 @@ SUITE = "benchmarks/suites/pr.yaml"
 
 def test_validate_pr_suite_prints_validated(capsys) -> None:
     assert main(["validate", "--suite", SUITE]) == 0
-    assert "validated" in capsys.readouterr().out.lower()
+    assert capsys.readouterr().out == "validated 6 benchmark cases for suite pr\n"
 
 
 def test_run_pr_suite_writes_report_metadata_and_raw_records(tmp_path: Path) -> None:
@@ -42,14 +43,14 @@ def test_run_uses_default_record_directory_relative_to_current_directory(tmp_pat
     assert len(list((tmp_path / "benchmarks" / "records" / "runs").glob("*/*.json"))) == 6
 
 
-def _loaded(case_id: str) -> LoadedCase:
+def _loaded(case_id: str, mode: str = "deterministic") -> LoadedCase:
     return LoadedCase(
         case=BenchmarkCase.model_validate({
             "id": case_id,
             "dataset_version": "test",
             "target": "supervisor",
             "category": "routing",
-            "execution": {"mode": "deterministic"},
+            "execution": {"mode": mode},
             "input": {"phase": "review_done", "review": {"passed": True}},
             "provenance": {"source": "synthetic", "reviewed": True, "sanitized": True},
         }),
@@ -97,3 +98,21 @@ def test_cli_infrastructure_error_is_printed_to_stdout(tmp_path: Path, capsys) -
     captured = capsys.readouterr()
     assert captured.out.startswith("benchmark infrastructure error: ")
     assert captured.err == ""
+
+
+def test_disallowed_modes_message_uses_sorted_list_representation() -> None:
+    suite, suite_dir = load_suite(SUITE)
+    restricted = suite.model_copy(update={"allowed_modes": ["deterministic"]})
+
+    try:
+        _load_cases(restricted, suite_dir)
+    except ValueError as exc:
+        assert str(exc) == "suite contains disallowed modes: ['replay']"
+    else:
+        raise AssertionError("expected disallowed replay mode")
+
+
+def test_missing_runner_message_is_exact() -> None:
+    result = run_cases([_loaded("unregistered", "rag")], RunContext("run", True))
+
+    assert result[0].infrastructure_error == "runner is not registered for mode: rag"

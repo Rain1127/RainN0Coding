@@ -63,7 +63,7 @@ def _load_cases(suite: SuiteConfig, suite_dir: Path) -> list[LoadedCase]:
         raise ValueError("duplicate benchmark case id across suite dataset roots")
     disallowed = sorted({item.case.execution.mode for item in cases} - set(suite.allowed_modes))
     if disallowed:
-        raise ValueError(f"suite does not allow execution modes: {', '.join(disallowed)}")
+        raise ValueError(f"suite contains disallowed modes: {disallowed}")
     return cases
 
 
@@ -90,7 +90,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         suite, suite_dir = load_suite(args.suite)
         cases = _load_cases(suite, suite_dir)
         if args.command == "validate":
-            print(f"validated {suite.name}: {len(cases)} cases")
+            print(f"validated {len(cases)} benchmark cases for suite {suite.name}")
             return 0
 
         started_at = datetime.now(timezone.utc).isoformat()
