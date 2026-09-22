@@ -34,11 +34,7 @@ def rendered_text(value: Any) -> str:
 
 def metric_name(case: BenchmarkCase, rule: str, path: str) -> str:
     tags = case.metric_tags
-    # Accept tags authored against a leaf field when the evaluated path is
-    # nested (the migrated golden cases use both forms).
-    exact_metric = tags.get(f"{rule}.{path}")
-    leaf_metric = tags.get(f"{rule}.{path.rsplit('.', 1)[-1]}") if "." in path else None
-    return exact_metric or leaf_metric or tags.get(rule, _DEFAULT_METRICS[rule])
+    return tags.get(f"{rule}.{path}", tags.get(rule, _DEFAULT_METRICS[rule]))
 
 
 def _output_metrics(case: BenchmarkCase, output: dict[str, Any]) -> dict[str, float]:
@@ -121,7 +117,3 @@ def evaluate_assertions(
         output=output,
         observed_metrics=metrics,
     )
-
-
-# Compatibility with the first draft and callers that use the legacy name.
-evaluate_case = evaluate_assertions

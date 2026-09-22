@@ -1,5 +1,5 @@
 from benchmark.contracts import BenchmarkCase
-from benchmark.evaluators.assertions import evaluate_case
+from benchmark.evaluators.assertions import evaluate_assertions
 
 
 def _case(expectations: dict, *, output_metrics: dict[str, str] | None = None) -> BenchmarkCase:
@@ -11,14 +11,14 @@ def _case(expectations: dict, *, output_metrics: dict[str, str] | None = None) -
         execution={"mode": "replay", "record": "reviewer-xss.json"},
         input={},
         expectations=expectations,
-        metric_tags={"required_text.issues": "critical_defect_recall"},
+        metric_tags={"required_text.review.issues": "critical_defect_recall"},
         output_metrics=output_metrics or {},
         provenance={"source": "curated", "reviewed": True, "sanitized": True},
     )
 
 
 def test_evaluate_case_accepts_matching_review_assertions_and_metrics():
-    result = evaluate_case(
+    result = evaluate_assertions(
         _case(
             {
                 "equals": {"review.passed": False},
@@ -53,7 +53,7 @@ def test_evaluate_case_accepts_matching_review_assertions_and_metrics():
 
 
 def test_evaluate_case_reports_missing_nested_path_as_case_failure():
-    result = evaluate_case(
+    result = evaluate_assertions(
         _case({"required_paths": ["review.score"]}),
         {"review": {"passed": False}},
     )
@@ -62,3 +62,12 @@ def test_evaluate_case_reports_missing_nested_path_as_case_failure():
     assert result.infrastructure_error is None
     assert result.failures == ["review.score: required path is missing"]
 
+
+def test_metric_resolution_does_not_fall_back_to_leaf_path():
+    case = _case(
+        {"required_text": {"review.issues": ["xss"]}},
+    ).model_copy(update={"metric_tags": {"required_text.issues": "leaf_metric", "required_text": "rule_metric"}})
+
+    result = evaluate_assertions(case, {"review": {"issues": "xss"}})
+
+    assert result.assertions[0].metric == "rule_metric"
