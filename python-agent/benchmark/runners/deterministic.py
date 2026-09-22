@@ -17,15 +17,17 @@ class DeterministicRunner:
             raise ValueError(f"{case.case.id}: deterministic runner requires deterministic mode")
         if case.case.target != "supervisor":
             raise ValueError(f"no deterministic adapter for {case.case.target}")
-        started_at = datetime.now(timezone.utc).isoformat()
-        started = perf_counter()
-        next_node = supervisor_decision(deepcopy(case.case.input))
-        duration_ms = (perf_counter() - started) * 1000
-        return [
-            RawRunRecord(
+        records: list[RawRunRecord] = []
+        for attempt_index in range(case.case.execution.repeats):
+            started_at = datetime.now(timezone.utc).isoformat()
+            started = perf_counter()
+            next_node = supervisor_decision(deepcopy(case.case.input))
+            duration_ms = (perf_counter() - started) * 1000
+            records.append(RawRunRecord(
                 case_id=case.case.id,
+                attempt_index=attempt_index,
                 output={"next_node": next_node},
                 started_at=started_at,
                 duration_ms=duration_ms,
-            )
-        ]
+            ))
+        return records

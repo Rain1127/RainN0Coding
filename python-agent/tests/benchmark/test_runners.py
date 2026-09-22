@@ -12,7 +12,7 @@ from benchmark.runners.replay import ReplayRunner
 
 
 def _loaded_case(
-    *, target: str = "supervisor", record_path: Path | None = None, mode: str | None = None
+    *, target: str = "supervisor", record_path: Path | None = None, mode: str | None = None, repeats: int = 1
 ) -> LoadedCase:
     case = BenchmarkCase.model_validate(
         {
@@ -20,7 +20,7 @@ def _loaded_case(
             "dataset_version": "2026.09.1",
             "target": target,
             "category": "routing",
-            "execution": {"mode": mode or ("deterministic" if target == "supervisor" else "replay")},
+            "execution": {"mode": mode or ("deterministic" if target == "supervisor" else "replay"), "repeats": repeats},
             "input": {"phase": "review_done", "review": {"passed": True}},
             "provenance": {"source": "synthetic", "reviewed": True, "sanitized": True},
         }
@@ -41,6 +41,13 @@ def test_deterministic_runner_uses_real_supervisor() -> None:
     assert record.duration_ms >= 0
     assert record.started_at.endswith("+00:00")
     assert loaded.case.input == original
+
+
+def test_deterministic_runner_honors_repeats_with_contiguous_attempts() -> None:
+    records = DeterministicRunner().run(_loaded_case(repeats=3), RunContext("run-1", True))
+
+    assert [record.attempt_index for record in records] == [0, 1, 2]
+    assert len(records) == 3
 
 
 def test_deterministic_runner_rejects_mismatched_execution_mode() -> None:
@@ -64,6 +71,18 @@ def test_replay_runner_reads_output_and_observed_latency(tmp_path: Path) -> None
 
     assert record.output == {"phase": "intent_done"}
     assert record.observed_metrics == {"latency_ms": 10.0}
+
+
+def test_replay_runner_honors_repeats_with_contiguous_attempts(tmp_path: Path) -> None:
+    record_path = tmp_path / "record.json"
+    record_path.write_text(json.dumps({"output": {"phase": "intent_done"}}), encoding="utf-8")
+
+    records = ReplayRunner().run(
+        _loaded_case(target="intent", record_path=record_path, repeats=3), RunContext("run-1", True)
+    )
+
+    assert [record.attempt_index for record in records] == [0, 1, 2]
+    assert len(records) == 3
 
 
 def test_replay_runner_defaults_omitted_metrics_to_empty_dict(tmp_path: Path) -> None:

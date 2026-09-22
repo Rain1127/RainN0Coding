@@ -19,8 +19,6 @@ class ReplayRunner:
         if case.record_path is None:
             raise ValueError(f"{case_id}: replay record is required")
 
-        started_at = datetime.now(timezone.utc).isoformat()
-        started = perf_counter()
         try:
             raw: Any = json.loads(case.record_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -43,13 +41,16 @@ class ReplayRunner:
                 observed_metrics[name] = normalize_metric_value(value)
             except ValueError:
                 raise ValueError(f"{case_id}: invalid replay metric {name}")
-        duration_ms = (perf_counter() - started) * 1000
-        return [
-            RawRunRecord(
+        records: list[RawRunRecord] = []
+        for attempt_index in range(case.case.execution.repeats):
+            started_at = datetime.now(timezone.utc).isoformat()
+            started = perf_counter()
+            records.append(RawRunRecord(
                 case_id=case_id,
+                attempt_index=attempt_index,
                 output=output,
                 observed_metrics=observed_metrics,
                 started_at=started_at,
-                duration_ms=duration_ms,
-            )
-        ]
+                duration_ms=(perf_counter() - started) * 1000,
+            ))
+        return records
