@@ -1,6 +1,8 @@
 import json
+import pytest
+from pydantic import ValidationError
 
-from benchmark.contracts import CaseEvaluation, RunMetadata
+from benchmark.contracts import BenchmarkReport, CaseEvaluation, RunMetadata
 from benchmark.evaluators.metrics import describe
 from benchmark.reporting.json_report import build_report, read_report, write_report
 from benchmark.redaction import redact
@@ -21,6 +23,16 @@ def test_run_metadata_carries_reproducibility_fields():
         model_aliases={"default": "offline"}, offline=True, started_at="2026-09-22T00:00:00+00:00",
     )
     assert metadata.run_id == "run-1" and metadata.offline is True
+
+
+def test_run_metadata_requires_model_aliases():
+    with pytest.raises(ValidationError):
+        RunMetadata(run_id="run-1", suite="suite", git_sha="abc", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", offline=True, started_at="now")
+
+
+def test_report_group_statistics_reject_strings():
+    with pytest.raises(ValidationError):
+        BenchmarkReport(metadata=RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now"), summary={}, by_target={"supervisor": {"cases": "two"}}, by_category={}, metrics={}, results=[])
 
 
 def test_build_write_read_report_aggregates_cases_and_metrics(tmp_path):

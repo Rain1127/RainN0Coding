@@ -150,7 +150,7 @@ class RunMetadata(StrictModel):
     dataset_versions: list[str]
     dataset_fingerprint: str
     prompt_fingerprint: str
-    model_aliases: dict[str, str] = Field(default_factory=dict)
+    model_aliases: dict[str, str]
     offline: bool
     started_at: str
 
@@ -158,8 +158,8 @@ class RunMetadata(StrictModel):
 class BenchmarkReport(StrictModel):
     metadata: RunMetadata
     summary: dict[str, int | float | str | bool]
-    by_target: dict[str, dict[str, int | float | str | bool]]
-    by_category: dict[str, dict[str, int | float | str | bool]]
-    metrics: dict[str, dict[str, int | float | str | bool]]
+    by_target: dict[str, dict[str, int | float]]
+    by_category: dict[str, dict[str, int | float]]
+    metrics: dict[str, dict[str, int | float]]
     gate: dict[str, Any] = Field(default_factory=dict)
     results: list[CaseEvaluation]
