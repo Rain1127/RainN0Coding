@@ -62,3 +62,25 @@ class LoadedCase(StrictModel):
     case: BenchmarkCase
     source_path: Path
     record_path: Path | None = None
+
+
+class MetricAssertion(StrictModel):
+    metric: str
+    passed: bool
+    rule: str
+    path: str
+
+
+class CaseEvaluation(StrictModel):
+    case_id: str
+    attempt_index: int = 0
+    target: Target
+    category: str
+    passed: bool
+    assertions_passed: int
+    assertions_total: int
+    assertions: list[MetricAssertion] = Field(default_factory=list)
+    failures: list[str] = Field(default_factory=list)
+    output: dict[str, Any] = Field(default_factory=dict)
+    observed_metrics: dict[str, float | None] = Field(default_factory=dict)
+    infrastructure_error: str | None = None
