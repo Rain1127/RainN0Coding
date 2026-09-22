@@ -8,7 +8,7 @@ import yaml
 from .contracts import BenchmarkCase, LoadedCase
 
 
-def load_dataset(dataset_path: str | Path, asset_root: str | Path | None = None) -> list[LoadedCase]:
+def load_cases(dataset_path: str | Path, asset_root: str | Path | None = None) -> list[LoadedCase]:
     dataset_root = Path(dataset_path).expanduser().resolve()
     if not dataset_root.is_dir():
         raise ValueError(f"dataset path must be an existing directory: {dataset_root}")
@@ -22,7 +22,7 @@ def load_dataset(dataset_path: str | Path, asset_root: str | Path | None = None)
         raw = yaml.safe_load(source_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ValueError(f"dataset file must contain a top-level object: {source_path}")
-        if raw.get("schema_version") != 1:
+        if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
             raise ValueError(f"schema_version must be exactly 1: {source_path}")
         dataset_version = raw.get("dataset_version")
         if not isinstance(dataset_version, str) or not dataset_version.strip():

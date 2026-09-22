@@ -39,10 +39,10 @@ class BenchmarkCase(BaseModel):
     difficulty: Literal["basic", "medium", "hard"] = "medium"
     tags: list[str] = Field(default_factory=list)
     execution: ExecutionSpec
-    input: dict[str, Any]
+    input: dict[str, Any] = Field(default_factory=dict)
     expectations: Expectations = Field(default_factory=Expectations)
-    metric_tags: list[str] = Field(default_factory=list)
-    output_metrics: list[str] = Field(default_factory=list)
+    metric_tags: dict[str, str] = Field(default_factory=dict)
+    output_metrics: dict[str, str] = Field(default_factory=dict)
     gate: dict[str, Any] = Field(default_factory=dict)
     provenance: Provenance
 
@@ -50,7 +50,7 @@ class BenchmarkCase(BaseModel):
     @classmethod
     def nonblank(cls, value: str) -> str:
         if not value.strip():
-            raise ValueError("must be nonblank")
+            raise ValueError("must not be blank")
         return value
 
 

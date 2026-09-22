@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
-from benchmark.dataset import load_dataset
+from benchmark.dataset import load_cases
 
 
 def _case(case_id: str, *, record: str | None = None) -> dict:
@@ -19,8 +20,8 @@ def _case(case_id: str, *, record: str | None = None) -> dict:
         "execution": execution,
         "input": {"prompt": "classify this request"},
         "expectations": {"equals": {"intent": "code_generation"}},
-        "metric_tags": ["smoke"],
-        "output_metrics": ["accuracy"],
+        "metric_tags": {"suite": "smoke"},
+        "output_metrics": {"primary": "accuracy"},
         "gate": {"required": True},
         "provenance": {
             "source": "curated",
@@ -31,8 +32,6 @@ def _case(case_id: str, *, record: str | None = None) -> dict:
 
 
 def _write_yaml(path: Path, dataset_version: str, cases: list[dict]) -> None:
-    import yaml
-
     path.write_text(
         yaml.safe_dump(
             {"schema_version": 1, "dataset_version": dataset_version, "cases": cases},
@@ -49,7 +48,7 @@ def test_loads_versions_and_resolves_replay_record(tmp_path: Path) -> None:
     record.write_text(json.dumps({"intent": "code_generation"}), encoding="utf-8")
     _write_yaml(source, "2026.09.1", [_case("intent-001", record="fixtures/output.json")])
 
-    loaded = load_dataset(tmp_path)
+    loaded = load_cases(tmp_path)
 
     assert len(loaded) == 1
     assert loaded[0].case.schema_version == 1
@@ -63,7 +62,7 @@ def test_rejects_duplicate_ids_across_yaml_files(tmp_path: Path) -> None:
     _write_yaml(tmp_path / "b.yml", "2026.09.2", [_case("duplicate")])
 
     with pytest.raises(ValueError, match="duplicate benchmark case id"):
-        load_dataset(tmp_path)
+        load_cases(tmp_path)
 
 
 def test_rejects_record_outside_dataset_root(tmp_path: Path) -> None:
@@ -72,4 +71,21 @@ def test_rejects_record_outside_dataset_root(tmp_path: Path) -> None:
     (tmp_path.parent / "secret.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(ValueError, match="outside dataset root"):
-        load_dataset(tmp_path)
+        load_cases(tmp_path)
+
+
+@pytest.mark.parametrize("schema_version", [True, 1.0])
+def test_rejects_schema_version_values_that_are_not_integer_one(
+    tmp_path: Path, schema_version: object
+) -> None:
+    source = tmp_path / "invalid.yaml"
+    source.write_text(
+        yaml.safe_dump(
+            {"schema_version": schema_version, "dataset_version": "2026.09.1", "cases": [_case("invalid")]},
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="schema_version must be exactly 1"):
+        load_cases(tmp_path)
