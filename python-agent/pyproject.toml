@@ -27,6 +27,7 @@ dependencies = [
     "pymilvus>=2.4",
     "qdrant-client>=1.18,<1.19",
     "pytest>=8.0",
+    "pyyaml>=6.0",
     "python-dotenv>=1.2.2",
     "rank-bm25>=0.2.2",
     "ragas>=0.2.0",
@@ -51,4 +52,5 @@ markers = [
     "unit: deterministic pure-python checks",
     "integration: runtime boundary checks inside python-agent",
     "harness: focused production-hardening verification suites",
+    "benchmark: deterministic benchmark framework and dataset contract tests",
 ]
