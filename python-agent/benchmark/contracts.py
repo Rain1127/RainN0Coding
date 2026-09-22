@@ -64,6 +64,16 @@ class LoadedCase(StrictModel):
     record_path: Path | None = None
 
 
+class RawRunRecord(StrictModel):
+    case_id: str
+    attempt_index: int = 0
+    output: dict[str, Any] = Field(default_factory=dict)
+    observed_metrics: dict[str, float | None] = Field(default_factory=dict)
+    infrastructure_error: str | None = None
+    started_at: str
+    duration_ms: float
+
+
 class MetricAssertion(StrictModel):
     metric: str
     passed: bool
