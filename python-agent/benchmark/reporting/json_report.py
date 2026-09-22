@@ -22,9 +22,12 @@ def _group(results: list[CaseEvaluation], attr: str) -> dict[str, dict[str, int 
 
 def build_report(metadata: RunMetadata, results: Iterable[CaseEvaluation], gate: dict | None = None) -> BenchmarkReport:
     ordered = sorted(
-        [item.model_copy(update={"observed_metrics": {name: value for name, value in item.observed_metrics.items() if value is not None}}) for item in results],
+        [item.model_copy(deep=True) for item in results],
         key=lambda item: (item.case_id, item.attempt_index),
     )
+    keys = [(item.case_id, item.attempt_index) for item in ordered]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate case_id and attempt_index")
     metric_values: dict[str, list[float]] = {}
     for result in ordered:
         for name, value in result.observed_metrics.items():
@@ -33,7 +36,7 @@ def build_report(metadata: RunMetadata, results: Iterable[CaseEvaluation], gate:
 
 def write_report(report: BenchmarkReport, path: str | Path) -> Path:
     destination = Path(path); destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(redact(report.model_dump(mode="json")), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    destination.write_text(json.dumps(redact(report.model_dump(mode="json")), ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     return destination
 
 def read_report(path: str | Path) -> BenchmarkReport:

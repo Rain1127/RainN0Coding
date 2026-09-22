@@ -129,7 +129,7 @@ class MetricAssertion(StrictModel):
 
 class CaseEvaluation(StrictModel):
     case_id: str
-    attempt_index: int = 0
+    attempt_index: int = Field(default=0, ge=0)
     target: Target
     category: str
     passed: bool
@@ -140,6 +140,19 @@ class CaseEvaluation(StrictModel):
     output: dict[str, Any] = Field(default_factory=dict)
     observed_metrics: dict[str, float | None] = Field(default_factory=dict)
     infrastructure_error: str | None = None
+
+    @field_validator("observed_metrics", mode="before")
+    @classmethod
+    def finite_observed_metrics(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            raise ValueError("observed_metrics must be a mapping")
+        normalized: dict[str, float | None] = {}
+        for name, metric in value.items():
+            try:
+                normalized[name] = normalize_metric_value(metric)
+            except ValueError as exc:
+                raise ValueError(f"observed metric {name!r} must be finite numeric or None") from exc
+        return normalized
 
 
 class RunMetadata(StrictModel):

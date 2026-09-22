@@ -1,6 +1,7 @@
 import json
 import pytest
 from pydantic import ValidationError
+import math
 
 from benchmark.contracts import BenchmarkReport, CaseEvaluation, RunMetadata
 from benchmark.evaluators.metrics import describe
@@ -35,6 +36,49 @@ def test_report_group_statistics_reject_strings():
         BenchmarkReport(metadata=RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now"), summary={}, by_target={"supervisor": {"cases": "two"}}, by_category={}, metrics={}, results=[])
 
 
+def test_case_evaluation_metrics_are_finite_numbers_or_none():
+    valid = _evaluation("case-a", 0, True, 10)
+    assert valid.observed_metrics["latency_ms"] == 10.0
+    with pytest.raises(ValidationError):
+        _evaluation("case-a", 0, True, math.nan)
+    with pytest.raises(ValidationError):
+        CaseEvaluation(case_id="a", target="supervisor", category="routing", passed=True, assertions_passed=0, assertions_total=0, observed_metrics={"x": True})
+
+
+def test_build_report_preserves_none_metrics_and_rejects_duplicate_attempts():
+    metadata = RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now")
+    report = build_report(metadata, [_evaluation("a", 0, True, 10)])
+    assert report.results[0].observed_metrics["cost_usd"] is None
+    assert "cost_usd" not in report.metrics
+    with pytest.raises(ValueError, match="duplicate"):
+        build_report(metadata, [_evaluation("a", 0, True, 10), _evaluation("a", 0, True, 11)])
+
+
+def test_write_report_redacts_nested_credentials_but_not_client_id(tmp_path):
+    metadata = RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now")
+    result = _evaluation("a", 0, True, 10).model_copy(update={"output": {"refresh_token": "refresh", "auth_token": "auth", "private_key": "key", "client_id": "keep"}})
+    path = tmp_path / "report.json"
+    write_report(build_report(metadata, [result]), path)
+    text = path.read_text(encoding="utf-8")
+    assert all(f'"{secret}"' not in text for secret in ("refresh", "auth", "key")) and "keep" in text
+
+
+def test_report_is_deep_snapshot_and_canonical_sorted():
+    metadata = RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now")
+    first = _evaluation("b", 1, True, 20)
+    second = _evaluation("a", 0, True, 10)
+    report = build_report(metadata, [first, second])
+    first.output["changed"] = True
+    first.observed_metrics["latency_ms"] = 99
+    assert [item.case_id for item in report.results] == ["a", "b"]
+    assert "changed" not in report.results[1].output and report.results[1].observed_metrics["latency_ms"] == 20.0
+
+
+def test_describe_empty_values_raise_value_error():
+    with pytest.raises(ValueError, match="at least one"):
+        describe([])
+
+
 def test_build_write_read_report_aggregates_cases_and_metrics(tmp_path):
     metadata = RunMetadata(
         run_id="run-1", suite="suite-1", git_sha="abc", dataset_versions=["data-1"],
@@ -50,7 +94,7 @@ def test_build_write_read_report_aggregates_cases_and_metrics(tmp_path):
     write_report(report, path)
     loaded = read_report(path)
     assert loaded.summary["case_pass_rate"] == 0.5
-    assert "cost_usd" not in path.read_text(encoding="utf-8")
+    assert '"cost_usd": null' in path.read_text(encoding="utf-8")
 
 
 def test_report_redacts_secrets_recursively():
