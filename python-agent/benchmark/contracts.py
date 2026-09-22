@@ -14,6 +14,20 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def normalize_metric_value(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("metric must be finite numeric or None")
+    try:
+        normalized = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("metric must be finite numeric or None") from exc
+    if not math.isfinite(normalized):
+        raise ValueError("metric must be finite numeric or None")
+    return normalized
+
+
 class ExecutionSpec(StrictModel):
     mode: ExecutionMode
     record: str | None = None
@@ -97,12 +111,10 @@ class RawRunRecord(StrictModel):
             raise ValueError("observed_metrics must be a mapping")
         normalized: dict[str, float | None] = {}
         for name, metric in value.items():
-            if metric is None:
-                normalized[name] = None
-            elif isinstance(metric, bool) or not isinstance(metric, (int, float)) or not math.isfinite(metric):
-                raise ValueError(f"observed metric {name!r} must be finite numeric or None")
-            else:
-                normalized[name] = float(metric)
+            try:
+                normalized[name] = normalize_metric_value(metric)
+            except ValueError as exc:
+                raise ValueError(f"observed metric {name!r} must be finite numeric or None") from exc
         return normalized
 
 

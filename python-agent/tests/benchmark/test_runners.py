@@ -121,6 +121,16 @@ def test_raw_run_record_accepts_none_and_normalizes_finite_metrics() -> None:
     assert record.observed_metrics == {"latency_ms": 10.0, "optional": None}
 
 
+def test_raw_run_record_rejects_overflowing_metric() -> None:
+    with pytest.raises(ValueError):
+        RawRunRecord(
+            case_id="runner-001",
+            observed_metrics={"latency_ms": 10**1000},
+            started_at="2026-09-22T00:00:00+00:00",
+            duration_ms=1,
+        )
+
+
 @pytest.mark.parametrize(
     "field,value",
     [("case_id", ""), ("attempt_index", -1), ("duration_ms", -1), ("duration_ms", float("nan"))],
@@ -143,6 +153,19 @@ def test_replay_runner_rejects_invalid_metrics(tmp_path: Path, value: object) ->
     record_path.write_text(
         json.dumps({"output": {"phase": "intent_done"}, "metrics": {"latency_ms": value}}, allow_nan=True),
         encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="runner-001: invalid replay metric"):
+        ReplayRunner().run(
+            _loaded_case(target="intent", record_path=record_path),
+            RunContext(run_id="run-1", offline=True),
+        )
+
+
+def test_replay_runner_rejects_overflowing_metric(tmp_path: Path) -> None:
+    record_path = tmp_path / "record.json"
+    record_path.write_text(
+        json.dumps({"output": {}, "metrics": {"latency_ms": 10**1000}}), encoding="utf-8"
     )
 
     with pytest.raises(ValueError, match="runner-001: invalid replay metric"):

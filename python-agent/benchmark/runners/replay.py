@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import math
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
-from benchmark.contracts import LoadedCase, RawRunRecord
+from benchmark.contracts import LoadedCase, RawRunRecord, normalize_metric_value
 
 from .base import RunContext
 
@@ -40,12 +39,10 @@ class ReplayRunner:
 
         observed_metrics: dict[str, float | None] = {}
         for name, value in metrics.items():
-            if value is None:
-                observed_metrics[name] = None
-            elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            try:
+                observed_metrics[name] = normalize_metric_value(value)
+            except ValueError:
                 raise ValueError(f"{case_id}: invalid replay metric {name}")
-            else:
-                observed_metrics[name] = float(value)
         duration_ms = (perf_counter() - started) * 1000
         return [
             RawRunRecord(
