@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -81,7 +80,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--suite", required=True)
     run.add_argument("--output", required=True)
     run.add_argument("--git-sha")
-    run.add_argument("--record-dir")
+    run.add_argument("--record-dir", default="benchmarks/records/runs")
     return parser
 
 
@@ -107,13 +106,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             offline=suite.offline,
             started_at=started_at,
         )
-        results = run_cases(cases, RunContext(run_id=run_id, offline=suite.offline, record_dir=Path(args.record_dir) if args.record_dir else None))
+        results = run_cases(cases, RunContext(run_id=run_id, offline=suite.offline, record_dir=Path(args.record_dir)))
         write_report(build_report(metadata, results), args.output)
         if any(result.infrastructure_error is not None for result in results):
             return 2
         return 0
     except Exception as exc:
-        print(f"benchmark infrastructure error: {exc}", file=sys.stderr)
+        print(f"benchmark infrastructure error: {exc}")
         return 2
 
 

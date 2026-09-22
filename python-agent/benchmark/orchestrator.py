@@ -33,6 +33,27 @@ def _infrastructure_evaluation(case: LoadedCase, record: RawRunRecord) -> CaseEv
     )
 
 
+def _persist_safely(context: RunContext, record: RawRunRecord) -> None:
+    if context.record_dir is None:
+        return
+    try:
+        persist_raw_record(context.record_dir, context.run_id, record)
+    except Exception:
+        # The original persistence exception is already captured in the fallback
+        # record. Never let a second storage failure abort later benchmark cases.
+        pass
+
+
+def _fallback_record(case: LoadedCase, error: Exception) -> RawRunRecord:
+    return RawRunRecord(
+        case_id=case.case.id,
+        attempt_index=0,
+        infrastructure_error=str(error),
+        started_at=datetime.now(timezone.utc).isoformat(),
+        duration_ms=0,
+    )
+
+
 def run_cases(cases: Iterable[LoadedCase], context: RunContext) -> list[CaseEvaluation]:
     evaluations: list[CaseEvaluation] = []
     for loaded in cases:
@@ -43,25 +64,20 @@ def run_cases(cases: Iterable[LoadedCase], context: RunContext) -> list[CaseEval
             if runner is None:
                 raise ValueError(f"{case.id}: no runner for mode {case.execution.mode}")
             records = runner.run(loaded, context)
+            for record in records:
+                if context.record_dir is not None:
+                    persist_raw_record(context.record_dir, context.run_id, record)
+                if record.infrastructure_error is not None:
+                    evaluations.append(_infrastructure_evaluation(loaded, record))
+                    continue
+                evaluations.append(evaluate_assertions(
+                    case,
+                    record.output,
+                    {**record.observed_metrics, "duration_ms": record.duration_ms},
+                    attempt_index=record.attempt_index,
+                ))
         except Exception as exc:
-            records = [RawRunRecord(
-                case_id=case.id,
-                attempt_index=0,
-                infrastructure_error=str(exc),
-                started_at=datetime.now(timezone.utc).isoformat(),
-                duration_ms=0,
-            )]
-
-        for record in records:
-            if context.record_dir is not None:
-                persist_raw_record(context.record_dir, context.run_id, record)
-            if record.infrastructure_error is not None:
-                evaluations.append(_infrastructure_evaluation(loaded, record))
-                continue
-            evaluations.append(evaluate_assertions(
-                case,
-                record.output,
-                {**record.observed_metrics, "duration_ms": record.duration_ms},
-                attempt_index=record.attempt_index,
-            ))
+            fallback = _fallback_record(loaded, exc)
+            _persist_safely(context, fallback)
+            evaluations.append(_infrastructure_evaluation(loaded, fallback))
     return evaluations
