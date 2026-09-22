@@ -81,12 +81,49 @@ def test_migration_rejects_duplicate_ids_and_empty_sources(tmp_path: Path):
         migrate_directory(empty, tmp_path / "empty.yaml", dataset_version="2026.09.1")
 
 
+@pytest.mark.parametrize("version", [None, True, 1.0, 2, "1"])
+def test_migration_requires_literal_source_version_one(tmp_path: Path, version):
+    source = tmp_path / "version.json"
+    payload = {"cases": [_valid_case()]}
+    if version is not None:
+        payload["version"] = version
+    _write_source(source, payload)
+    with pytest.raises(ValueError, match=r"version\.json.*version"):
+        migrate_directory(tmp_path, tmp_path / "out.yaml", dataset_version="2026.09.1")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("id", 1), ("agent", ""), ("category", None), ("input_state", []), ("expectations", []), ("metric_tags", []), ("output_metrics", [])],
+)
+def test_migration_rejects_invalid_source_field_types(tmp_path: Path, field, value):
+    source = tmp_path / "types.json"
+    case = _valid_case()
+    case[field] = value
+    _write_source(source, {"version": 1, "cases": [case]})
+    with pytest.raises(ValueError, match=r"types\.json.*case index 0"):
+        migrate_directory(tmp_path, tmp_path / "out.yaml", dataset_version="2026.09.1")
+
+
+def test_migration_rejects_unsupported_target_and_non_directory_source(tmp_path: Path):
+    source = tmp_path / "target.json"
+    case = _valid_case()
+    case["agent"] = "unknown"
+    _write_source(source, {"version": 1, "cases": [case]})
+    with pytest.raises(ValueError, match=r"target\.json.*unsupported agent"):
+        migrate_directory(tmp_path, tmp_path / "out.yaml", dataset_version="2026.09.1")
+    with pytest.raises(ValueError, match="source directory"):
+        migrate_directory(source, tmp_path / "out.yaml", dataset_version="2026.09.1")
+
+
 def test_migration_is_deterministic_across_repeated_outputs(tmp_path: Path):
     source = Path(__file__).parents[2] / "agent_eval" / "golden" / "dev"
-    first, second = tmp_path / "first.yaml", tmp_path / "second.yaml"
-    migrate_directory(source, first, dataset_version="2026.09.1")
-    migrate_directory(source, second, dataset_version="2026.09.1")
-    assert first.read_bytes() == second.read_bytes()
+    destination = tmp_path / "same.yaml"
+    first_count = migrate_directory(source, destination, dataset_version="2026.09.1")
+    first_bytes = destination.read_bytes()
+    second_count = migrate_directory(source, destination, dataset_version="2026.09.1")
+    assert first_count == second_count == 6
+    assert destination.read_bytes() == first_bytes
 
 
 def test_committed_regression_dataset_loads_with_benchmark_asset_boundary():

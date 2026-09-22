@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+SUPPORTED_SOURCE_AGENTS = {"intent", "reviewer", "supervisor"}
+
 
 def _source_error(source_file: Path, message: str, *, index: int | None = None, case_id: str | None = None) -> ValueError:
     context = f"; case index {index}" if index is not None else ""
@@ -24,6 +26,8 @@ def migrate_directory(
 ) -> int:
     """Convert every case in sorted JSON files under *source_directory*."""
     source = Path(source_directory)
+    if not source.is_dir():
+        raise ValueError(f"source directory must be an existing directory: {source}")
     destination_path = Path(destination)
     migrated: list[dict[str, Any]] = []
     seen_ids: dict[str, Path] = {}
@@ -35,8 +39,8 @@ def migrate_directory(
             raise _source_error(source_file, f"could not read JSON: {exc}") from exc
         if not isinstance(document, dict):
             raise _source_error(source_file, "top-level JSON must be an object")
-        if "version" in document and document["version"] != 1:
-            raise _source_error(source_file, f"unsupported source version: {document['version']!r}")
+        if type(document.get("version")) is not int or document["version"] != 1:
+            raise _source_error(source_file, f"unsupported source version: {document.get('version')!r}")
         cases = document.get("cases")
         if not isinstance(cases, list):
             raise _source_error(source_file, "cases must be a list")
@@ -45,7 +49,7 @@ def migrate_directory(
                 raise _source_error(source_file, "case must be an object", index=index)
             case_id = old_case.get("id")
             case_id_text = case_id if isinstance(case_id, str) else None
-            required = ("id", "agent", "category", "input_state")
+            required = ("id", "agent", "category", "input_state", "expectations")
             missing = [field for field in required if field not in old_case]
             if missing:
                 raise _source_error(
@@ -56,6 +60,17 @@ def migrate_directory(
                 )
             if not isinstance(case_id, str) or not case_id.strip():
                 raise _source_error(source_file, "id must be a nonblank string", index=index)
+            for field in ("agent", "category"):
+                if not isinstance(old_case[field], str) or not old_case[field].strip():
+                    raise _source_error(source_file, f"{field} must be a nonblank string", index=index, case_id=case_id)
+            if old_case["agent"] not in SUPPORTED_SOURCE_AGENTS:
+                raise _source_error(source_file, f"unsupported agent target: {old_case['agent']!r}", index=index, case_id=case_id)
+            for field in ("input_state", "expectations"):
+                if not isinstance(old_case[field], dict):
+                    raise _source_error(source_file, f"{field} must be a mapping", index=index, case_id=case_id)
+            for field in ("metric_tags", "output_metrics"):
+                if field in old_case and not isinstance(old_case[field], dict):
+                    raise _source_error(source_file, f"{field} must be a mapping", index=index, case_id=case_id)
             if case_id in seen_ids:
                 raise _source_error(
                     source_file,
