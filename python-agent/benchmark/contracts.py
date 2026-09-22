@@ -140,3 +140,26 @@ class CaseEvaluation(StrictModel):
     output: dict[str, Any] = Field(default_factory=dict)
     observed_metrics: dict[str, float | None] = Field(default_factory=dict)
     infrastructure_error: str | None = None
+
+
+class RunMetadata(StrictModel):
+    report_schema_version: int = 1
+    run_id: str
+    suite_version: str
+    git_sha: str
+    dataset_version: str
+    dataset_fingerprint: str
+    prompt_fingerprint: str
+    model_aliases: dict[str, str] = Field(default_factory=dict)
+    offline: bool
+    started_at: str
+
+
+class BenchmarkReport(StrictModel):
+    metadata: RunMetadata
+    summary: dict[str, int | float | str | bool] = Field(default_factory=dict)
+    by_target: dict[str, dict[str, int | float | str | bool]] = Field(default_factory=dict)
+    by_category: dict[str, dict[str, int | float | str | bool]] = Field(default_factory=dict)
+    metrics: dict[str, dict[str, int | float | str | bool]] = Field(default_factory=dict)
+    gate: dict[str, Any] = Field(default_factory=dict)
+    results: list[CaseEvaluation] = Field(default_factory=list)
