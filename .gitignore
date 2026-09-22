@@ -74,3 +74,6 @@ build/
 
 # Isolated queue regression artifacts
 python-agent/.test-tmp-*/
+python-agent/benchmarks/records/runs/
+python-agent/benchmarks/reports/
+python-agent/.test-tmp-benchmark/

@@ -1,0 +1,11 @@
+schema_version: 1
+hard_fail_metrics:
+  - route_accuracy
+  - retry_route_accuracy
+  - architecture_escalation_accuracy
+  - retry_limit_enforcement
+  - critical_defect_recall
+  - safety_compliance
+  - build_failed
+absolute_thresholds: {}
+regression_thresholds: {}

@@ -1,0 +1,179 @@
+schema_version: 1
+dataset_version: 2026.09.1
+cases:
+- id: intent-fallback-vue
+  target: intent
+  category: fallback
+  difficulty: medium
+  tags:
+  - pr
+  - migrated
+  execution:
+    mode: replay
+    record: ../../records/intent-fallback-vue.json
+  input:
+    phase: init
+    user_request: Build a task management dashboard
+    code_gen_type: vue_project
+  expectations:
+    equals:
+      phase: intent_done
+      error: null
+    required_paths:
+    - intent.primary_intent
+    - intent.slots.code_gen_type
+    - clarification
+  metric_tags:
+    equals.phase: intent_state_transition
+    equals.error: intent_failure_handling
+    required_paths: intent_output_protocol_completeness
+  output_metrics: {}
+  provenance:
+    source: curated
+    reviewed: true
+    sanitized: true
+- id: reviewer-detects-xss
+  target: reviewer
+  category: security
+  difficulty: medium
+  tags:
+  - pr
+  - migrated
+  execution:
+    mode: replay
+    record: ../../records/reviewer-detects-xss.json
+  input:
+    phase: code_done
+    code_files:
+    - path: src/App.vue
+      content: <div v-html="userInput"></div>
+  expectations:
+    equals:
+      passed: false
+    required_paths:
+    - score
+    - issues
+    required_text:
+      issues:
+      - xss
+      - v-html
+      - unescaped user input
+  metric_tags:
+    equals.passed: critical_defect_detection
+    required_paths: review_output_protocol_completeness
+    required_text.issues: critical_defect_recall
+  output_metrics:
+    score: review_score
+  provenance:
+    source: curated
+    reviewed: true
+    sanitized: true
+- id: supervisor-review-passed
+  target: supervisor
+  category: routing
+  difficulty: medium
+  tags:
+  - pr
+  - migrated
+  execution:
+    mode: deterministic
+  input:
+    phase: review_done
+    review:
+      passed: true
+    retry_count: 0
+    max_retries: 3
+  expectations:
+    equals:
+      next_node: builder_agent
+  metric_tags:
+    equals.next_node: route_accuracy
+  output_metrics: {}
+  provenance:
+    source: curated
+    reviewed: true
+    sanitized: true
+- id: supervisor-code-retry
+  target: supervisor
+  category: retry
+  difficulty: medium
+  tags:
+  - pr
+  - migrated
+  execution:
+    mode: deterministic
+  input:
+    phase: review_done
+    review:
+      passed: false
+      issues:
+      - category: security
+        description: escape user text
+    retry_count: 1
+    max_retries: 3
+  expectations:
+    equals:
+      next_node: coder_agent
+  metric_tags:
+    equals.next_node: retry_route_accuracy
+  output_metrics: {}
+  provenance:
+    source: curated
+    reviewed: true
+    sanitized: true
+- id: supervisor-architecture-discussion
+  target: supervisor
+  category: routing
+  difficulty: medium
+  tags:
+  - pr
+  - migrated
+  execution:
+    mode: deterministic
+  input:
+    phase: review_done
+    review:
+      passed: false
+      issues:
+      - category: architecture
+        description: component boundary is invalid
+    retry_count: 0
+    max_retries: 3
+  expectations:
+    equals:
+      next_node: autogen_discussion
+  metric_tags:
+    equals.next_node: architecture_escalation_accuracy
+  output_metrics: {}
+  provenance:
+    source: curated
+    reviewed: true
+    sanitized: true
+- id: supervisor-retry-exhausted
+  target: supervisor
+  category: recovery
+  difficulty: medium
+  tags:
+  - pr
+  - migrated
+  execution:
+    mode: deterministic
+  input:
+    phase: review_done
+    review:
+      passed: false
+      issues:
+      - category: security
+        description: xss
+    retry_count: 3
+    max_retries: 3
+  expectations:
+    equals:
+      next_node: human_intervention
+  metric_tags:
+    equals.next_node: retry_limit_enforcement
+  output_metrics: {}
+  provenance:
+    source: curated
+    reviewed: true
+    sanitized: true

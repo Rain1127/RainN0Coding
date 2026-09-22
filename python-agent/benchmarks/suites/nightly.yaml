@@ -1,0 +1,16 @@
+schema_version: 1
+name: nightly
+dataset_roots:
+  - ../datasets/regression
+  - ../datasets/nightly
+  - ../datasets/adversarial
+allowed_modes:
+  - deterministic
+  - replay
+  - live
+  - rag
+  - e2e
+offline: false
+fail_on_infrastructure_error: true
+policy: ../policies/default.yaml
+baseline_dir: ../baselines

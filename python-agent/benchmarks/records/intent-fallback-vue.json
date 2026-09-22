@@ -1,0 +1,16 @@
+{
+  "output": {
+    "phase": "intent_done",
+    "error": null,
+    "intent": {
+      "primary_intent": "code generation",
+      "slots": {
+        "code_gen_type": "vue_project"
+      }
+    },
+    "clarification": {
+      "questions": []
+    }
+  },
+  "metrics": {}
+}

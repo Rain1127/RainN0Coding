@@ -1,0 +1,12 @@
+{
+  "output": {
+    "passed": false,
+    "score": 40,
+    "issues": [
+      {
+        "description": "XSS caused by v-html"
+      }
+    ]
+  },
+  "metrics": {}
+}
