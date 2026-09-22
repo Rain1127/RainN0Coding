@@ -13,6 +13,8 @@ from .base import RunContext
 class DeterministicRunner:
     def run(self, case: LoadedCase, context: RunContext) -> list[RawRunRecord]:
         context.assert_mode_allowed(case.case.execution.mode)
+        if case.case.execution.mode != "deterministic":
+            raise ValueError(f"{case.case.id}: deterministic runner requires deterministic mode")
         if case.case.target != "supervisor":
             raise ValueError(f"no deterministic adapter for {case.case.target}")
         started_at = datetime.now(timezone.utc).isoformat()

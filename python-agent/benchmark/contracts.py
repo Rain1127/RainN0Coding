@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Literal
 
@@ -66,12 +67,43 @@ class LoadedCase(StrictModel):
 
 class RawRunRecord(StrictModel):
     case_id: str
-    attempt_index: int = 0
+    attempt_index: int = Field(default=0, ge=0)
     output: dict[str, Any] = Field(default_factory=dict)
     observed_metrics: dict[str, float | None] = Field(default_factory=dict)
     infrastructure_error: str | None = None
     started_at: str
     duration_ms: float
+
+    @field_validator("case_id")
+    @classmethod
+    def nonblank_case_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("case_id must not be blank")
+        return value
+
+    @field_validator("duration_ms", mode="before")
+    @classmethod
+    def finite_duration(cls, value: object) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError("duration_ms must be finite")
+        if value < 0:
+            raise ValueError("duration_ms must be non-negative")
+        return float(value)
+
+    @field_validator("observed_metrics", mode="before")
+    @classmethod
+    def finite_metrics(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            raise ValueError("observed_metrics must be a mapping")
+        normalized: dict[str, float | None] = {}
+        for name, metric in value.items():
+            if metric is None:
+                normalized[name] = None
+            elif isinstance(metric, bool) or not isinstance(metric, (int, float)) or not math.isfinite(metric):
+                raise ValueError(f"observed metric {name!r} must be finite numeric or None")
+            else:
+                normalized[name] = float(metric)
+        return normalized
 
 
 class MetricAssertion(StrictModel):
