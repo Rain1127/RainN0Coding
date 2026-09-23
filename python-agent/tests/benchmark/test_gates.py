@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 
+import benchmark.baseline as baseline_module
 from benchmark.baseline import compatibility_key, promote
-from benchmark.contracts import BenchmarkReport, RunMetadata
+from benchmark.contracts import BenchmarkReport, CaseEvaluation, MetricAssertion, RunMetadata
 from benchmark.gates import evaluate_gate
 from benchmark.reporting.json_report import build_report
 
@@ -41,3 +42,53 @@ def test_promote_refuses_overwrite_for_same_compatibility_key(tmp_path: Path) ->
 
     with pytest.raises(FileExistsError):
         promote(report, tmp_path)
+
+
+def test_absolute_thresholds_accept_canonical_minimum_and_maximum() -> None:
+    result = evaluate_gate(
+        _report(rate=0.8, latency=12), None,
+        {"absolute_thresholds": {"latency.mean": {"maximum": 11}, "case_pass_rate": {"minimum": 0.9}}},
+    )
+
+    assert [(failure["metric"], failure["rule"]) for failure in result["failures"]] == [
+        ("case_pass_rate", "minimum"), ("latency.mean", "maximum"),
+    ]
+
+
+def test_absolute_thresholds_reject_conflicting_alias_and_canonical_value() -> None:
+    with pytest.raises(ValueError, match="conflicting"):
+        evaluate_gate(_report(), None, {"absolute_thresholds": {"case_pass_rate": {"min": 0.9, "minimum": 0.8}}})
+
+
+def test_hard_fail_metrics_reject_duplicates() -> None:
+    with pytest.raises(ValueError, match="duplicate"):
+        evaluate_gate(_report(), None, {"hard_fail_metrics": ["route_accuracy", "route_accuracy"]})
+
+
+def test_gate_output_is_canonical_across_policy_and_result_insertion_order() -> None:
+    failed_a = CaseEvaluation(case_id="z", target="supervisor", category="routing", passed=False, assertions_passed=0, assertions_total=1, assertions=[MetricAssertion(metric="z_metric", passed=False, rule="equals", path="z")])
+    failed_b = CaseEvaluation(case_id="a", target="supervisor", category="routing", passed=False, assertions_passed=0, assertions_total=1, assertions=[MetricAssertion(metric="a_metric", passed=False, rule="equals", path="a")])
+    candidate_a = _report(rate=0.8, latency=12).model_copy(update={"results": [failed_a, failed_b]})
+    candidate_b = _report(rate=0.8, latency=12).model_copy(update={"results": [failed_b, failed_a]})
+    policy_a = {"hard_fail_metrics": ["z_metric", "a_metric"], "absolute_thresholds": {"latency.mean": {"maximum": 11}, "case_pass_rate": {"minimum": 0.9}}, "regression_thresholds": {"latency.mean": {"max_increase_ratio": 0.1}, "case_pass_rate": {"max_drop": 0.1}}}
+    policy_b = {"regression_thresholds": {"case_pass_rate": {"max_drop": 0.1}, "latency.mean": {"max_increase_ratio": 0.1}}, "absolute_thresholds": {"case_pass_rate": {"minimum": 0.9}, "latency.mean": {"maximum": 11}}, "hard_fail_metrics": ["a_metric", "z_metric"]}
+
+    assert evaluate_gate(candidate_a, _report(rate=1.0, latency=10), policy_a) == evaluate_gate(candidate_b, _report(rate=1.0, latency=10), policy_b)
+
+
+@pytest.mark.parametrize("baseline_latency", [0, -1])
+def test_increase_ratio_rejects_nonpositive_baseline(baseline_latency: float) -> None:
+    with pytest.raises(ValueError, match="non-positive baseline"):
+        evaluate_gate(_report(latency=1), _report(latency=baseline_latency), {"regression_thresholds": {"latency.mean": {"max_increase_ratio": 0.1}}})
+
+
+def test_promote_publish_failure_leaves_no_final_or_temp_file(monkeypatch, tmp_path: Path) -> None:
+    def fail_publish(temporary: Path, destination: Path) -> None:
+        raise OSError("publish failed")
+
+    monkeypatch.setattr(baseline_module, "_publish", fail_publish, raising=False)
+    with pytest.raises(OSError, match="publish failed"):
+        promote(_report(), tmp_path)
+
+    assert not list(tmp_path.rglob("baseline.json"))
+    assert not list(tmp_path.rglob("*.tmp"))

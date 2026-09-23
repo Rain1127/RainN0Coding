@@ -272,6 +272,20 @@ def test_compare_returns_zero_and_records_passing_gate(tmp_path: Path) -> None:
     assert json.loads(candidate_path.read_text(encoding="utf-8"))["gate"]["passed"] is True
 
 
+def test_compare_keeps_unrelated_fixed_tmp_file(tmp_path: Path) -> None:
+    candidate = build_report(RunMetadata(run_id="candidate", suite="s", git_sha="new", dataset_versions=["v"], dataset_fingerprint="d", prompt_fingerprint="p", model_aliases={}, offline=True, started_at="now"), [])
+    baseline = candidate.model_copy(update={"metadata": candidate.metadata.model_copy(update={"run_id": "baseline", "git_sha": "old"})})
+    candidate_path, baseline_path, policy_path = tmp_path / "candidate.json", tmp_path / "baseline.json", tmp_path / "policy.yaml"
+    write_report(candidate, candidate_path)
+    write_report(baseline, baseline_path)
+    policy_path.write_text("absolute_thresholds: {}\nregression_thresholds: {}\n", encoding="utf-8")
+    unrelated = candidate_path.with_name(candidate_path.name + ".tmp")
+    unrelated.write_text("keep", encoding="utf-8")
+
+    assert main(["compare", "--candidate", str(candidate_path), "--baseline", str(baseline_path), "--policy", str(policy_path)]) == 0
+    assert unrelated.read_text(encoding="utf-8") == "keep"
+
+
 def test_compare_returns_one_for_regression_and_two_for_incompatible(tmp_path: Path) -> None:
     candidate = build_report(RunMetadata(run_id="candidate", suite="s", git_sha="new", dataset_versions=["v"], dataset_fingerprint="d", prompt_fingerprint="p", model_aliases={}, offline=True, started_at="now"), [])
     baseline = candidate.model_copy(update={"metadata": candidate.metadata.model_copy(update={"run_id": "baseline", "git_sha": "old"})})

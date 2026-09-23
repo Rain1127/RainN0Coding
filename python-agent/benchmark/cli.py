@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -120,7 +121,10 @@ def _load_policy(path: str | Path) -> dict:
 
 def _write_report_atomic(report: BenchmarkReport, path: str | Path) -> Path:
     destination = Path(path)
-    temporary = destination.with_name(destination.name + ".tmp")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
+    os.close(descriptor)
+    temporary = Path(temporary_name)
     try:
         write_report(report, temporary)
         os.replace(temporary, destination)
