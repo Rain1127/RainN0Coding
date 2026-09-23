@@ -75,17 +75,19 @@ def run_cases(cases: Iterable[LoadedCase], context: RunContext) -> list[CaseEval
             _validate_records(loaded, records)
             for record in records:
                 try:
-                    if context.record_dir is not None:
-                        persist_raw_record(context.record_dir, context.run_id, record)
                     if record.infrastructure_error is not None:
+                        _persist_safely(context, record)
                         evaluations.append(_infrastructure_evaluation(loaded, record))
                         continue
-                    evaluations.append(evaluate_assertions(
+                    evaluation = evaluate_assertions(
                         case,
                         record.output,
                         {**record.observed_metrics, "duration_ms": record.duration_ms},
                         attempt_index=record.attempt_index,
-                    ))
+                    )
+                    if context.record_dir is not None:
+                        persist_raw_record(context.record_dir, context.run_id, record)
+                    evaluations.append(evaluation)
                 except Exception as exc:
                     fallback = _fallback_record(loaded, exc).model_copy(update={"attempt_index": record.attempt_index})
                     _persist_safely(context, fallback)

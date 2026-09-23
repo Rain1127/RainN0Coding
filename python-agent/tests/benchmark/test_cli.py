@@ -91,7 +91,7 @@ def test_run_cases_isolates_persist_and_evaluation_failures(monkeypatch, tmp_pat
 
     assert [result.case_id for result in results] == ["first", "second"]
     assert all(result.infrastructure_error for result in results)
-    assert persisted == ["first", "first", "second", "second"]
+    assert persisted == ["first", "first", "second"]
     assert len(list((tmp_path / "run").glob("*.json"))) == 2
 
 
@@ -217,6 +217,37 @@ def test_orchestrator_keeps_later_attempts_after_partial_record_failure(monkeypa
     assert [result.attempt_index for result in results] == [0, 1, 2]
     assert results[1].infrastructure_error == "password=***REDACTED***"
     assert build_report(RunMetadata(run_id="r", suite="s", git_sha="g", dataset_versions=[], dataset_fingerprint="d", prompt_fingerprint="p", model_aliases={}, offline=True, started_at="now"), results).summary["observations"] == 3
+
+
+def test_evaluation_failure_persists_only_redacted_fallback_record(monkeypatch, tmp_path: Path) -> None:
+    import benchmark.orchestrator as orchestrator
+
+    class TwoAttemptRunner:
+        def run(self, case: LoadedCase, context: RunContext) -> list[RawRunRecord]:
+            return [
+                RawRunRecord(case_id=case.case.id, attempt_index=index, output={"secret": "hunter2"}, started_at="2026-01-01T00:00:00+00:00", duration_ms=0)
+                for index in range(2)
+            ]
+
+    original_evaluate = orchestrator.evaluate_assertions
+
+    def failing_evaluate(*args, **kwargs):
+        if kwargs["attempt_index"] == 0:
+            raise RuntimeError("password=hunter2")
+        return original_evaluate(*args, **kwargs)
+
+    monkeypatch.setitem(RUNNERS, "deterministic", TwoAttemptRunner())
+    monkeypatch.setattr(orchestrator, "evaluate_assertions", failing_evaluate)
+
+    results = run_cases([_loaded("evaluation-failure", repeats=2)], RunContext("run", True, tmp_path))
+
+    records = sorted(tmp_path.joinpath("run").glob("*.json"))
+    assert len(records) == 2
+    first = json.loads(records[0].read_text(encoding="utf-8"))
+    assert first["attempt_index"] == 0
+    assert first["infrastructure_error"] == "password=***REDACTED***"
+    assert "secret" not in first["output"]
+    assert [result.attempt_index for result in results] == [0, 1]
 
 
 def test_error_redaction_hides_key_value_colon_and_basic_credentials() -> None:
