@@ -292,3 +292,51 @@ def test_baseline_promote_returns_two_on_overwrite(tmp_path: Path) -> None:
     arguments = ["baseline", "promote", "--report", str(report_path), "--baseline-dir", str(tmp_path / "baselines")]
     assert main(arguments) == 0
     assert main(arguments) == 2
+
+
+def _write_run_assets(tmp_path: Path, *, target: str, expected_node: str, policy: str) -> tuple[Path, Path]:
+    suite = tmp_path / "suite.yaml"
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    suite.write_text(
+        "schema_version: 1\nname: temporary\ndataset_roots: [dataset]\nallowed_modes: [deterministic]\n"
+        "offline: true\nfail_on_infrastructure_error: true\npolicy: policy.yaml\nbaseline_dir: baselines\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "policy.yaml").write_text(policy, encoding="utf-8")
+    (dataset / "case.yaml").write_text(
+        "schema_version: 1\ndataset_version: test\ncases:\n"
+        "- id: temporary-case\n  target: " + target + "\n  category: routing\n"
+        "  execution: {mode: deterministic}\n"
+        "  input: {phase: review_done, review: {passed: true}, retry_count: 0, max_retries: 3}\n"
+        "  expectations:\n    equals: {next_node: " + expected_node + "}\n"
+        "  metric_tags: {equals.next_node: route_accuracy}\n"
+        "  provenance: {source: synthetic, reviewed: true, sanitized: true}\n",
+        encoding="utf-8",
+    )
+    return suite, tmp_path / "report.json"
+
+
+def test_run_returns_one_and_writes_gate_for_hard_assertion_failure(tmp_path: Path) -> None:
+    suite, output = _write_run_assets(
+        tmp_path, target="supervisor", expected_node="coder_agent",
+        policy="hard_fail_metrics: [route_accuracy]\nabsolute_thresholds: {}\nregression_thresholds: {}\n",
+    )
+
+    assert main(["run", "--suite", str(suite), "--output", str(output), "--git-sha", "test-sha", "--record-dir", str(tmp_path / "records")]) == 1
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["gate"]["passed"] is False
+    assert report["results"][0]["infrastructure_error"] is None
+
+
+def test_run_returns_two_and_writes_report_for_runner_infrastructure_failure(tmp_path: Path) -> None:
+    suite, output = _write_run_assets(
+        tmp_path, target="intent", expected_node="builder_agent",
+        policy="hard_fail_metrics: []\nabsolute_thresholds: {}\nregression_thresholds: {}\n",
+    )
+
+    assert main(["run", "--suite", str(suite), "--output", str(output), "--git-sha", "test-sha", "--record-dir", str(tmp_path / "records")]) == 2
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["results"][0]["infrastructure_error"] == "no deterministic adapter for intent"
