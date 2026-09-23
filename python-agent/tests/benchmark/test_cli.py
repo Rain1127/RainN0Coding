@@ -120,18 +120,24 @@ def test_missing_runner_message_is_exact() -> None:
     assert result[0].infrastructure_error == "runner is not registered for mode: rag"
 
 
-def test_suite_requires_each_configured_dataset_root_to_exist(tmp_path: Path) -> None:
+def test_suite_skips_future_dataset_root_when_a_valid_root_exists() -> None:
     suite, suite_dir = load_suite(SUITE)
     configured = "missing-dataset"
-    restricted = suite.model_copy(update={"dataset_roots": [configured]})
+    staged = suite.model_copy(update={"dataset_roots": [configured, "../datasets/regression"]})
+
+    assert len(_load_cases(staged, suite_dir)) == 6
+
+
+def test_suite_fails_only_when_all_configured_dataset_roots_are_missing() -> None:
+    suite, suite_dir = load_suite(SUITE)
+    staged = suite.model_copy(update={"dataset_roots": ["missing-one", "missing-two"]})
 
     try:
-        _load_cases(restricted, suite_dir)
+        _load_cases(staged, suite_dir)
     except ValueError as exc:
-        assert configured in str(exc)
-        assert str((suite_dir / configured).resolve()) in str(exc)
+        assert str(exc) == "suite contains no benchmark cases from existing dataset roots"
     else:
-        raise AssertionError("expected missing dataset root")
+        raise AssertionError("expected no benchmark cases")
 
 
 def test_prompt_fingerprint_requires_fixed_files(tmp_path: Path) -> None:

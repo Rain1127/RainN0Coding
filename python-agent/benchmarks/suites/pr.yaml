@@ -2,6 +2,7 @@ schema_version: 1
 name: pr
 dataset_roots:
   - ../datasets/regression
+  - ../datasets/adversarial
 allowed_modes:
   - deterministic
   - replay
