@@ -9,6 +9,7 @@ from benchmark.contracts import BenchmarkCase, LoadedCase, RawRunRecord, RunMeta
 from benchmark.orchestrator import RUNNERS, run_cases
 from benchmark.redaction import redact_error
 from benchmark.reporting.json_report import build_report
+from benchmark.reporting.json_report import write_report
 from benchmark.runners.base import RunContext
 
 
@@ -257,3 +258,37 @@ def test_error_redaction_hides_key_value_colon_and_basic_credentials() -> None:
     assert "abc123" not in redacted
     assert "topsecret" not in redacted
     assert redacted.count("***REDACTED***") >= 3
+
+
+def test_compare_returns_zero_and_records_passing_gate(tmp_path: Path) -> None:
+    candidate = build_report(RunMetadata(run_id="candidate", suite="s", git_sha="new", dataset_versions=["v"], dataset_fingerprint="d", prompt_fingerprint="p", model_aliases={}, offline=True, started_at="now"), [])
+    baseline = candidate.model_copy(update={"metadata": candidate.metadata.model_copy(update={"run_id": "baseline", "git_sha": "old"})})
+    candidate_path, baseline_path, policy_path = tmp_path / "candidate.json", tmp_path / "baseline.json", tmp_path / "policy.yaml"
+    write_report(candidate, candidate_path)
+    write_report(baseline, baseline_path)
+    policy_path.write_text("absolute_thresholds: {}\nregression_thresholds: {}\n", encoding="utf-8")
+
+    assert main(["compare", "--candidate", str(candidate_path), "--baseline", str(baseline_path), "--policy", str(policy_path)]) == 0
+    assert json.loads(candidate_path.read_text(encoding="utf-8"))["gate"]["passed"] is True
+
+
+def test_compare_returns_one_for_regression_and_two_for_incompatible(tmp_path: Path) -> None:
+    candidate = build_report(RunMetadata(run_id="candidate", suite="s", git_sha="new", dataset_versions=["v"], dataset_fingerprint="d", prompt_fingerprint="p", model_aliases={}, offline=True, started_at="now"), [])
+    baseline = candidate.model_copy(update={"metadata": candidate.metadata.model_copy(update={"run_id": "baseline", "git_sha": "old"})})
+    candidate_path, baseline_path, policy_path = tmp_path / "candidate.json", tmp_path / "baseline.json", tmp_path / "policy.yaml"
+    write_report(candidate, candidate_path)
+    write_report(baseline, baseline_path)
+    policy_path.write_text("absolute_thresholds:\n  case_pass_rate:\n    min: 1.1\nregression_thresholds: {}\n", encoding="utf-8")
+    assert main(["compare", "--candidate", str(candidate_path), "--baseline", str(baseline_path), "--policy", str(policy_path)]) == 1
+    incompatible = baseline.model_copy(update={"metadata": baseline.metadata.model_copy(update={"suite": "other"})})
+    write_report(incompatible, baseline_path)
+    assert main(["compare", "--candidate", str(candidate_path), "--baseline", str(baseline_path), "--policy", str(policy_path)]) == 2
+
+
+def test_baseline_promote_returns_two_on_overwrite(tmp_path: Path) -> None:
+    report = build_report(RunMetadata(run_id="candidate", suite="s", git_sha="new", dataset_versions=["v"], dataset_fingerprint="d", prompt_fingerprint="p", model_aliases={}, offline=True, started_at="now"), [])
+    report_path = tmp_path / "report.json"
+    write_report(report, report_path)
+    arguments = ["baseline", "promote", "--report", str(report_path), "--baseline-dir", str(tmp_path / "baselines")]
+    assert main(arguments) == 0
+    assert main(arguments) == 2

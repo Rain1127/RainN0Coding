@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,13 +11,16 @@ from typing import Sequence
 from uuid import uuid4
 
 from benchmark.config import SuiteConfig, load_suite
-from benchmark.contracts import LoadedCase, RunMetadata
+from benchmark.contracts import BenchmarkReport, LoadedCase, RunMetadata
 from benchmark.dataset import load_cases
+from benchmark.baseline import compatibility_key, load_compatible, promote
+from benchmark.gates import evaluate_gate
 from benchmark.orchestrator import run_cases
 from benchmark.redaction import redact_error
-from benchmark.reporting.json_report import build_report, write_report
+from benchmark.reporting.json_report import build_report, read_report, write_report
 from benchmark.runners.base import RunContext
 from config import config
+import yaml
 
 
 def _canonical_json(value: object) -> bytes:
@@ -85,12 +89,63 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--output", required=True)
     run.add_argument("--git-sha")
     run.add_argument("--record-dir", default="benchmarks/records/runs")
+    compare = commands.add_parser("compare")
+    compare.add_argument("--candidate", required=True)
+    compare.add_argument("--baseline", required=True)
+    compare.add_argument("--policy", required=True)
+    baseline = commands.add_parser("baseline")
+    baseline_commands = baseline.add_subparsers(dest="baseline_command", required=True)
+    promote_command = baseline_commands.add_parser("promote")
+    promote_command.add_argument("--report", required=True)
+    promote_command.add_argument("--baseline-dir", required=True)
     return parser
+
+
+def _read_report(path: str | Path) -> BenchmarkReport:
+    try:
+        return read_report(path)
+    except Exception as exc:
+        raise ValueError(f"invalid benchmark report {path}: {exc}") from exc
+
+
+def _load_policy(path: str | Path) -> dict:
+    try:
+        policy = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"invalid benchmark policy {path}: {exc}") from exc
+    if not isinstance(policy, dict):
+        raise ValueError("benchmark policy must contain a top-level object")
+    return policy
+
+
+def _write_report_atomic(report: BenchmarkReport, path: str | Path) -> Path:
+    destination = Path(path)
+    temporary = destination.with_name(destination.name + ".tmp")
+    try:
+        write_report(report, temporary)
+        os.replace(temporary, destination)
+    except Exception:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+    return destination
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "compare":
+            candidate = _read_report(args.candidate)
+            baseline = _read_report(args.baseline)
+            if compatibility_key(candidate) != compatibility_key(baseline):
+                raise ValueError("candidate and baseline compatibility keys do not match")
+            gate = evaluate_gate(candidate, baseline, _load_policy(args.policy))
+            _write_report_atomic(candidate.model_copy(update={"gate": gate}), args.candidate)
+            return 0 if gate["passed"] else 1
+        if args.command == "baseline":
+            target = promote(_read_report(args.report), args.baseline_dir)
+            print(target)
+            return 0
         suite, suite_dir = load_suite(args.suite)
         cases = _load_cases(suite, suite_dir)
         if args.command == "validate":
@@ -111,10 +166,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             started_at=started_at,
         )
         results = run_cases(cases, RunContext(run_id=run_id, offline=suite.offline, record_dir=Path(args.record_dir)))
-        write_report(build_report(metadata, results), args.output)
+        report = build_report(metadata, results)
+        policy = _load_policy((suite_dir / suite.policy).resolve())
+        baseline = load_compatible(report, (suite_dir / suite.baseline_dir).resolve())
+        gate = evaluate_gate(report, baseline, policy)
+        write_report(report.model_copy(update={"gate": gate}), args.output)
         if any(result.infrastructure_error is not None for result in results):
             return 2
-        return 0
+        return 0 if gate["passed"] else 1
     except Exception as exc:
         print(f"benchmark infrastructure error: {redact_error(exc)}")
         return 2
