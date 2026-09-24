@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
@@ -14,6 +15,9 @@ from .base import RunContext
 
 RetrieveCallable = Callable[[dict[str, Any]], list[dict[str, Any]]]
 _DOCUMENT_ID_FIELDS = ("api_name", "component_name", "pattern_name", "error_signature", "file_path")
+_REVIEWED_CONTEXT_COLLECTIONS = frozenset({
+    "framework_api", "component_library", "design_pattern", "error_pattern",
+})
 
 
 def retrieve_with_engine(input_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -59,7 +63,8 @@ class RagRunner:
         if case.case.target != "rag":
             raise ValueError(f"{case_id}: rag runner requires rag target")
 
-        input_data = dict(case.case.input)
+        input_data = case.case.input
+        explicit_k = input_data.get("k", None)
         if input_data.get("ragas") and context.offline:
             raise ValueError(f"{case_id}: RAGAS is not allowed in an offline suite")
         relevant_document_ids = case.case.expectations.relevant_document_ids
@@ -72,13 +77,20 @@ class RagRunner:
         for attempt_index in range(case.case.execution.repeats):
             started_at = datetime.now(timezone.utc).isoformat()
             started = perf_counter()
-            results = self._replay_results(case) if case.record_path is not None else self._retrieve(input_data)
+            attempt_input = deepcopy(input_data)
+            results = self._replay_results(case) if case.record_path is not None else self._retrieve(attempt_input)
             document_ids, contexts = self._document_ids_and_contexts(case_id, results)
-            k = input_data.get("k") or len(document_ids) or 1
+            k = len(document_ids) or 1 if explicit_k is None else explicit_k
             observed_metrics = retrieval_metrics(document_ids, relevant_document_ids, k)
             retrieval_latency_ms = (perf_counter() - started) * 1000
             if input_data.get("ragas"):
-                observed_metrics.update(self._ragas_metrics(case_id, context.run_id, input_data, contexts))
+                reviewed_contexts = [
+                    content for source_collection, content in contexts
+                    if source_collection in _REVIEWED_CONTEXT_COLLECTIONS
+                ]
+                if not reviewed_contexts:
+                    raise ValueError(f"{case_id}: RAGAS requires at least one reviewed retrieval context")
+                observed_metrics.update(self._ragas_metrics(case_id, context.run_id, input_data, reviewed_contexts))
             observed_metrics["retrieval_latency_ms"] = retrieval_latency_ms
             output = {"retrieved_document_ids": list(document_ids), "retrieved_count": len(document_ids)}
             records.append(
@@ -108,11 +120,11 @@ class RagRunner:
         return results
 
     @staticmethod
-    def _document_ids_and_contexts(case_id: str, results: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    def _document_ids_and_contexts(case_id: str, results: list[dict[str, Any]]) -> tuple[list[str], list[tuple[str, str]]]:
         if not isinstance(results, list):
             raise ValueError(f"{case_id}: retrieval results must be a list")
         document_ids: list[str] = []
-        contexts: list[str] = []
+        contexts: list[tuple[str, str]] = []
         for result in results:
             if not isinstance(result, Mapping):
                 raise ValueError(f"{case_id}: retrieval result must be an object")
@@ -136,7 +148,7 @@ class RagRunner:
             if not document_id:
                 raise ValueError(f"{case_id}: retrieval result has no stable document id")
             document_ids.append(document_id)
-            contexts.append(content)
+            contexts.append((source_collection, content))
         return document_ids, contexts
 
     @staticmethod
@@ -166,19 +178,21 @@ class RagRunner:
             rows = evaluate_offline([
                 {"question": question, "answer": answer, "contexts": contexts, "ground_truth": ground_truth}
             ])
-        if not isinstance(rows, list) or not rows:
-            raise RuntimeError(f"{case_id}: RAGAS returned no rows")
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], Mapping):
+            raise RuntimeError(f"{case_id}: RAGAS must return exactly one mapping row")
         metrics: dict[str, float] = {}
-        for row in rows:
-            if not isinstance(row, Mapping):
+        for name, value in rows[0].items():
+            if not isinstance(name, str):
                 continue
-            for name, value in row.items():
-                if not isinstance(name, str) or not name.strip():
-                    continue
-                try:
-                    normalized = normalize_metric_value(value)
-                except ValueError:
-                    continue
-                if normalized is not None:
-                    metrics[name] = normalized
+            metric_name = name.strip()
+            while metric_name.startswith("ragas_"):
+                metric_name = metric_name[len("ragas_"):]
+            if not metric_name:
+                continue
+            try:
+                normalized = normalize_metric_value(value)
+            except ValueError:
+                continue
+            if normalized is not None:
+                metrics[f"ragas_{metric_name}"] = normalized
         return metrics

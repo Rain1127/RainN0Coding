@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from copy import deepcopy
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -94,6 +95,40 @@ def test_retrieval_precision_divides_by_k_when_fewer_results_are_returned() -> N
 
     assert metrics["precision_at_k"] == pytest.approx(1 / 3)
     assert metrics["recall_at_k"] == pytest.approx(1 / 2)
+
+
+@pytest.mark.parametrize("invalid_k", [0, -1, True])
+def test_rag_runner_preserves_invalid_explicit_k_for_metric_validation(invalid_k: object) -> None:
+    with pytest.raises(ValueError, match="k must be at least 1"):
+        RagRunner(retrieve=lambda _input: [_result("watch")]).run(
+            _loaded_rag_case(record_path=None, input_data={"k": invalid_k}),
+            RunContext("run-1", offline=True),
+        )
+
+
+def test_rag_runner_isolates_mutating_retriever_inputs_and_preserves_explicit_k() -> None:
+    seen_inputs: list[dict] = []
+    received_objects: list[dict] = []
+
+    def mutate(input_data: dict) -> list[dict]:
+        seen_inputs.append(deepcopy(input_data))
+        received_objects.append(input_data)
+        input_data["k"] = 1
+        input_data["nested"]["changed"] = True
+        return [_result("watch")]
+
+    loaded = _loaded_rag_case(
+        record_path=None,
+        repeats=2,
+        input_data={"k": 2, "nested": {"changed": False}},
+    )
+    records = RagRunner(retrieve=mutate).run(loaded, RunContext("run-1", offline=True))
+
+    assert [item["k"] for item in seen_inputs] == [2, 2]
+    assert all(item["nested"] == {"changed": False} for item in seen_inputs)
+    assert received_objects[0] is not received_objects[1]
+    assert loaded.case.input == {"k": 2, "nested": {"changed": False}}
+    assert [record.observed_metrics["precision_at_k"] for record in records] == [0.5, 0.5]
 
 
 def test_rag_runner_replays_results_and_emits_labeled_metrics_for_each_attempt(tmp_path: Path) -> None:
@@ -208,9 +243,9 @@ def test_rag_runner_merges_only_finite_numeric_ragas_metrics(monkeypatch: pytest
         RunContext("run-1", offline=False),
     )[0]
 
-    assert record.observed_metrics["faithfulness"] == 0.8
-    assert "drop_bool" not in record.observed_metrics
-    assert "drop_none" not in record.observed_metrics
+    assert record.observed_metrics["ragas_faithfulness"] == 0.8
+    assert "ragas_drop_bool" not in record.observed_metrics
+    assert "ragas_drop_none" not in record.observed_metrics
 
 
 def test_rag_runner_binds_ragas_request_context_for_online_evaluation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -285,10 +320,104 @@ def test_rag_runner_rejects_empty_ragas_rows(monkeypatch: pytest.MonkeyPatch, tm
     ragas_module.evaluate_offline = lambda rows: []
     monkeypatch.setitem(sys.modules, "rag.ragas_evaluator", ragas_module)
 
-    with pytest.raises(RuntimeError, match="rag-replay: RAGAS returned no rows"):
+    with pytest.raises(RuntimeError, match="rag-replay: RAGAS must return exactly one mapping row"):
         RagRunner().run(
             _loaded_rag_case(
                 record_path=record_path,
+                input_data={"ragas": {"question": "What API?", "answer": "watch", "ground_truth": "Use watch."}},
+            ),
+            RunContext("run-1", offline=False),
+        )
+
+
+def test_ragas_metrics_are_namespaced_and_cannot_override_core_metrics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    record_path = tmp_path / "search-results.json"
+    record_path.write_text(json.dumps({"rag-replay": [_result("watch")]}), encoding="utf-8")
+    ragas_module = types.ModuleType("rag.ragas_evaluator")
+    ragas_module.evaluate_offline = lambda rows: [{
+        "precision_at_k": 0.1,
+        "mrr": 0.2,
+        "ragas_faithfulness": 0.8,
+        "": 0.9,
+    }]
+    monkeypatch.setitem(sys.modules, "rag.ragas_evaluator", ragas_module)
+
+    metrics = RagRunner().run(
+        _loaded_rag_case(
+            record_path=record_path,
+            input_data={"ragas": {"question": "What API?", "answer": "watch", "ground_truth": "Use watch."}},
+        ),
+        RunContext("run-1", offline=False),
+    )[0].observed_metrics
+
+    assert metrics["precision_at_k"] == 1.0
+    assert metrics["mrr"] == 1.0
+    assert metrics["ragas_precision_at_k"] == 0.1
+    assert metrics["ragas_mrr"] == 0.2
+    assert metrics["ragas_faithfulness"] == 0.8
+    assert "ragas_ragas_faithfulness" not in metrics
+    assert "ragas_" not in metrics
+
+
+def test_rag_runner_rejects_multiple_ragas_rows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    record_path = tmp_path / "search-results.json"
+    record_path.write_text(json.dumps({"rag-replay": [_result("watch")]}), encoding="utf-8")
+    ragas_module = types.ModuleType("rag.ragas_evaluator")
+    ragas_module.evaluate_offline = lambda rows: [{"faithfulness": 0.8}, {"faithfulness": 0.7}]
+    monkeypatch.setitem(sys.modules, "rag.ragas_evaluator", ragas_module)
+
+    with pytest.raises(RuntimeError, match="rag-replay: RAGAS must return exactly one mapping row"):
+        RagRunner().run(
+            _loaded_rag_case(
+                record_path=record_path,
+                input_data={"ragas": {"question": "What API?", "answer": "watch", "ground_truth": "Use watch."}},
+            ),
+            RunContext("run-1", offline=False),
+        )
+
+
+def test_ragas_receives_only_reviewed_collection_contexts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    record_path = tmp_path / "search-results.json"
+    code_store = {
+        "content": "SECRET unreviewed code",
+        "source_collection": "code_store",
+        "source_channel": "intent_directed",
+        "score": 0.99,
+        "metadata": {"file_path": "secrets.py"},
+    }
+    record_path.write_text(json.dumps({"rag-replay": [code_store, _result("watch", content="Reviewed watch context")]}), encoding="utf-8")
+    captured: list[list[dict]] = []
+    ragas_module = types.ModuleType("rag.ragas_evaluator")
+    ragas_module.evaluate_offline = lambda rows: captured.append(rows) or [{"faithfulness": 0.8}]
+    monkeypatch.setitem(sys.modules, "rag.ragas_evaluator", ragas_module)
+
+    RagRunner().run(
+        _loaded_rag_case(
+            record_path=record_path,
+            input_data={"ragas": {"question": "What API?", "answer": "watch", "ground_truth": "Use watch."}},
+        ),
+        RunContext("run-1", offline=False),
+    )
+
+    assert captured[0][0]["contexts"] == ["Reviewed watch context"]
+
+
+def test_ragas_rejects_retrieval_with_no_reviewed_contexts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    record_path = tmp_path / "search-results.json"
+    code_store = {
+        "content": "SECRET unreviewed code",
+        "source_collection": "code_store",
+        "source_channel": "intent_directed",
+        "score": 0.99,
+        "metadata": {"file_path": "secrets.py"},
+    }
+    record_path.write_text(json.dumps({"rag-replay": [code_store]}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="rag-replay: RAGAS requires at least one reviewed retrieval context"):
+        RagRunner().run(
+            _loaded_rag_case(
+                record_path=record_path,
+                relevant=["code_store:secrets.py"],
                 input_data={"ragas": {"question": "What API?", "answer": "watch", "ground_truth": "Use watch."}},
             ),
             RunContext("run-1", offline=False),
