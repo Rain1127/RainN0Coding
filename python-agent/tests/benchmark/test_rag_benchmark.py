@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from benchmark.contracts import BenchmarkCase, LoadedCase
+from benchmark.cli import _load_cases
+from benchmark.config import load_suite
 from benchmark.evaluators.metrics import retrieval_metrics
 from benchmark.runners.base import RunContext
 from benchmark.runners.rag import RagRunner, retrieve_with_engine
@@ -63,6 +65,13 @@ def test_retrieval_metrics_reject_empty_relevant_labels() -> None:
         retrieval_metrics(["doc-a"], [], k=1)
 
 
+def test_retrieval_metrics_accept_plan_keyword_names_and_positional_k() -> None:
+    by_keyword = retrieval_metrics(retrieved_ids=["doc-a"], relevant_ids=["doc-a"], k=1)
+    by_position = retrieval_metrics(["doc-a"], ["doc-a"], 1)
+
+    assert by_keyword == by_position
+
+
 def test_retrieval_metrics_validate_k_and_nonblank_ids() -> None:
     with pytest.raises(ValueError, match="k must be at least 1"):
         retrieval_metrics(["doc-a"], ["doc-a"], k=0)
@@ -97,15 +106,17 @@ def test_rag_runner_replays_results_and_emits_labeled_metrics_for_each_attempt(t
 
     assert [record.attempt_index for record in records] == [0, 1]
     assert records[0].output == {
-        "document_ids": ["framework_api:watch", "framework_api:computed"],
+        "retrieved_document_ids": ["framework_api:watch", "framework_api:computed"],
         "retrieved_count": 2,
     }
-    assert records[0].observed_metrics == {
+    assert records[0].observed_metrics | {"retrieval_latency_ms": 0.0} == {
         "precision_at_k": pytest.approx(1 / 3),
         "recall_at_k": 1.0,
         "mrr": 1.0,
         "ndcg_at_k": 1.0,
+        "retrieval_latency_ms": 0.0,
     }
+    assert records[0].observed_metrics["retrieval_latency_ms"] >= 0
 
 
 def test_rag_runner_uses_explicit_document_id_before_stable_metadata_fallback(tmp_path: Path) -> None:
@@ -116,7 +127,7 @@ def test_rag_runner_uses_explicit_document_id_before_stable_metadata_fallback(tm
 
     record = RagRunner().run(_loaded_rag_case(record_path=record_path, relevant=["reviewed-watch-v1"]), RunContext("run-1", True))[0]
 
-    assert record.output["document_ids"] == ["reviewed-watch-v1"]
+    assert record.output["retrieved_document_ids"] == ["reviewed-watch-v1"]
 
 
 def test_rag_runner_rejects_missing_relevant_labels(tmp_path: Path) -> None:
@@ -161,7 +172,7 @@ def test_rag_runner_uses_an_injected_retriever_without_importing_live_services()
     )
 
     assert received == [{"phase": "code", "user_request": "watch state"}]
-    assert records[0].output["document_ids"] == ["framework_api:watch"]
+    assert records[0].output["retrieved_document_ids"] == ["framework_api:watch"]
 
 
 def test_rag_runner_replay_is_offline_and_does_not_import_live_retrieval(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -215,7 +226,7 @@ def test_rag_runner_binds_ragas_request_context_for_online_evaluation(monkeypatc
     context_module = types.ModuleType("request_context")
     context_module.bind_request_context = bind_request_context
     ragas_module = types.ModuleType("rag.ragas_evaluator")
-    ragas_module.evaluate_offline = lambda rows: []
+    ragas_module.evaluate_offline = lambda rows: [{"faithfulness": 0.8}]
     monkeypatch.setitem(sys.modules, "request_context", context_module)
     monkeypatch.setitem(sys.modules, "rag.ragas_evaluator", ragas_module)
 
@@ -230,7 +241,69 @@ def test_rag_runner_binds_ragas_request_context_for_online_evaluation(monkeypatc
         RunContext("run-1", offline=False),
     )
 
-    assert events == [{"request_id": "req-1", "trace_id": "trace-1", "user_id": "user-1", "app_id": "app-1"}]
+    assert events == [{
+        "request_id": "benchmark-run-1-rag-replay-ragas",
+        "trace_id": "benchmark-run-1-rag-replay-ragas",
+        "user_id": "benchmark",
+        "app_id": "benchmark-rag",
+    }]
+
+
+def test_rag_runner_repeats_the_retrieval_work_and_keeps_attempt_payloads_independent() -> None:
+    calls: list[dict] = []
+
+    def retrieve(input_data: dict) -> list[dict]:
+        calls.append(input_data)
+        return [_result("watch")]
+
+    records = RagRunner(retrieve=retrieve).run(
+        _loaded_rag_case(record_path=None, repeats=2, input_data={"phase": "code", "user_request": "watch"}),
+        RunContext("run-1", offline=True),
+    )
+
+    assert calls == [{"phase": "code", "user_request": "watch"}] * 2
+    assert records[0].output is not records[1].output
+    assert records[0].observed_metrics is not records[1].observed_metrics
+    assert all(record.observed_metrics["retrieval_latency_ms"] >= 0 for record in records)
+    assert all(record.duration_ms >= record.observed_metrics["retrieval_latency_ms"] for record in records)
+
+
+def test_offline_rag_rejects_default_live_retriever_but_allows_injected_pure_function() -> None:
+    loaded = _loaded_rag_case(record_path=None, input_data={"phase": "code", "user_request": "watch"})
+
+    with pytest.raises(ValueError, match="offline RAG requires a replay record or an injected retriever"):
+        RagRunner().run(loaded, RunContext("run-1", offline=True))
+
+    record = RagRunner(retrieve=lambda _input: [_result("watch")]).run(loaded, RunContext("run-1", offline=True))[0]
+    assert record.output["retrieved_document_ids"] == ["framework_api:watch"]
+
+
+def test_rag_runner_rejects_empty_ragas_rows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    record_path = tmp_path / "search-results.json"
+    record_path.write_text(json.dumps({"rag-replay": [_result("watch")]}), encoding="utf-8")
+    ragas_module = types.ModuleType("rag.ragas_evaluator")
+    ragas_module.evaluate_offline = lambda rows: []
+    monkeypatch.setitem(sys.modules, "rag.ragas_evaluator", ragas_module)
+
+    with pytest.raises(RuntimeError, match="rag-replay: RAGAS returned no rows"):
+        RagRunner().run(
+            _loaded_rag_case(
+                record_path=record_path,
+                input_data={"ragas": {"question": "What API?", "answer": "watch", "ground_truth": "Use watch."}},
+            ),
+            RunContext("run-1", offline=False),
+        )
+
+
+def test_nightly_suite_adds_live_retrieval_and_ragas_cases_while_pr_stays_offline() -> None:
+    pr_suite, pr_dir = load_suite("benchmarks/suites/pr.yaml")
+    nightly_suite, nightly_dir = load_suite("benchmarks/suites/nightly.yaml")
+    pr_cases = _load_cases(pr_suite, pr_dir)
+    nightly_cases = _load_cases(nightly_suite, nightly_dir)
+
+    assert len(pr_cases) == 8
+    assert {case.case.id for case in nightly_cases} >= {"rag-nightly-live-retrieval", "rag-nightly-ragas"}
+    assert len(nightly_cases) == 10
 
 
 def test_real_retrieval_adapter_builds_context_and_serializes_ranked_results(monkeypatch: pytest.MonkeyPatch) -> None:

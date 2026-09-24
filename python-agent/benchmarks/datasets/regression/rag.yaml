@@ -16,7 +16,7 @@ cases:
     k: 2
   expectations:
     equals: {retrieved_count: 2}
-    required_paths: [document_ids, retrieved_count]
+    required_paths: [retrieved_document_ids, retrieved_count]
     relevant_document_ids: [framework_api:watch]
   metric_tags:
     equals.retrieved_count: retrieval_replay_completeness
@@ -38,7 +38,7 @@ cases:
     k: 2
   expectations:
     equals: {retrieved_count: 2}
-    required_paths: [document_ids, retrieved_count]
+    required_paths: [retrieved_document_ids, retrieved_count]
     relevant_document_ids: [component_library:DataTable]
   metric_tags:
     equals.retrieved_count: retrieval_replay_completeness

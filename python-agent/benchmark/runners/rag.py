@@ -48,6 +48,7 @@ def retrieve_with_engine(input_data: dict[str, Any]) -> list[dict[str, Any]]:
 
 class RagRunner:
     def __init__(self, retrieve: RetrieveCallable | None = None):
+        self._injected_retriever = retrieve is not None
         self._retrieve = retrieve or retrieve_with_engine
 
     def run(self, case: LoadedCase, context: RunContext) -> list[RawRunRecord]:
@@ -64,19 +65,21 @@ class RagRunner:
         relevant_document_ids = case.case.expectations.relevant_document_ids
         if not relevant_document_ids:
             raise ValueError(f"{case_id}: relevant document labels are required")
-
-        results = self._replay_results(case) if case.record_path is not None else self._retrieve(input_data)
-        document_ids, contexts = self._document_ids_and_contexts(case_id, results)
-        k = input_data.get("k") or len(document_ids) or 1
-        observed_metrics = retrieval_metrics(document_ids, relevant_document_ids, k=k)
-        if input_data.get("ragas"):
-            observed_metrics.update(self._ragas_metrics(case_id, input_data, contexts))
+        if context.offline and case.record_path is None and not self._injected_retriever:
+            raise ValueError(f"{case_id}: offline RAG requires a replay record or an injected retriever")
 
         records: list[RawRunRecord] = []
-        output = {"document_ids": document_ids, "retrieved_count": len(document_ids)}
         for attempt_index in range(case.case.execution.repeats):
             started_at = datetime.now(timezone.utc).isoformat()
             started = perf_counter()
+            results = self._replay_results(case) if case.record_path is not None else self._retrieve(input_data)
+            document_ids, contexts = self._document_ids_and_contexts(case_id, results)
+            k = input_data.get("k") or len(document_ids) or 1
+            observed_metrics = retrieval_metrics(document_ids, relevant_document_ids, k)
+            if input_data.get("ragas"):
+                observed_metrics.update(self._ragas_metrics(case_id, context.run_id, input_data, contexts))
+            observed_metrics["retrieval_latency_ms"] = (perf_counter() - started) * 1000
+            output = {"retrieved_document_ids": list(document_ids), "retrieved_count": len(document_ids)}
             records.append(
                 RawRunRecord(
                     case_id=case_id,
@@ -136,7 +139,7 @@ class RagRunner:
         return document_ids, contexts
 
     @staticmethod
-    def _ragas_metrics(case_id: str, input_data: dict[str, Any], contexts: list[str]) -> dict[str, float]:
+    def _ragas_metrics(case_id: str, run_id: str, input_data: dict[str, Any], contexts: list[str]) -> dict[str, float]:
         ragas_input = input_data.get("ragas")
         if ragas_input is True:
             ragas_input = {}
@@ -151,22 +154,19 @@ class RagRunner:
         from rag.ragas_evaluator import evaluate_offline
         from request_context import bind_request_context
 
-        raw_context = input_data.get("request_context", {})
-        if not isinstance(raw_context, Mapping):
-            raise ValueError(f"{case_id}: request_context must be an object")
+        evaluation_id = f"benchmark-{run_id}-{case_id}-ragas"
         request_context = {
-            name: value if isinstance(value, str) else ""
-            for name, value in {
-                "request_id": raw_context.get("request_id", ""),
-                "trace_id": raw_context.get("trace_id", ""),
-                "user_id": raw_context.get("user_id", ""),
-                "app_id": raw_context.get("app_id", input_data.get("app_id", "")),
-            }.items()
+            "request_id": evaluation_id,
+            "trace_id": evaluation_id,
+            "user_id": "benchmark",
+            "app_id": "benchmark-rag",
         }
         with bind_request_context(**request_context):
             rows = evaluate_offline([
                 {"question": question, "answer": answer, "contexts": contexts, "ground_truth": ground_truth}
             ])
+        if not isinstance(rows, list) or not rows:
+            raise RuntimeError(f"{case_id}: RAGAS returned no rows")
         metrics: dict[str, float] = {}
         for row in rows:
             if not isinstance(row, Mapping):

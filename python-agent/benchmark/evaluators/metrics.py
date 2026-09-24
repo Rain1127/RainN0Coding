@@ -4,7 +4,7 @@ import statistics
 
 
 def retrieval_metrics(
-    retrieved_document_ids: list[str], relevant_document_ids: list[str], *, k: int
+    retrieved_ids: list[str], relevant_ids: list[str], k: int
 ) -> dict[str, float]:
     """Calculate deterministic binary-relevance retrieval metrics at ``k``.
 
@@ -14,18 +14,18 @@ def retrieval_metrics(
     """
     if isinstance(k, bool) or not isinstance(k, int) or k < 1:
         raise ValueError("k must be at least 1")
-    if any(not isinstance(document_id, str) or not document_id.strip() for document_id in retrieved_document_ids):
+    if any(not isinstance(document_id, str) or not document_id.strip() for document_id in retrieved_ids):
         raise ValueError("retrieved document ids must be nonblank strings")
-    if not relevant_document_ids or any(
+    if not relevant_ids or any(
         not isinstance(document_id, str) or not document_id.strip()
-        for document_id in relevant_document_ids
+        for document_id in relevant_ids
     ):
         raise ValueError("relevant document labels must be nonempty, nonblank strings")
 
-    relevant = set(relevant_document_ids)
+    relevant = set(relevant_ids)
     seen: set[str] = set()
     credited: list[bool] = []
-    for document_id in retrieved_document_ids[:k]:
+    for document_id in retrieved_ids[:k]:
         is_new_relevant = document_id in relevant and document_id not in seen
         credited.append(is_new_relevant)
         seen.add(document_id)

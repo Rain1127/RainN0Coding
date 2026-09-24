@@ -1,0 +1,45 @@
+schema_version: 1
+dataset_version: 2026.09.1
+cases:
+- id: rag-nightly-live-retrieval
+  target: rag
+  category: retrieval
+  difficulty: medium
+  tags: [nightly, live-retrieval]
+  execution:
+    mode: rag
+  input:
+    phase: code
+    user_request: Use Vue watch to react to a state change.
+    code_gen_type: vue_project
+    k: 3
+  expectations:
+    required_paths: [retrieved_document_ids, retrieved_count]
+    relevant_document_ids: [framework_api:watch]
+  metric_tags:
+    required_paths: retrieval_output_protocol_completeness
+  output_metrics: {}
+  provenance: {source: curated, reviewed: true, sanitized: true}
+- id: rag-nightly-ragas
+  target: rag
+  category: ragas
+  difficulty: medium
+  tags: [nightly, live-retrieval, ragas]
+  execution:
+    mode: rag
+  input:
+    phase: code
+    user_request: Use Vue watch to react to a state change.
+    code_gen_type: vue_project
+    k: 3
+    ragas:
+      question: How should Vue state changes be observed?
+      answer: Use the watch API to observe a source and run a callback.
+      ground_truth: Vue watch observes a reactive source and invokes a callback when it changes.
+  expectations:
+    required_paths: [retrieved_document_ids, retrieved_count]
+    relevant_document_ids: [framework_api:watch]
+  metric_tags:
+    required_paths: retrieval_output_protocol_completeness
+  output_metrics: {}
+  provenance: {source: curated, reviewed: true, sanitized: true}
