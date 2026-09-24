@@ -71,3 +71,39 @@ def test_metric_resolution_does_not_fall_back_to_leaf_path():
     result = evaluate_assertions(case, {"review": {"issues": "xss"}})
 
     assert result.assertions[0].metric == "rule_metric"
+
+
+def test_required_files_are_native_assertions_against_generated_code_files():
+    case = _case({"required_files": ["index.html", "src/app.js"]}).model_copy(
+        update={
+            "metric_tags": {
+                "required_files": "file_coverage",
+                "required_files.src/app.js": "critical_file_coverage",
+            }
+        }
+    )
+
+    result = evaluate_assertions(
+        case,
+        {"code_files": [{"path": "index.html", "content": "<main />"}]},
+    )
+
+    assert result.passed is False
+    assert result.assertions_total == 2
+    assert [(item.path, item.passed, item.metric) for item in result.assertions] == [
+        ("index.html", True, "file_coverage"),
+        ("src/app.js", False, "critical_file_coverage"),
+    ]
+    assert result.failures == ["src/app.js: required generated file is missing"]
+
+
+def test_required_files_fail_when_generated_file_schema_is_invalid():
+    result = evaluate_assertions(
+        _case({"required_files": ["index.html"]}),
+        {"code_files": [{"path": "../index.html", "content": "unsafe"}]},
+    )
+
+    assert result.passed is False
+    assert result.assertions_total == 1
+    assert result.assertions[0].metric == "output_protocol_completeness"
+    assert result.failures == ["index.html: generated files are invalid"]

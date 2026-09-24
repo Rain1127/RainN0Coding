@@ -181,6 +181,54 @@ def test_code_execution_infrastructure_failure_is_not_quality(tmp_path: Path) ->
     assert "benchmark_code_check" not in record.output
 
 
+@pytest.mark.parametrize(
+    "code_files",
+    [
+        [{"path": "../private-name.py", "content": "x = 1"}],
+        [{"path": "app", "content": "file"}, {"path": "app/main.py", "content": "child"}],
+        [{"path": "index.html", "content": "ok", "unexpected": "field"}],
+    ],
+)
+def test_invalid_generated_file_entries_are_quality_failures_for_every_attempt(
+    tmp_path: Path, code_files: list[dict]
+) -> None:
+    state = _state()
+    state["code_files"] = code_files
+    loaded = _loaded(
+        tmp_path,
+        state=state,
+        repeats=2,
+        expectations={
+            "equals": {
+                "benchmark_generated_files.passed": True,
+                "benchmark_code_check.passed": True,
+            },
+            "required_files": ["index.html"],
+        },
+        metric_tags={
+            "equals.benchmark_generated_files.passed": "build_failed",
+            "equals.benchmark_code_check.passed": "build_failed",
+            "required_files": "output_protocol_completeness",
+        },
+    )
+
+    evaluations = run_cases([loaded], RunContext("run", True))
+
+    assert len(evaluations) == 2
+    assert [item.attempt_index for item in evaluations] == [0, 1]
+    assert all(item.infrastructure_error is None for item in evaluations)
+    assert all(item.passed is False for item in evaluations)
+    assert all(item.output["benchmark_generated_files"] == {"passed": False} for item in evaluations)
+    assert all(item.output["benchmark_required_files"]["passed"] is False for item in evaluations)
+    assert all(item.output["benchmark_code_check"] == {
+        "passed": False,
+        "metric": "build_failed",
+        "log": "generated files failed validation",
+        "infrastructure_error": None,
+    } for item in evaluations)
+    assert all(any(a.metric == "build_failed" and not a.passed for a in item.assertions) for item in evaluations)
+
+
 def test_repeats_have_unique_attempts_and_temporary_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

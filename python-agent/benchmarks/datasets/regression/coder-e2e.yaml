@@ -22,6 +22,7 @@ cases:
         review.passed: true
         quality_gate_result.passed: true
         build_result.success: true
+        benchmark_generated_files.passed: true
         benchmark_required_files.passed: true
         benchmark_code_check.passed: true
       required_paths:
@@ -42,6 +43,7 @@ cases:
       equals.review.passed: critical_defect_recall
       equals.quality_gate_result.passed: quality_gate_accuracy
       equals.build_result.success: build_success
+      equals.benchmark_generated_files.passed: build_failed
       required_paths: output_protocol_completeness
       required_text.code_files: output_protocol_completeness
     output_metrics:

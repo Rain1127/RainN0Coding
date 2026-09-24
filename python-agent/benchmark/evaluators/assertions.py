@@ -1,9 +1,11 @@
 """Declarative assertion evaluation for benchmark outputs."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from benchmark.contracts import BenchmarkCase, CaseEvaluation, MetricAssertion
+from benchmark.evaluators.code_execution import validate_generated_files
 
 
 MISSING = object()
@@ -12,6 +14,7 @@ _DEFAULT_METRICS = {
     "required_paths": "output_protocol_completeness",
     "required_text": "evidence_recall",
     "forbidden_text": "safety_compliance",
+    "required_files": "output_protocol_completeness",
 }
 
 
@@ -101,6 +104,34 @@ def evaluate_assertions(
         else:
             failures.append(f"{path}: forbidden text {matched!r} found")
         assertions.append(MetricAssertion(metric=metric_name(case, "forbidden_text", path), passed=passed, rule="forbidden_text", path=path))
+
+    generated_paths: set[str] = set()
+    generated_files_valid = True
+    if expectations.required_files:
+        try:
+            generated_paths = {
+                path.as_posix() for path, _content in validate_generated_files(output.get("code_files"))
+            }
+        except ValueError:
+            generated_files_valid = False
+    for path in expectations.required_files:
+        total += 1
+        normalized = Path(path).as_posix()
+        passed = generated_files_valid and normalized in generated_paths
+        if passed:
+            passed_count += 1
+        elif generated_files_valid:
+            failures.append(f"{path}: required generated file is missing")
+        else:
+            failures.append(f"{path}: generated files are invalid")
+        assertions.append(
+            MetricAssertion(
+                metric=metric_name(case, "required_files", path),
+                passed=passed,
+                rule="required_files",
+                path=path,
+            )
+        )
 
     metrics: dict[str, float | None] = dict(observed_metrics or {})
     metrics.update(_output_metrics(case, output))

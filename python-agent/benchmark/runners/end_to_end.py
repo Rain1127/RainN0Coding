@@ -29,10 +29,19 @@ class EndToEndRunner:
             raise ValueError(f"{case.id}: end-to-end replay record is required")
 
         state = self._load_final_state(case.id, loaded.record_path)
-        validated_files = validate_generated_files(state["code_files"])
-        generated_paths = {path.as_posix() for path, _ in validated_files}
         required_files = [self._required_file(case.id, item) for item in case.expectations.required_files]
-        missing = [path for path in required_files if path not in generated_paths]
+        generated_files_valid = True
+        generated_paths: set[str] = set()
+        try:
+            validated_files = validate_generated_files(state["code_files"])
+            generated_paths = {path.as_posix() for path, _ in validated_files}
+        except ValueError:
+            generated_files_valid = False
+        missing = (
+            [path for path in required_files if path not in generated_paths]
+            if generated_files_valid
+            else list(required_files)
+        )
 
         command = case.input.get("execution_command")
         timeout_seconds = case.input.get("timeout_seconds", 60)
@@ -55,9 +64,20 @@ class EndToEndRunner:
             started_at = datetime.now(timezone.utc).isoformat()
             clock = perf_counter()
             output = deepcopy(state)
-            output["benchmark_required_files"] = {"passed": not missing, "missing": list(missing)}
+            output["benchmark_generated_files"] = {"passed": generated_files_valid}
+            output["benchmark_required_files"] = {
+                "passed": generated_files_valid and not missing,
+                "missing": list(missing),
+            }
             infrastructure_error: str | None = None
-            if command is not None:
+            if not generated_files_valid:
+                output["benchmark_code_check"] = {
+                    "passed": False,
+                    "metric": "build_failed",
+                    "log": "generated files failed validation",
+                    "infrastructure_error": None,
+                }
+            elif command is not None:
                 with tempfile.TemporaryDirectory(prefix="benchmark-code-") as temporary:
                     check = evaluate_code(
                         files=deepcopy(state["code_files"]),

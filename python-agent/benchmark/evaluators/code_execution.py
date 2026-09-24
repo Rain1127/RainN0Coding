@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -12,6 +13,8 @@ from benchmark.redaction import redact_error
 SAFE_ENV_KEYS = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP")
 MAX_LOG_CHARACTERS = 4000
 MAX_TIMEOUT_SECONDS = 600
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 
 
 def _relative_generated_path(raw_path: object) -> Path:
@@ -23,6 +26,7 @@ def _relative_generated_path(raw_path: object) -> Path:
         or relative.is_absolute()
         or bool(relative.drive)
         or any(part in {"", ".", ".."} for part in relative.parts)
+        or any(part.rstrip(" .") != part for part in relative.parts)
         or relative.is_reserved()
     ):
         raise ValueError(f"unsafe generated path: {raw_path}")
@@ -93,12 +97,165 @@ def materialize_files(files: list[dict[str, Any]], project_dir: str | Path) -> l
             raise ValueError(f"generated path collision: {relative}") from exc
         _confined(target.parent, root, relative)
         target = _confined(target, root, relative)
-        if target.exists() and (target.is_dir() or target.is_symlink()):
+        if target.exists() or target.is_symlink():
             raise ValueError(f"generated path collision: {relative}")
-        target.write_text(content, encoding="utf-8")
+        try:
+            with target.open("x", encoding="utf-8") as stream:
+                stream.write(content)
+        except FileExistsError as exc:
+            raise ValueError(f"generated path collision: {relative}") from exc
         _confined(target, root, relative)
         written.append(target)
     return written
+
+
+def _create_windows_kill_job(process: subprocess.Popen[str]) -> int | None:
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_uint64),
+            ("WriteOperationCount", ctypes.c_uint64),
+            ("OtherOperationCount", ctypes.c_uint64),
+            ("ReadTransferCount", ctypes.c_uint64),
+            ("WriteTransferCount", ctypes.c_uint64),
+            ("OtherTransferCount", ctypes.c_uint64),
+        ]
+
+    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+            ("IoInfo", IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    )
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    information = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    information.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    configured = kernel32.SetInformationJobObject(
+        job,
+        _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+    )
+    assigned = configured and kernel32.AssignProcessToJobObject(job, wintypes.HANDLE(int(process._handle)))
+    if not assigned:
+        kernel32.CloseHandle(job)
+        return None
+    return int(job)
+
+
+def _close_windows_job(job: int | None, *, terminate: bool = False) -> None:
+    if os.name != "nt" or job is None:
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    if terminate:
+        kernel32.TerminateJobObject(wintypes.HANDLE(job), 1)
+    kernel32.CloseHandle(wintypes.HANDLE(job))
+
+
+def _kill_windows_process_tree(
+    process: subprocess.Popen[str], environment: dict[str, str], job: int | None
+) -> None:
+    if job is not None:
+        _close_windows_job(job, terminate=True)
+        return
+    helper: subprocess.Popen[str] | None = None
+    try:
+        helper = subprocess.Popen(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            env=environment,
+        )
+        try:
+            helper.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            helper.kill()
+            helper.communicate(timeout=1)
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        if helper is not None and helper.poll() is None:
+            helper.kill()
+    finally:
+        if process.poll() is None:
+            process.kill()
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[str], environment: dict[str, str], windows_job: int | None
+) -> None:
+    if os.name == "nt":
+        _kill_windows_process_tree(process, environment, windows_job)
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        if process.poll() is None:
+            process.kill()
+
+
+def _communicate_after_termination(process: subprocess.Popen[str]) -> tuple[str, str]:
+    try:
+        return process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            process.kill()
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        return "", ""
 
 
 def _validate_execution(command: object, timeout_seconds: object) -> tuple[list[str], int]:
@@ -127,19 +284,29 @@ def evaluate_code(
     materialize_files(files, project_dir)
     environment = {key: os.environ[key] for key in SAFE_ENV_KEYS if key in os.environ}
     environment.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+    windows_job: int | None = None
+    windows_job_closed = False
     try:
-        completed = subprocess.run(
+        options: dict[str, Any] = {}
+        if os.name == "nt":
+            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            options["start_new_session"] = True
+        process = subprocess.Popen(
             safe_command,
             cwd=Path(project_dir).resolve(),
             shell=False,
-            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=safe_timeout,
             env=environment,
-            check=False,
+            **options,
         )
+        windows_job = _create_windows_kill_job(process)
+        stdout, stderr = process.communicate(timeout=safe_timeout)
     except FileNotFoundError:
         return {
             "passed": False,
@@ -148,6 +315,9 @@ def evaluate_code(
             "infrastructure_error": "code execution tool was not found",
         }
     except subprocess.TimeoutExpired:
+        _terminate_process_tree(process, environment, windows_job)
+        windows_job_closed = windows_job is not None
+        _communicate_after_termination(process)
         return {
             "passed": False,
             "metric": "build_failed",
@@ -161,15 +331,18 @@ def evaluate_code(
             "log": "",
             "infrastructure_error": redact_error(f"code execution OS error {exc.errno or 'unknown'}"),
         }
+    finally:
+        if not windows_job_closed:
+            _close_windows_job(windows_job)
 
-    combined = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+    combined = "\n".join(part for part in (stdout, stderr) if part)
     redacted_log = redact_error(combined)
     if len(redacted_log) > MAX_LOG_CHARACTERS:
         half = MAX_LOG_CHARACTERS // 2
         log = redacted_log[:half] + redacted_log[-half:]
     else:
         log = redacted_log
-    passed = completed.returncode == 0
+    passed = process.returncode == 0
     return {
         "passed": passed,
         "metric": "build_success" if passed else "build_failed",

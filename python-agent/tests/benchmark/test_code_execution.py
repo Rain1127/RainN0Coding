@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,37 @@ def test_materialize_rejects_parent_traversal(tmp_path: Path) -> None:
 def test_materialize_rejects_empty_or_absolute_paths(tmp_path: Path, path: str) -> None:
     with pytest.raises(ValueError, match="unsafe generated path"):
         materialize_files([{"path": path, "content": "x"}], tmp_path)
+
+
+@pytest.mark.parametrize("path", ["a.txt.", "a.txt ", "dir./main.py", "dir /main.py"])
+def test_materialize_rejects_windows_trailing_dot_or_space_aliases(tmp_path: Path, path: str) -> None:
+    with pytest.raises(ValueError, match="unsafe generated path"):
+        materialize_files([{"path": path, "content": "x"}], tmp_path)
+
+
+def test_materialize_refuses_to_overwrite_an_existing_regular_file(tmp_path: Path) -> None:
+    target = tmp_path / "main.py"
+    target.write_text("original", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="generated path collision"):
+        materialize_files([{"path": "main.py", "content": "replacement"}], tmp_path)
+
+    assert target.read_text(encoding="utf-8") == "original"
+
+
+def test_materialize_refuses_to_write_through_an_existing_hardlink(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("outside-original", encoding="utf-8")
+    link = tmp_path / "main.py"
+    try:
+        os.link(outside, link)
+    except OSError:
+        pytest.skip("hardlink creation is unavailable on this platform")
+
+    with pytest.raises(ValueError, match="generated path collision"):
+        materialize_files([{"path": "main.py", "content": "replacement"}], tmp_path)
+
+    assert outside.read_text(encoding="utf-8") == "outside-original"
 
 
 @pytest.mark.parametrize(
@@ -119,6 +151,30 @@ def test_missing_tool_is_infrastructure_error(tmp_path: Path) -> None:
 
     assert result["infrastructure_error"]
     assert result["passed"] is False
+
+
+def test_timeout_terminates_the_entire_process_tree_before_a_child_can_write(tmp_path: Path) -> None:
+    marker = tmp_path / "child-marker.txt"
+    child = "import pathlib,sys,time; time.sleep(2.5); pathlib.Path(sys.argv[1]).write_text('escaped')"
+    launcher = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable, '-c', " + repr(child) + ", sys.argv[1]]); "
+        "time.sleep(30)"
+    )
+    started = time.monotonic()
+
+    result = evaluate_code(
+        files=[{"path": "launcher.py", "content": launcher}],
+        project_dir=tmp_path / "project",
+        command=[sys.executable, "launcher.py", str(marker)],
+        timeout_seconds=1,
+    )
+    elapsed = time.monotonic() - started
+    time.sleep(2.75)
+
+    assert result["infrastructure_error"] == "code execution timed out after 1 seconds"
+    assert elapsed < 2.25
+    assert not marker.exists()
 
 
 def test_execution_uses_explicit_environment_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
