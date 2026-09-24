@@ -28,6 +28,10 @@ def test_html_is_single_file_and_contains_gate_and_failures(tmp_path: Path) -> N
     assert "wrong route" in html
     assert "https://" not in html
     assert "<script src=" not in html
+    for element_id in ("status", "summary", "targets", "metrics", "gate", "interview", "cases", "benchmark-data"):
+        assert f'id="{element_id}"' in html
+    for element_id in ("benchmark-status", "benchmark-summary", "benchmark-targets", "benchmark-metrics", "benchmark-gate", "benchmark-interview", "benchmark-cases"):
+        assert f'id="{element_id}"' not in html
 
 
 def test_html_escapes_script_termination_in_report_data(tmp_path: Path) -> None:
