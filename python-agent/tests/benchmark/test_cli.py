@@ -61,6 +61,13 @@ def test_run_keeps_json_when_html_rendering_fails(tmp_path: Path, monkeypatch) -
     assert json.loads(output.read_text(encoding="utf-8"))["metadata"]["git_sha"] == "test-sha"
 
 
+def test_run_rejects_html_output_same_as_json_and_preserves_json(tmp_path: Path) -> None:
+    output = tmp_path / "result.json"
+
+    assert main(["run", "--suite", SUITE, "--output", str(output), "--html-output", str(output), "--git-sha", "test-sha", "--record-dir", str(tmp_path / "records")]) == 2
+    assert json.loads(output.read_text(encoding="utf-8"))["metadata"]["git_sha"] == "test-sha"
+
+
 def test_run_uses_default_record_directory_relative_to_current_directory(tmp_path: Path, monkeypatch) -> None:
     output = tmp_path / "result.json"
     suite = Path(__file__).resolve().parents[2] / SUITE

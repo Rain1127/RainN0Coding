@@ -36,6 +36,9 @@ def test_html_is_single_file_and_contains_gate_and_failures(tmp_path: Path) -> N
     assert ".card-value, #status p, pre, code, th, td { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }" in html
     assert '"card-value"' in html
     assert "th:nth-child(2), td:nth-child(2) { white-space: nowrap; width: 1%; }" in html
+    assert "td:nth-child(3) { display: block; grid-column: 1 / -1; }" in html
+    assert 'aria-labelledby="interview-heading"' in html
+    assert '<th scope="col">' in html
 
 
 def test_html_escapes_script_termination_in_report_data(tmp_path: Path) -> None:

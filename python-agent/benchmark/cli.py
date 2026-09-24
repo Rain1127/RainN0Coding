@@ -178,6 +178,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         gate = evaluate_gate(report, baseline, policy)
         write_report(report.model_copy(update={"gate": gate}), args.output)
         html_output = Path(args.html_output) if args.html_output else Path(args.output).with_suffix(".html")
+        if html_output.resolve().as_posix().casefold() == Path(args.output).resolve().as_posix().casefold():
+            raise ValueError("--html-output must not resolve to the JSON output path")
         render_html(json.loads(Path(args.output).read_text(encoding="utf-8")), html_output)
         if any(result.infrastructure_error is not None for result in results):
             return 2
