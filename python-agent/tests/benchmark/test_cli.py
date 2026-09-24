@@ -23,17 +23,42 @@ def test_validate_pr_suite_prints_validated(capsys) -> None:
 
 def test_run_pr_suite_writes_report_metadata_and_raw_records(tmp_path: Path) -> None:
     output = tmp_path / "pr-result.json"
+    html_output = tmp_path / "pr-report.html"
     record_dir = tmp_path / "records"
 
     assert main([
         "run", "--suite", SUITE, "--output", str(output), "--git-sha", "test-sha",
-        "--record-dir", str(record_dir),
+        "--record-dir", str(record_dir), "--html-output", str(html_output),
     ]) == 0
 
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["metadata"]["git_sha"] == "test-sha"
     assert report["summary"]["cases"] == 6
     assert len(list(record_dir.glob("*/*.json"))) == 6
+    assert "test-sha" in html_output.read_text(encoding="utf-8")
+
+
+def test_run_derives_html_output_as_json_sibling(tmp_path: Path) -> None:
+    output = tmp_path / "result.json"
+
+    assert main(["run", "--suite", SUITE, "--output", str(output), "--git-sha", "test-sha", "--record-dir", str(tmp_path / "records")]) == 0
+
+    assert (tmp_path / "result.html").is_file()
+
+
+def test_run_keeps_json_when_html_rendering_fails(tmp_path: Path, monkeypatch) -> None:
+    import benchmark.cli as cli
+
+    output = tmp_path / "result.json"
+
+    def fail_render(*args, **kwargs) -> None:
+        raise OSError("render failed")
+
+    monkeypatch.setattr(cli, "render_html", fail_render)
+
+    assert main(["run", "--suite", SUITE, "--output", str(output), "--git-sha", "test-sha", "--record-dir", str(tmp_path / "records")]) == 2
+
+    assert json.loads(output.read_text(encoding="utf-8"))["metadata"]["git_sha"] == "test-sha"
 
 
 def test_run_uses_default_record_directory_relative_to_current_directory(tmp_path: Path, monkeypatch) -> None:

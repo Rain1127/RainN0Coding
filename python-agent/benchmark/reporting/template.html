@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Benchmark 评测报告</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f5f7fb; color: #172033; }
+    main { width: min(1180px, calc(100% - 32px)); margin: 24px auto 48px; }
+    header, section { background: white; border: 1px solid #dfe5ef; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    .passed { border-left: 8px solid #17803d; }
+    .failed { border-left: 8px solid #b42318; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 12px; }
+    .card { background: #f8fafc; border-radius: 8px; padding: 14px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; border-bottom: 1px solid #e5e7eb; padding: 10px; vertical-align: top; }
+    code { white-space: pre-wrap; word-break: break-word; }
+    textarea { width: 100%; min-height: 120px; box-sizing: border-box; }
+    @media (max-width: 640px) { main { width: min(100% - 16px,1180px); } th:nth-child(3), td:nth-child(3) { display: none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header id="benchmark-status"></header>
+    <section><h2>总体指标</h2><div id="benchmark-summary" class="grid"></div></section>
+    <section><h2>评测对象</h2><div id="benchmark-targets" class="grid"></div></section>
+    <section><h2>运行指标</h2><div id="benchmark-metrics" class="grid"></div></section>
+    <section><h2>门禁详情</h2><pre id="benchmark-gate"></pre></section>
+    <section><h2>面试摘要</h2><textarea id="benchmark-interview" readonly></textarea></section>
+    <section>
+      <h2>案例详情</h2>
+      <table><thead><tr><th>案例</th><th>结果</th><th>失败原因</th></tr></thead><tbody id="benchmark-cases"></tbody></table>
+    </section>
+  </main>
+  <script id="benchmark-data" type="application/json">BENCHMARK_DATA_JSON</script>
+  <script>
+    const report = JSON.parse(document.getElementById("benchmark-data").textContent);
+    function element(tag, text, className) {
+      const node = document.createElement(tag);
+      node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    }
+    const gatePassed = report.gate && report.gate.passed !== false;
+    const status = document.getElementById("benchmark-status");
+    status.className = gatePassed ? "passed" : "failed";
+    status.appendChild(element("h1", "Benchmark " + (gatePassed ? "PASS" : "FAIL")));
+    status.appendChild(element(
+      "p",
+      "Run " + report.metadata.run_id + " · Suite " + report.metadata.suite
+        + " · Git " + report.metadata.git_sha
+    ));
+    function cards(target, values) {
+      Object.entries(values).forEach(([name, value]) => {
+        const card = element("article", "", "card");
+        card.appendChild(element("strong", name));
+        card.appendChild(element("div", JSON.stringify(value)));
+        target.appendChild(card);
+      });
+    }
+    cards(document.getElementById("benchmark-summary"), report.summary || {});
+    cards(document.getElementById("benchmark-targets"), report.by_target || {});
+    cards(document.getElementById("benchmark-metrics"), report.metrics || {});
+    document.getElementById("benchmark-gate").textContent = JSON.stringify(report.gate || {}, null, 2);
+    document.getElementById("benchmark-interview").value =
+      "本次 " + report.metadata.suite + " Benchmark 共评测 "
+      + report.summary.cases + " 个案例、" + report.summary.observations
+      + " 次观测，案例通过率为 " + report.summary.case_pass_rate
+      + "，门禁结果为 " + (gatePassed ? "通过" : "未通过") + "。";
+    const rows = document.getElementById("benchmark-cases");
+    (report.results || []).forEach(item => {
+      const row = document.createElement("tr");
+      row.appendChild(element("td", item.case_id + " #" + (item.attempt_index || 0)));
+      row.appendChild(element("td", item.passed ? "PASS" : "FAIL"));
+      const details = document.createElement("td");
+      details.appendChild(element("code", JSON.stringify(item.failures || [])));
+      row.appendChild(details);
+      rows.appendChild(row);
+    });
+  </script>
+</body>
+</html>

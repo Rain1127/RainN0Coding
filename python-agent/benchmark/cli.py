@@ -19,6 +19,7 @@ from benchmark.gates import evaluate_gate
 from benchmark.orchestrator import run_cases
 from benchmark.redaction import redact_error
 from benchmark.reporting.json_report import build_report, read_report, write_report
+from benchmark.reporting.html_report import render_html
 from benchmark.runners.base import RunContext
 from config import config
 import yaml
@@ -88,6 +89,7 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run")
     run.add_argument("--suite", required=True)
     run.add_argument("--output", required=True)
+    run.add_argument("--html-output")
     run.add_argument("--git-sha")
     run.add_argument("--record-dir", default="benchmarks/records/runs")
     compare = commands.add_parser("compare")
@@ -175,6 +177,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         baseline = load_compatible(report, (suite_dir / suite.baseline_dir).resolve())
         gate = evaluate_gate(report, baseline, policy)
         write_report(report.model_copy(update={"gate": gate}), args.output)
+        html_output = Path(args.html_output) if args.html_output else Path(args.output).with_suffix(".html")
+        render_html(json.loads(Path(args.output).read_text(encoding="utf-8")), html_output)
         if any(result.infrastructure_error is not None for result in results):
             return 2
         return 0 if gate["passed"] else 1

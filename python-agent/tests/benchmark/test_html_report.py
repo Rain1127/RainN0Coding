@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from benchmark.reporting.html_report import render_html
+
+
+def _report() -> dict:
+    return {
+        "metadata": {"run_id": "run-1", "suite": "pr", "git_sha": "abc"},
+        "summary": {"cases": 2, "passed": 1, "case_pass_rate": 0.5, "observations": 2},
+        "by_target": {"supervisor": {"cases": 2, "passed": 1, "case_pass_rate": 0.5}},
+        "by_category": {},
+        "metrics": {"latency_ms": {"p50": 10, "p95": 20}},
+        "gate": {"passed": False, "failures": [{"type": "absolute", "metric": "case_pass_rate"}]},
+        "results": [{"case_id": "failed-case", "passed": False, "failures": ["wrong route"]}],
+    }
+
+
+def test_html_is_single_file_and_contains_gate_and_failures(tmp_path: Path) -> None:
+    output = tmp_path / "report.html"
+
+    render_html(_report(), output)
+
+    html = output.read_text(encoding="utf-8")
+    assert "run-1" in html
+    assert "failed-case" in html
+    assert "wrong route" in html
+    assert "https://" not in html
+    assert "<script src=" not in html
+
+
+def test_html_escapes_script_termination_in_report_data(tmp_path: Path) -> None:
+    report = _report()
+    payload = "</script><img src=x onerror=alert(1)>"
+    report["results"][0]["failures"] = [payload]
+    output = tmp_path / "report.html"
+
+    render_html(report, output)
+
+    html = output.read_text(encoding="utf-8")
+    assert html.count('id="benchmark-data"') == 1
+    assert "<\\/script><img" in html
+    assert "</script><img" not in html
+    data_start = html.index('type="application/json">') + len('type="application/json">')
+    data_end = html.index("</script>", data_start)
+    assert "<img src=x onerror=alert(1)>" not in html[:data_start] + html[data_end:]
+    assert "node.textContent = text" in html
