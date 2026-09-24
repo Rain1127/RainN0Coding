@@ -295,6 +295,29 @@ def test_rag_runner_rejects_empty_ragas_rows(monkeypatch: pytest.MonkeyPatch, tm
         )
 
 
+def test_rag_latency_excludes_ragas_judge_time_but_duration_covers_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import benchmark.runners.rag as rag_runner_module
+
+    record_path = tmp_path / "search-results.json"
+    record_path.write_text(json.dumps({"rag-replay": [_result("watch")]}), encoding="utf-8")
+    clock = iter([0.0, 2.0, 5.0, 6.0])
+    monkeypatch.setattr(rag_runner_module, "perf_counter", lambda: next(clock))
+    ragas_module = types.ModuleType("rag.ragas_evaluator")
+    ragas_module.evaluate_offline = lambda rows: (rag_runner_module.perf_counter(), [{"faithfulness": 0.8}])[1]
+    monkeypatch.setitem(sys.modules, "rag.ragas_evaluator", ragas_module)
+
+    record = RagRunner().run(
+        _loaded_rag_case(
+            record_path=record_path,
+            input_data={"ragas": {"question": "What API?", "answer": "watch", "ground_truth": "Use watch."}},
+        ),
+        RunContext("run-1", offline=False),
+    )[0]
+
+    assert record.observed_metrics["retrieval_latency_ms"] == 2000.0
+    assert record.duration_ms == 6000.0
+
+
 def test_nightly_suite_adds_live_retrieval_and_ragas_cases_while_pr_stays_offline() -> None:
     pr_suite, pr_dir = load_suite("benchmarks/suites/pr.yaml")
     nightly_suite, nightly_dir = load_suite("benchmarks/suites/nightly.yaml")

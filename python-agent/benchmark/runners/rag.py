@@ -76,9 +76,10 @@ class RagRunner:
             document_ids, contexts = self._document_ids_and_contexts(case_id, results)
             k = input_data.get("k") or len(document_ids) or 1
             observed_metrics = retrieval_metrics(document_ids, relevant_document_ids, k)
+            retrieval_latency_ms = (perf_counter() - started) * 1000
             if input_data.get("ragas"):
                 observed_metrics.update(self._ragas_metrics(case_id, context.run_id, input_data, contexts))
-            observed_metrics["retrieval_latency_ms"] = (perf_counter() - started) * 1000
+            observed_metrics["retrieval_latency_ms"] = retrieval_latency_ms
             output = {"retrieved_document_ids": list(document_ids), "retrieved_count": len(document_ids)}
             records.append(
                 RawRunRecord(
