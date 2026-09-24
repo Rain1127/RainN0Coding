@@ -20,7 +20,11 @@
     th, td { text-align: left; border-bottom: 1px solid #e5e7eb; padding: 10px; vertical-align: top; }
     code { white-space: pre-wrap; word-break: break-word; }
     textarea { width: 100%; min-height: 120px; box-sizing: border-box; }
-    @media (max-width: 640px) { main { width: min(100% - 16px,1180px); } th:nth-child(3), td:nth-child(3) { display: none; } }
+    @media (max-width: 640px) {
+      main { width: min(100% - 16px,1180px); }
+      th:nth-child(2), td:nth-child(2) { white-space: nowrap; width: 1%; }
+      th:nth-child(3), td:nth-child(3) { display: none; }
+    }
   </style>
 </head>
 <body>
