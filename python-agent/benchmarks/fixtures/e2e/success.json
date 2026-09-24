@@ -1,0 +1,32 @@
+{
+  "output": {
+    "phase": "completed",
+    "final_status": "success",
+    "intent": {
+      "primary_intent": "create_web_page",
+      "confidence": 0.98
+    },
+    "code_files": [
+      {
+        "path": "index.html",
+        "content": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <title>Benchmark Ready</title>\n  </head>\n  <body>\n    <main id=\"benchmark-ready\">Offline benchmark fixture</main>\n  </body>\n</html>\n"
+      }
+    ],
+    "review": {
+      "passed": true,
+      "score": 94,
+      "issues": []
+    },
+    "quality_gate_result": {
+      "passed": true,
+      "review_score": 94,
+      "has_critical_issues": false,
+      "syntax_check_passed": true,
+      "reason": "reviewed offline fixture"
+    },
+    "build_result": {
+      "success": true,
+      "log": "static HTML fixture validated offline"
+    }
+  }
+}

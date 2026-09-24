@@ -129,9 +129,10 @@ def test_migration_is_deterministic_across_repeated_outputs(tmp_path: Path):
 def test_committed_regression_dataset_loads_with_benchmark_asset_boundary():
     benchmark_root = Path(__file__).parents[2] / "benchmarks"
     loaded = load_cases(benchmark_root / "datasets" / "regression", asset_root=benchmark_root)
-    assert len(loaded) == 8
+    assert len(loaded) == 9
     assert {case.record_path.name for case in loaded if case.record_path} == {
         "intent-fallback-vue.json",
         "reviewer-detects-xss.json",
         "search-results.json",
+        "success.json",
     }

@@ -18,7 +18,7 @@ SUITE = "benchmarks/suites/pr.yaml"
 
 def test_validate_pr_suite_prints_validated(capsys) -> None:
     assert main(["validate", "--suite", SUITE]) == 0
-    assert capsys.readouterr().out == "validated 8 benchmark cases for suite pr\n"
+    assert capsys.readouterr().out == "validated 9 benchmark cases for suite pr\n"
 
 
 def test_run_pr_suite_writes_report_metadata_and_raw_records(tmp_path: Path) -> None:
@@ -33,8 +33,8 @@ def test_run_pr_suite_writes_report_metadata_and_raw_records(tmp_path: Path) -> 
 
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["metadata"]["git_sha"] == "test-sha"
-    assert report["summary"]["cases"] == 8
-    assert len(list(record_dir.glob("*/*.json"))) == 8
+    assert report["summary"]["cases"] == 9
+    assert len(list(record_dir.glob("*/*.json"))) == 9
     assert "test-sha" in html_output.read_text(encoding="utf-8")
 
 
@@ -75,7 +75,7 @@ def test_run_uses_default_record_directory_relative_to_current_directory(tmp_pat
 
     assert main(["run", "--suite", str(suite), "--output", str(output), "--git-sha", "test-sha"]) == 0
 
-    assert len(list((tmp_path / "benchmarks" / "records" / "runs").glob("*/*.json"))) == 8
+    assert len(list((tmp_path / "benchmarks" / "records" / "runs").glob("*/*.json"))) == 9
 
 
 def _loaded(case_id: str, mode: str = "deterministic", repeats: int = 1) -> LoadedCase:
@@ -142,15 +142,15 @@ def test_disallowed_modes_message_uses_sorted_list_representation() -> None:
     try:
         _load_cases(restricted, suite_dir)
     except ValueError as exc:
-        assert str(exc) == "suite contains disallowed modes: ['rag', 'replay']"
+        assert str(exc) == "suite contains disallowed modes: ['e2e', 'rag', 'replay']"
     else:
         raise AssertionError("expected disallowed replay mode")
 
 
 def test_missing_runner_message_is_exact() -> None:
-    result = run_cases([_loaded("unregistered", "e2e")], RunContext("run", True))
+    result = run_cases([_loaded("unregistered", "live")], RunContext("run", False))
 
-    assert result[0].infrastructure_error == "runner is not registered for mode: e2e"
+    assert result[0].infrastructure_error == "runner is not registered for mode: live"
 
 
 def test_suite_skips_future_dataset_root_when_a_valid_root_exists() -> None:
@@ -158,7 +158,7 @@ def test_suite_skips_future_dataset_root_when_a_valid_root_exists() -> None:
     configured = "missing-dataset"
     staged = suite.model_copy(update={"dataset_roots": [configured, "../datasets/regression"]})
 
-    assert len(_load_cases(staged, suite_dir)) == 8
+    assert len(_load_cases(staged, suite_dir)) == 9
 
 
 def test_suite_fails_only_when_all_configured_dataset_roots_are_missing() -> None:
