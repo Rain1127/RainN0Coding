@@ -12,7 +12,18 @@ pytestmark = pytest.mark.harness
 def _stub_retrieval_import_deps():
     milvus_module = types.ModuleType("rag.milvus_client")
     milvus_module.milvus_store = types.SimpleNamespace(search_multi=lambda queries: [])
-    return {"rag.milvus_client": milvus_module}
+    vector_store_module = types.ModuleType("rag.vector_store")
+    vector_store_module.vector_store = types.SimpleNamespace(search_multi=lambda queries: [])
+    sqlite_store_module = types.ModuleType("rag.sqlite_store")
+    sqlite_store_module.sqlite_store = types.SimpleNamespace(search=lambda *args, **kwargs: [])
+    code_grep_module = types.ModuleType("rag.code_grep")
+    code_grep_module.code_grep = types.SimpleNamespace(search=lambda *args, **kwargs: [])
+    return {
+        "rag.milvus_client": milvus_module,
+        "rag.vector_store": vector_store_module,
+        "rag.sqlite_store": sqlite_store_module,
+        "rag.code_grep": code_grep_module,
+    }
 
 
 class _BlockingModuleFinder:
@@ -52,6 +63,9 @@ def _isolated_retrieval_imports(include_hybrid=False):
     stubbed_modules = _stub_retrieval_import_deps()
     module_names = [
         "rag.milvus_client",
+        "rag.vector_store",
+        "rag.sqlite_store",
+        "rag.code_grep",
         "rag.retrieval_engine",
         "rag.retrieval_common",
     ]
@@ -141,6 +155,26 @@ def test_retrieval_engine_serialization_round_trips_shared_result():
     )
 
 
+def test_retrieval_engine_exposes_ranked_results_while_preserving_formatted_retrieve_output(monkeypatch):
+    retrieval_common, retrieval_engine = _load_retrieval_modules()
+    engine = retrieval_engine.RetrievalEngine()
+    ctx = retrieval_common.RetrievalContext(phase="review", user_request="use watch")
+    raw = [
+        retrieval_common.RetrievalResult(
+            content="API watch", source_collection="framework_api", source_channel="intent_directed",
+            score=0.9, metadata={"api_name": "watch"},
+        )
+    ]
+    monkeypatch.setattr(engine.channel_a, "retrieve", lambda _ctx: raw)
+    monkeypatch.setattr(retrieval_engine.rag_cache, "get", lambda *_args: None)
+    monkeypatch.setattr(retrieval_engine.rag_cache, "set", lambda *_args: None)
+
+    ranked = engine.retrieve_results(ctx)
+
+    assert ranked == raw
+    assert engine.retrieve(ctx) == engine.postprocessor.format(ranked)
+
+
 def test_hybrid_engine_deserialization_uses_shared_result_model():
     retrieval_common, retrieval_engine, hybrid_engine = _load_hybrid_modules()
     result = _sample_result(retrieval_common.RetrievalResult)
@@ -158,6 +192,9 @@ def test_semantic_and_hybrid_engines_import_shared_types_without_retrieval_engin
     stubbed_modules = _stub_retrieval_import_deps()
     module_names = [
         "rag.milvus_client",
+        "rag.vector_store",
+        "rag.sqlite_store",
+        "rag.code_grep",
         "rag.retrieval_engine",
         "rag.retrieval_common",
         "rag.semantic_engine",

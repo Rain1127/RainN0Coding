@@ -1,0 +1,34 @@
+{
+  "rag-vue-watch-replay": [
+    {
+      "content": "API watch: function watch(source, callback, options?)",
+      "source_collection": "framework_api",
+      "source_channel": "intent_directed",
+      "score": 0.91,
+      "metadata": {"api_name": "watch", "framework": "vue3"}
+    },
+    {
+      "content": "API computed: function computed(getter)",
+      "source_collection": "framework_api",
+      "source_channel": "global_vector",
+      "score": 0.82,
+      "metadata": {"api_name": "computed", "framework": "vue3"}
+    }
+  ],
+  "rag-component-table-replay": [
+    {
+      "content": "Component DataTable: reusable table component skeleton",
+      "source_collection": "component_library",
+      "source_channel": "intent_directed",
+      "score": 0.93,
+      "metadata": {"component_name": "DataTable", "framework": "vue3"}
+    },
+    {
+      "content": "Component SearchFilter: reusable search filter skeleton",
+      "source_collection": "component_library",
+      "source_channel": "global_vector",
+      "score": 0.80,
+      "metadata": {"component_name": "SearchFilter", "framework": "vue3"}
+    }
+  ]
+}

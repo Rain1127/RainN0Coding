@@ -241,7 +241,11 @@ class RetrievalEngine:
         return {"intent_directed": True, "global_vector": False}
 
     def retrieve(self, ctx: RetrievalContext) -> str:
-        """执行检索，返回格式化 Prompt 文本。
+        """执行检索，返回格式化 Prompt 文本。"""
+        return self.postprocessor.format(self.retrieve_results(ctx))
+
+    def retrieve_results(self, ctx: RetrievalContext) -> list[RetrievalResult]:
+        """Execute the dual-channel pipeline and expose its ranked results.
 
         每个通道独立缓存：rag_cache:{version}:{phase}:{channel}:{query_md5}
         """
@@ -299,7 +303,7 @@ class RetrievalEngine:
                     print(f"[RetrievalEngine] 通道 {channel_name} 失败: {e}")
 
         if not all_results:
-            return ""
+            return []
 
         # === 反馈追踪 (P2)：记录检索到的 code_store 条目 ===
         if ctx.app_id:
@@ -332,8 +336,7 @@ class RetrievalEngine:
         ranked = self.postprocessor.rerank(deduped)
         print(f"[RetrievalEngine] 重排序: top {len(ranked)}")
 
-        formatted = self.postprocessor.format(ranked)
-        return formatted
+        return ranked
 
 
     # ========== 缓存序列化 ==========

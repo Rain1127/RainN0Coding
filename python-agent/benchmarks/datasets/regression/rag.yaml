@@ -1,0 +1,47 @@
+schema_version: 1
+dataset_version: 2026.09.1
+cases:
+- id: rag-vue-watch-replay
+  target: rag
+  category: retrieval
+  difficulty: basic
+  tags: [pr, replay]
+  execution:
+    mode: rag
+    record: ../../fixtures/rag/search-results.json
+  input:
+    phase: code
+    user_request: Watch a Vue reactive value and update state.
+    code_gen_type: vue_project
+    k: 2
+  expectations:
+    equals: {retrieved_count: 2}
+    required_paths: [document_ids, retrieved_count]
+    relevant_document_ids: [framework_api:watch]
+  metric_tags:
+    equals.retrieved_count: retrieval_replay_completeness
+    required_paths: retrieval_output_protocol_completeness
+  output_metrics: {}
+  provenance: {source: curated, reviewed: true, sanitized: true}
+- id: rag-component-table-replay
+  target: rag
+  category: retrieval
+  difficulty: basic
+  tags: [pr, replay]
+  execution:
+    mode: rag
+    record: ../../fixtures/rag/search-results.json
+  input:
+    phase: code
+    user_request: Build a Vue table with filtering controls.
+    code_gen_type: vue_project
+    k: 2
+  expectations:
+    equals: {retrieved_count: 2}
+    required_paths: [document_ids, retrieved_count]
+    relevant_document_ids: [component_library:DataTable]
+  metric_tags:
+    equals.retrieved_count: retrieval_replay_completeness
+    required_paths: retrieval_output_protocol_completeness
+  output_metrics: {}
+  provenance: {source: curated, reviewed: true, sanitized: true}
