@@ -1,0 +1,222 @@
+schema_version: 1
+dataset_version: 2026.09.1
+cases:
+  - id: intent-vue-clear-live
+    target: intent
+    category: intent
+    difficulty: basic
+    tags: [nightly, live, vue]
+    execution:
+      mode: live
+      repeats: 3
+    input:
+      phase: init
+      user_request: Build a Vue task dashboard with a searchable task table and status filters.
+      code_gen_type: vue_project
+    expectations:
+      equals:
+        phase: intent_done
+        error: null
+      required_paths:
+        - intent.slots.code_gen_type
+    metric_tags:
+      equals.phase: intent_state_transition
+      equals.error: intent_failure_handling
+      required_paths: intent_output_protocol_completeness
+    provenance:
+      source: curated
+      reviewed: true
+      sanitized: true
+
+  - id: intent-ambiguous-live
+    target: intent
+    category: intent
+    difficulty: hard
+    tags: [nightly, live, ambiguous]
+    execution:
+      mode: live
+      repeats: 3
+    input:
+      phase: init
+      user_request: Build something useful for my team.
+    expectations:
+      equals:
+        phase: clarify
+      required_paths:
+        - clarification.questions
+    metric_tags:
+      equals.phase: clarification_accuracy
+      required_paths: intent_output_protocol_completeness
+    provenance:
+      source: curated
+      reviewed: true
+      sanitized: true
+
+  - id: reviewer-xss-live
+    target: reviewer
+    category: security
+    difficulty: medium
+    tags: [nightly, live, xss]
+    execution:
+      mode: live
+      repeats: 3
+    input:
+      phase: code_done
+      code_gen_type: vue_project
+      retry_count: 0
+      max_retries: 3
+      prd:
+        features:
+          - name: Comment preview
+            description: Display text entered by the user.
+            priority: P0
+      architecture:
+        file_list:
+          - path: src/App.vue
+            purpose: Render the comment preview.
+      code_files:
+        - path: src/App.vue
+          content: |-
+            <template><main v-html="userInput"></main></template>
+            <script setup>const userInput = '<img src=x onerror=alert(1)>'</script>
+    expectations:
+      equals:
+        passed: false
+      required_paths:
+        - issues
+      required_text:
+        issues: [XSS, v-html]
+    metric_tags:
+      equals.passed: critical_defect_detection
+      required_paths: review_output_protocol_completeness
+      required_text.issues: critical_defect_recall
+    output_metrics:
+      score: review_score
+    provenance:
+      source: curated
+      reviewed: true
+      sanitized: true
+
+  - id: reviewer-clean-live
+    target: reviewer
+    category: security
+    difficulty: medium
+    tags: [nightly, live, clean]
+    execution:
+      mode: live
+      repeats: 3
+    input:
+      phase: code_done
+      code_gen_type: vue_project
+      retry_count: 0
+      max_retries: 3
+      prd:
+        features:
+          - name: Comment preview
+            description: Display text entered by the user as escaped text.
+            priority: P0
+      architecture:
+        file_list:
+          - path: src/App.vue
+            purpose: Render escaped comment text.
+      code_files:
+        - path: src/App.vue
+          content: |-
+            <template><main>{{ userInput }}</main></template>
+            <script setup>const userInput = 'A safe example comment'</script>
+    expectations:
+      equals:
+        passed: true
+      required_paths:
+        - score
+    metric_tags:
+      equals.passed: clean_code_accuracy
+      required_paths: review_output_protocol_completeness
+    output_metrics:
+      score: review_score
+    provenance:
+      source: curated
+      reviewed: true
+      sanitized: true
+
+  - id: coder-html-login-live
+    target: coder
+    category: code_generation
+    difficulty: medium
+    tags: [nightly, live, html]
+    execution:
+      mode: live
+      repeats: 3
+    input:
+      phase: architecture_done
+      mode: new
+      code_gen_type: html
+      user_role: user
+      retry_count: 0
+      max_retries: 3
+      user_request: Create a static accessible login page with email and password fields and a submit button.
+      prd:
+        features:
+          - name: Login form
+            description: Accessible email and password inputs with a submit action.
+            priority: P0
+      architecture:
+        tech_stack:
+          framework: static-html
+          language: html
+        component_tree:
+          - name: LoginPage
+            children: [LoginForm]
+        data_flow:
+          - Static form submission is prevented and validated in the browser.
+        file_list:
+          - path: index.html
+            purpose: Self-contained accessible login page with inline styles and behavior.
+    expectations:
+      equals:
+        phase: code_done
+        benchmark_code_check.passed: true
+      required_paths:
+        - code_files
+      required_files:
+        - index.html
+    metric_tags:
+      equals.phase: task_correctness
+      equals.benchmark_code_check.passed: build_success
+      required_paths: output_protocol_completeness
+      required_files: output_protocol_completeness
+    provenance:
+      source: curated
+      reviewed: true
+      sanitized: true
+
+  - id: e2e-html-login-live
+    target: e2e
+    category: workflow
+    difficulty: hard
+    tags: [nightly, live, e2e, html]
+    execution:
+      mode: live
+      repeats: 2
+    input:
+      user_request: Create a complete static accessible login page with email and password fields and a submit button.
+      code_gen_type: html
+      user_role: user
+    expectations:
+      equals:
+        final_status: success
+      required_paths:
+        - phase
+        - review
+        - build_result
+        - code_files
+      required_files:
+        - index.html
+    metric_tags:
+      equals.final_status: task_correctness
+      required_paths: output_protocol_completeness
+      required_files: output_protocol_completeness
+    provenance:
+      source: curated
+      reviewed: true
+      sanitized: true

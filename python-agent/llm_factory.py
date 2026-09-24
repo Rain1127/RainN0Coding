@@ -7,7 +7,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 from config import config
 from core.model_router import model_router
-from request_context import build_litellm_metadata
+from request_context import build_litellm_metadata, record_llm_response
 
 # 创建 LLM 实例
 def create_llm(temperature: float | None = None) -> ChatOpenAI:
@@ -43,6 +43,7 @@ def _call_with_parser(messages: list, output_schema: type[BaseModel],
             content=last_msg.content + "\n\n" + field_spec
         )
         response = _client.invoke(msgs, config=_config)
+        record_llm_response(response, _model or "unknown")
         content = response.content or ""
     else:
         # === 旧兼容路径：LangChain ChatOpenAI ===
@@ -53,6 +54,9 @@ def _call_with_parser(messages: list, output_schema: type[BaseModel],
             content=last_msg.content + "\n\n" + field_spec
         )
         response = llm.invoke(msgs)
+        response_metadata = getattr(response, "response_metadata", {}) or {}
+        response_model = response_metadata.get("model_name", "unknown") if isinstance(response_metadata, dict) else "unknown"
+        record_llm_response(response, _model or response_model)
         content = response.content
 
     content = _strip_code_fences(content)
@@ -154,7 +158,7 @@ class _ToolEnabledRouter:
         self.group = group
 
     def invoke(self, messages: list, config: dict | None = None):
-        def invoke_with_tools(msgs, _client=None, _config=None):
+        def invoke_with_tools(msgs, _client=None, _model=None, _config=None):
             if _client is None:
                 raise RuntimeError("tool-enabled routing requires a model client")
             return _client.bind_tools(self.tools).invoke(msgs, config=_config)

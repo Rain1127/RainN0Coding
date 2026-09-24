@@ -5,7 +5,7 @@ from langchain_openai import ChatOpenAI
 from config import config
 from core.model_registry import get_model_alias
 from monitoring import record_llm_call
-from request_context import build_litellm_metadata
+from request_context import build_litellm_metadata, record_llm_response
 from tracing import start_span
 
 
@@ -44,10 +44,14 @@ class ModelRouter:
                     result = parser(
                         messages,
                         _client=client,
+                        _model=model_alias,
                         _config=runnable_config,
                     )
+                    if hasattr(result, "usage_metadata"):
+                        record_llm_response(result, model_alias)
                 else:
                     response = client.invoke(messages, config=runnable_config)
+                    record_llm_response(response, model_alias)
                     result = response.content or ""
                     if not result:
                         raise ValueError(f"{model_alias}: empty gateway response")

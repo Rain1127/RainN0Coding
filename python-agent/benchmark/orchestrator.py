@@ -10,6 +10,7 @@ from benchmark.record_store import persist_raw_record
 from benchmark.runners.base import RunContext, Runner
 from benchmark.runners.deterministic import DeterministicRunner
 from benchmark.runners.end_to_end import EndToEndRunner
+from benchmark.runners.live_llm import LiveLlmRunner
 from benchmark.runners.rag import RagRunner
 from benchmark.runners.replay import ReplayRunner
 
@@ -17,6 +18,7 @@ from benchmark.runners.replay import ReplayRunner
 RUNNERS: dict[str, Runner] = {
     "deterministic": DeterministicRunner(),
     "e2e": EndToEndRunner(),
+    "live": LiveLlmRunner(),
     "replay": ReplayRunner(),
     "rag": RagRunner(),
 }

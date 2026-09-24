@@ -147,7 +147,8 @@ def test_disallowed_modes_message_uses_sorted_list_representation() -> None:
         raise AssertionError("expected disallowed replay mode")
 
 
-def test_missing_runner_message_is_exact() -> None:
+def test_missing_runner_message_is_exact(monkeypatch) -> None:
+    monkeypatch.delitem(RUNNERS, "live")
     result = run_cases([_loaded("unregistered", "live")], RunContext("run", False))
 
     assert result[0].infrastructure_error == "runner is not registered for mode: live"

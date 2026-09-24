@@ -2,11 +2,17 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from collections.abc import Iterator
 import json
+import math
 
 
 _request_metadata: ContextVar[dict[str, str]] = ContextVar(
     "request_metadata",
     default={},
+)
+
+_llm_usage: ContextVar[list[dict[str, object]] | None] = ContextVar(
+    "llm_usage",
+    default=None,
 )
 
 
@@ -68,3 +74,63 @@ def bind_request_context(
         yield
     finally:
         _request_metadata.reset(token)
+
+
+@contextmanager
+def capture_llm_usage() -> Iterator[list[dict[str, object]]]:
+    """Capture provider-reported LLM usage in the current execution context."""
+    captured: list[dict[str, object]] = []
+    token = _llm_usage.set(captured)
+    try:
+        yield captured
+    finally:
+        _llm_usage.reset(token)
+
+
+def _token_count(usage: dict[str, object], primary: str, fallback: str) -> int:
+    value = usage.get(primary, usage.get(fallback, 0))
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{primary} tokens must be a non-negative integer")
+    return value
+
+
+def record_llm_response(response: object, model: str) -> None:
+    """Record actual provider usage, without estimating unavailable spend."""
+    captured = _llm_usage.get()
+    if captured is None:
+        return
+
+    response_metadata = getattr(response, "response_metadata", {}) or {}
+    if not isinstance(response_metadata, dict):
+        response_metadata = {}
+    usage = getattr(response, "usage_metadata", None)
+    if not isinstance(usage, dict):
+        fallback_usage = response_metadata.get("token_usage", {}) or {}
+        usage = fallback_usage if isinstance(fallback_usage, dict) else {}
+
+    input_tokens = _token_count(usage, "input_tokens", "prompt_tokens")
+    output_tokens = _token_count(usage, "output_tokens", "completion_tokens")
+    expected_total = input_tokens + output_tokens
+    total_value = usage.get("total_tokens", expected_total)
+    if isinstance(total_value, bool) or not isinstance(total_value, int) or total_value < expected_total:
+        raise ValueError("total_tokens tokens must be a non-negative integer at least input plus output")
+
+    raw_cost = response_metadata.get("response_cost")
+    cost = None
+    if isinstance(raw_cost, (int, float)) and not isinstance(raw_cost, bool) and raw_cost >= 0:
+        try:
+            normalized_cost = float(raw_cost)
+        except OverflowError:
+            pass
+        else:
+            if math.isfinite(normalized_cost):
+                cost = normalized_cost
+    captured.append(
+        {
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_value,
+            "cost_usd": cost,
+        }
+    )

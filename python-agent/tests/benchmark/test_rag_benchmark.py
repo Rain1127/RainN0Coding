@@ -455,7 +455,7 @@ def test_nightly_suite_adds_live_retrieval_and_ragas_cases_while_pr_stays_offlin
 
     assert len(pr_cases) == 9
     assert {case.case.id for case in nightly_cases} >= {"rag-nightly-live-retrieval", "rag-nightly-ragas"}
-    assert len(nightly_cases) == 11
+    assert len(nightly_cases) == 17
 
 
 def test_real_retrieval_adapter_builds_context_and_serializes_ranked_results(monkeypatch: pytest.MonkeyPatch) -> None:
