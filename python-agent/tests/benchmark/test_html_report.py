@@ -32,6 +32,9 @@ def test_html_is_single_file_and_contains_gate_and_failures(tmp_path: Path) -> N
         assert f'id="{element_id}"' in html
     for element_id in ("benchmark-status", "benchmark-summary", "benchmark-targets", "benchmark-metrics", "benchmark-gate", "benchmark-interview", "benchmark-cases"):
         assert f'id="{element_id}"' not in html
+    assert ".grid > *, .card { min-width: 0; }" in html
+    assert ".card-value, #status p, pre, code, th, td { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }" in html
+    assert '"card-value"' in html
 
 
 def test_html_escapes_script_termination_in_report_data(tmp_path: Path) -> None:

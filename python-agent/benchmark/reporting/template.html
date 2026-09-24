@@ -12,7 +12,10 @@
     .passed { border-left: 8px solid #17803d; }
     .failed { border-left: 8px solid #b42318; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 12px; }
+    .grid > *, .card { min-width: 0; }
     .card { background: #f8fafc; border-radius: 8px; padding: 14px; }
+    .card-value, #status p, pre, code, th, td { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+    pre { margin: 0; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; border-bottom: 1px solid #e5e7eb; padding: 10px; vertical-align: top; }
     code { white-space: pre-wrap; word-break: break-word; }
@@ -55,7 +58,7 @@
       Object.entries(values).forEach(([name, value]) => {
         const card = element("article", "", "card");
         card.appendChild(element("strong", name));
-        card.appendChild(element("div", JSON.stringify(value)));
+        card.appendChild(element("div", JSON.stringify(value), "card-value"));
         target.appendChild(card);
       });
     }
