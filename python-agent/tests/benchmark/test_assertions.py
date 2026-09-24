@@ -107,3 +107,19 @@ def test_required_files_fail_when_generated_file_schema_is_invalid():
     assert result.assertions_total == 1
     assert result.assertions[0].metric == "output_protocol_completeness"
     assert result.failures == ["index.html: generated files are invalid"]
+
+
+def test_required_files_use_the_same_windows_safe_component_grammar():
+    result = evaluate_assertions(
+        _case({"required_files": ["a.txt:stream", "bad?.py", "nested/CON.txt"]}),
+        {"code_files": [{"path": "index.html", "content": "safe"}]},
+    )
+
+    assert result.passed is False
+    assert result.assertions_total == 3
+    assert all(not item.passed for item in result.assertions)
+    assert result.failures == [
+        "a.txt:stream: required generated file path is invalid",
+        "bad?.py: required generated file path is invalid",
+        "nested/CON.txt: required generated file path is invalid",
+    ]

@@ -185,6 +185,8 @@ def test_code_execution_infrastructure_failure_is_not_quality(tmp_path: Path) ->
     "code_files",
     [
         [{"path": "../private-name.py", "content": "x = 1"}],
+        [{"path": "a.txt:stream", "content": "x = 1"}],
+        [{"path": "nested/CON.txt", "content": "x = 1"}],
         [{"path": "app", "content": "file"}, {"path": "app/main.py", "content": "child"}],
         [{"path": "index.html", "content": "ok", "unexpected": "field"}],
     ],
@@ -296,4 +298,14 @@ def test_runner_rejects_invalid_execution_configuration(tmp_path: Path, input_da
     loaded = _loaded(tmp_path, input_data=input_data)
 
     with pytest.raises(ValueError, match="e2e-fixture: (execution_command|timeout_seconds)"):
+        EndToEndRunner().run(loaded, RunContext("run", True))
+
+
+@pytest.mark.parametrize("required_file", ["a.txt:stream", "bad?.py", "nested/CON.txt"])
+def test_runner_validates_required_files_with_the_windows_safe_grammar(
+    tmp_path: Path, required_file: str
+) -> None:
+    loaded = _loaded(tmp_path, expectations={"required_files": [required_file]})
+
+    with pytest.raises(ValueError, match="e2e-fixture: required_files must contain safe non-empty paths"):
         EndToEndRunner().run(loaded, RunContext("run", True))

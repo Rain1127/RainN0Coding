@@ -12,6 +12,7 @@ from benchmark.contracts import LoadedCase, RawRunRecord
 from benchmark.evaluators.code_execution import (
     MAX_TIMEOUT_SECONDS,
     evaluate_code,
+    normalize_generated_path,
     validate_generated_files,
 )
 from benchmark.runners.base import RunContext
@@ -132,9 +133,7 @@ class EndToEndRunner:
 
     @staticmethod
     def _required_file(case_id: str, raw_path: object) -> str:
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            raise ValueError(f"{case_id}: required_files must contain safe non-empty paths")
-        relative = Path(raw_path)
-        if relative.is_absolute() or bool(relative.drive) or any(part in {"", ".", ".."} for part in relative.parts):
-            raise ValueError(f"{case_id}: required_files must contain safe non-empty paths")
-        return relative.as_posix()
+        try:
+            return normalize_generated_path(raw_path).as_posix()
+        except ValueError as exc:
+            raise ValueError(f"{case_id}: required_files must contain safe non-empty paths") from exc

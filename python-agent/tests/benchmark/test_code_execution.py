@@ -21,8 +21,22 @@ def test_materialize_rejects_empty_or_absolute_paths(tmp_path: Path, path: str) 
         materialize_files([{"path": path, "content": "x"}], tmp_path)
 
 
-@pytest.mark.parametrize("path", ["a.txt.", "a.txt ", "dir./main.py", "dir /main.py"])
-def test_materialize_rejects_windows_trailing_dot_or_space_aliases(tmp_path: Path, path: str) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "a.txt.",
+        "a.txt ",
+        "dir./main.py",
+        "dir /main.py",
+        "a.txt:stream",
+        "bad?.py",
+        "nested/CON.txt",
+        "nested/lpt9.log",
+        "control\x01.py",
+        "nul\x00.py",
+    ],
+)
+def test_materialize_rejects_windows_unsafe_components_on_every_platform(tmp_path: Path, path: str) -> None:
     with pytest.raises(ValueError, match="unsafe generated path"):
         materialize_files([{"path": path, "content": "x"}], tmp_path)
 
@@ -155,7 +169,7 @@ def test_missing_tool_is_infrastructure_error(tmp_path: Path) -> None:
 
 def test_timeout_terminates_the_entire_process_tree_before_a_child_can_write(tmp_path: Path) -> None:
     marker = tmp_path / "child-marker.txt"
-    child = "import pathlib,sys,time; time.sleep(2.5); pathlib.Path(sys.argv[1]).write_text('escaped')"
+    child = "import pathlib,sys,time; time.sleep(1.4); pathlib.Path(sys.argv[1]).write_text('escaped')"
     launcher = (
         "import subprocess,sys,time; "
         "subprocess.Popen([sys.executable, '-c', " + repr(child) + ", sys.argv[1]]); "
@@ -170,10 +184,56 @@ def test_timeout_terminates_the_entire_process_tree_before_a_child_can_write(tmp
         timeout_seconds=1,
     )
     elapsed = time.monotonic() - started
-    time.sleep(2.75)
+    time.sleep(0.65)
 
     assert result["infrastructure_error"] == "code execution timed out after 1 seconds"
-    assert elapsed < 2.25
+    assert elapsed < 1.9
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("parent_exit_code", [0, 3])
+def test_completed_parent_exit_still_cleans_a_detached_background_child(
+    tmp_path: Path, parent_exit_code: int
+) -> None:
+    marker = tmp_path / "background-marker.txt"
+    child = "import pathlib,sys,time; time.sleep(0.45); pathlib.Path(sys.argv[1]).write_text('escaped')"
+    launcher = (
+        "import subprocess,sys; "
+        "subprocess.Popen([sys.executable, '-c', " + repr(child) + ", sys.argv[1]], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True); "
+        f"raise SystemExit({parent_exit_code})"
+    )
+
+    result = evaluate_code(
+        files=[{"path": "launcher.py", "content": launcher}],
+        project_dir=tmp_path / "project",
+        command=[sys.executable, "launcher.py", str(marker)],
+        timeout_seconds=5,
+    )
+    time.sleep(0.7)
+
+    assert result["passed"] is (parent_exit_code == 0)
+    assert result["infrastructure_error"] is None
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object isolation is Windows-specific")
+def test_windows_job_setup_failure_never_resumes_the_suspended_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import benchmark.evaluators.code_execution as module
+
+    marker = tmp_path / "must-not-run.txt"
+    monkeypatch.setattr(module, "_create_windows_kill_job", lambda _process: None)
+    result = evaluate_code(
+        files=[{"path": "main.py", "content": "from pathlib import Path; Path(__import__('sys').argv[1]).write_text('ran')"}],
+        project_dir=tmp_path / "project",
+        command=[sys.executable, "main.py", str(marker)],
+        timeout_seconds=5,
+    )
+
+    assert result["passed"] is False
+    assert result["infrastructure_error"] == "Windows process isolation could not be established"
     assert not marker.exists()
 
 

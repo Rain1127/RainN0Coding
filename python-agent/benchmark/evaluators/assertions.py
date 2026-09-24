@@ -1,11 +1,10 @@
 """Declarative assertion evaluation for benchmark outputs."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from benchmark.contracts import BenchmarkCase, CaseEvaluation, MetricAssertion
-from benchmark.evaluators.code_execution import validate_generated_files
+from benchmark.evaluators.code_execution import normalize_generated_path, validate_generated_files
 
 
 MISSING = object()
@@ -116,9 +115,14 @@ def evaluate_assertions(
             generated_files_valid = False
     for path in expectations.required_files:
         total += 1
-        normalized = Path(path).as_posix()
-        passed = generated_files_valid and normalized in generated_paths
-        if passed:
+        try:
+            normalized = normalize_generated_path(path).as_posix()
+        except ValueError:
+            normalized = None
+        passed = normalized is not None and generated_files_valid and normalized in generated_paths
+        if normalized is None:
+            failures.append(f"{path}: required generated file path is invalid")
+        elif passed:
             passed_count += 1
         elif generated_files_valid:
             failures.append(f"{path}: required generated file is missing")
