@@ -184,7 +184,46 @@ def test_intent_fallback_without_usage_is_infrastructure_error():
         }
     ).run(_loaded(), RunContext("run", False))[0]
 
-    assert record.infrastructure_error == "intent live target completed without LLM usage"
+    assert record.infrastructure_error == "intent infrastructure failure: fallback"
+
+
+def test_intent_fallback_with_usage_is_still_infrastructure_error():
+    def invoke(target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return {
+            "phase": "intent_done",
+            "error": None,
+            "intent": {
+                "confidence": 0.55,
+                "confidence_reason": (
+                    "LLM unavailable, fallback to rule router: password=hunter2"
+                ),
+            },
+        }
+
+    record = LiveLlmRunner(invoke).run(_loaded(), RunContext("run", False))[0]
+
+    assert record.infrastructure_error == "intent infrastructure failure: fallback"
+    assert "hunter2" not in record.infrastructure_error
+
+
+def test_normal_low_confidence_intent_with_usage_remains_a_quality_result():
+    def invoke(target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return {
+            "phase": "clarify",
+            "error": None,
+            "intent": {
+                "confidence": 0.35,
+                "confidence_reason": "The request lacks concrete application details.",
+            },
+            "clarification": {"questions": ["What should the app do?"]},
+        }
+
+    record = LiveLlmRunner(invoke).run(_loaded(), RunContext("run", False))[0]
+
+    assert record.infrastructure_error is None
+    assert record.output["phase"] == "clarify"
 
 
 @pytest.mark.parametrize("target", ["reviewer", "coder"])
@@ -300,7 +339,7 @@ def test_untrusted_e2e_reason_code_is_not_copied_into_error_summary():
         return {
             "phase": "completed",
             "phase_failures": [
-                {"phase": "coder", "reason_code": "token=sk-secretvalue123"}
+                {"phase": "coder", "reason_code": "sk-proj-SECRETvalue123"}
             ],
         }
 
@@ -309,8 +348,26 @@ def test_untrusted_e2e_reason_code_is_not_copied_into_error_summary():
         RunContext("run", False),
     )[0]
 
-    assert record.infrastructure_error == "e2e infrastructure failure: coder_failure"
-    assert "secretvalue" not in record.infrastructure_error
+    assert record.infrastructure_error == "e2e infrastructure failure: workflow_failure"
+    assert "SECRETvalue" not in record.infrastructure_error
+
+
+def test_untrusted_failed_phase_is_not_copied_into_error_summary():
+    def invoke(target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return {
+            "phase": "completed",
+            "final_status": "failed",
+            "failed_phase": "sk-proj-SECRETvalue123",
+        }
+
+    record = LiveLlmRunner(invoke).run(
+        _loaded(target="e2e"),
+        RunContext("run", False),
+    )[0]
+
+    assert record.infrastructure_error == "e2e infrastructure failure: workflow_failure"
+    assert "SECRETvalue" not in record.infrastructure_error
 
 
 def test_usage_metrics_are_total_for_overflow_and_malformed_entries():

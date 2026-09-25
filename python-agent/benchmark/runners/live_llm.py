@@ -140,13 +140,37 @@ def _usage_metrics(usage: list[dict[str, object]]) -> dict[str, float | None]:
     }
 
 
-_SAFE_REASON_CODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
+_WORKFLOW_PHASES = frozenset(
+    {
+        "intent",
+        "pm",
+        "architect",
+        "image_collector",
+        "coder",
+        "reviewer",
+        "builder",
+        "memory",
+        "rag",
+    }
+)
+_WORKFLOW_REASON_CODES = frozenset(
+    f"{phase}_{failure_type}"
+    for phase in _WORKFLOW_PHASES
+    for failure_type in ("timeout", "exception")
+)
+_INTENT_FALLBACK_PREFIX = "LLM unavailable, fallback to rule router:"
 
 
-def _safe_reason_code(value: object, fallback: str) -> str:
-    if isinstance(value, str) and _SAFE_REASON_CODE.fullmatch(value):
+def _known_workflow_phase(value: object) -> str | None:
+    if isinstance(value, str) and value in _WORKFLOW_PHASES:
         return value
-    return fallback
+    return None
+
+
+def _known_workflow_reason(value: object) -> str | None:
+    if isinstance(value, str) and value in _WORKFLOW_REASON_CODES:
+        return value
+    return None
 
 
 def _live_infrastructure_error(
@@ -159,27 +183,40 @@ def _live_infrastructure_error(
     if output.get("error"):
         return f"{target} infrastructure failure: agent_error"
 
+    intent = output.get("intent")
+    if target == "intent" and isinstance(intent, dict):
+        confidence_reason = intent.get("confidence_reason")
+        if (
+            isinstance(confidence_reason, str)
+            and confidence_reason.startswith(_INTENT_FALLBACK_PREFIX)
+        ):
+            return "intent infrastructure failure: fallback"
+
     if target == "e2e":
         failures = output.get("phase_failures")
         if isinstance(failures, list) and failures:
             failure = failures[0] if isinstance(failures[0], dict) else {}
-            phase = _safe_reason_code(failure.get("phase"), "workflow")
-            reason = _safe_reason_code(
-                failure.get("reason_code"),
-                f"{phase}_failure",
-            )
+            phase = _known_workflow_phase(failure.get("phase"))
+            reason = _known_workflow_reason(failure.get("reason_code"))
+            if phase is None or reason is None or not reason.startswith(f"{phase}_"):
+                reason = "workflow_failure"
             return f"e2e infrastructure failure: {reason}"
 
         if output.get("degraded"):
             reasons = output.get("degraded_reasons")
             raw_reason = reasons[0] if isinstance(reasons, list) and reasons else None
-            failed_phase = _safe_reason_code(output.get("failed_phase"), "workflow")
-            reason = _safe_reason_code(raw_reason, f"{failed_phase}_degraded")
+            failed_phase = _known_workflow_phase(output.get("failed_phase"))
+            reason = _known_workflow_reason(raw_reason)
+            if reason is None or (
+                failed_phase is not None and not reason.startswith(f"{failed_phase}_")
+            ):
+                reason = "workflow_failure"
             return f"e2e infrastructure failure: {reason}"
 
         if output.get("final_status") == "failed" or output.get("failed_phase"):
-            failed_phase = _safe_reason_code(output.get("failed_phase"), "workflow")
-            return f"e2e infrastructure failure: {failed_phase}_failed"
+            failed_phase = _known_workflow_phase(output.get("failed_phase"))
+            reason = f"{failed_phase}_failed" if failed_phase else "workflow_failure"
+            return f"e2e infrastructure failure: {reason}"
 
     if not usage:
         return f"{target} live target completed without LLM usage"
