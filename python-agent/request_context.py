@@ -87,44 +87,57 @@ def capture_llm_usage() -> Iterator[list[dict[str, object]]]:
         _llm_usage.reset(token)
 
 
-def _token_count(usage: dict[str, object], primary: str, fallback: str) -> int:
+def _token_count(usage: dict[str, object], primary: str, fallback: str) -> int | None:
     value = usage.get(primary, usage.get(fallback, 0))
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f"{primary} tokens must be a non-negative integer")
+        return None
     return value
 
 
 def record_llm_response(response: object, model: str) -> None:
-    """Record actual provider usage, without estimating unavailable spend."""
+    """Record provider usage without allowing telemetry to affect the model call."""
     captured = _llm_usage.get()
     if captured is None:
         return
 
-    response_metadata = getattr(response, "response_metadata", {}) or {}
-    if not isinstance(response_metadata, dict):
-        response_metadata = {}
-    usage = getattr(response, "usage_metadata", None)
-    if not isinstance(usage, dict):
-        fallback_usage = response_metadata.get("token_usage", {}) or {}
-        usage = fallback_usage if isinstance(fallback_usage, dict) else {}
+    try:
+        response_metadata = getattr(response, "response_metadata", {}) or {}
+        if not isinstance(response_metadata, dict):
+            response_metadata = {}
+        usage = getattr(response, "usage_metadata", None)
+        if not isinstance(usage, dict):
+            fallback_usage = response_metadata.get("token_usage", {}) or {}
+            usage = fallback_usage if isinstance(fallback_usage, dict) else {}
 
-    input_tokens = _token_count(usage, "input_tokens", "prompt_tokens")
-    output_tokens = _token_count(usage, "output_tokens", "completion_tokens")
-    expected_total = input_tokens + output_tokens
-    total_value = usage.get("total_tokens", expected_total)
-    if isinstance(total_value, bool) or not isinstance(total_value, int) or total_value < expected_total:
-        raise ValueError("total_tokens tokens must be a non-negative integer at least input plus output")
+        input_tokens = _token_count(usage, "input_tokens", "prompt_tokens")
+        output_tokens = _token_count(usage, "output_tokens", "completion_tokens")
+        if input_tokens is None or output_tokens is None:
+            return
+        expected_total = input_tokens + output_tokens
+        total_value = usage.get("total_tokens", expected_total)
+        if (
+            isinstance(total_value, bool)
+            or not isinstance(total_value, int)
+            or total_value < expected_total
+        ):
+            return
 
-    raw_cost = response_metadata.get("response_cost")
-    cost = None
-    if isinstance(raw_cost, (int, float)) and not isinstance(raw_cost, bool) and raw_cost >= 0:
-        try:
-            normalized_cost = float(raw_cost)
-        except OverflowError:
-            pass
-        else:
-            if math.isfinite(normalized_cost):
-                cost = normalized_cost
+        raw_cost = response_metadata.get("response_cost")
+        cost = None
+        if (
+            isinstance(raw_cost, (int, float))
+            and not isinstance(raw_cost, bool)
+            and raw_cost >= 0
+        ):
+            try:
+                normalized_cost = float(raw_cost)
+            except (OverflowError, TypeError, ValueError):
+                pass
+            else:
+                if math.isfinite(normalized_cost):
+                    cost = normalized_cost
+    except Exception:
+        return
     captured.append(
         {
             "model": model,

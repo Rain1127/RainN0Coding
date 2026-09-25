@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ from benchmark.contracts import BenchmarkCase, ExecutionSpec, Expectations, Load
 from benchmark.dataset import load_cases
 from benchmark.orchestrator import RUNNERS, run_cases
 from benchmark.runners.base import RunContext
-from benchmark.runners.live_llm import LiveLlmRunner, _invoke_target, _safe_app_id
+from benchmark.runners.live_llm import LiveLlmRunner, _invoke_target, _safe_app_id, _usage_metrics
 from request_context import bind_request_context, get_request_metadata, record_llm_response
 from tools import get_app_id, get_project_dir, get_user_role, set_tool_context
 
@@ -105,25 +106,25 @@ def test_empty_or_partially_unknown_usage_has_unknown_cost():
     def invoke(target, state):
         nonlocal calls
         calls += 1
+        record_llm_response(
+            type(
+                "UnknownCost",
+                (),
+                {
+                    "usage_metadata": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                    "response_metadata": {},
+                },
+            )(),
+            "unknown",
+        )
         if calls == 2:
-            record_llm_response(
-                type(
-                    "UnknownCost",
-                    (),
-                    {
-                        "usage_metadata": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-                        "response_metadata": {},
-                    },
-                )(),
-                "unknown",
-            )
             record_llm_response(FakeResponse(), "known")
         return {"ok": True}
 
     records = LiveLlmRunner(invoke).run(_loaded(repeats=2), RunContext("run", False))
     assert records[0].observed_metrics["cost_usd"] is None
     assert records[1].observed_metrics["cost_usd"] is None
-    assert records[0].observed_metrics["total_tokens"] == 0.0
+    assert records[0].observed_metrics["total_tokens"] == 2.0
     assert records[1].observed_metrics["total_tokens"] == 7.0
 
 
@@ -149,6 +150,7 @@ def test_quality_failure_is_scored_once_without_runner_retry(monkeypatch):
     def invoke(target, state):
         nonlocal calls
         calls += 1
+        record_llm_response(FakeResponse(), "fake-model")
         return {"phase": "wrong"}
 
     monkeypatch.setitem(RUNNERS, "live", LiveLlmRunner(invoke))
@@ -159,6 +161,221 @@ def test_quality_failure_is_scored_once_without_runner_retry(monkeypatch):
     assert len(evaluations) == 1
     assert evaluations[0].passed is False
     assert evaluations[0].infrastructure_error is None
+
+
+def test_successful_live_target_without_usage_is_infrastructure_error():
+    record = LiveLlmRunner(lambda target, state: {"phase": "intent_done"}).run(
+        _loaded(),
+        RunContext("run", False),
+    )[0]
+
+    assert record.infrastructure_error == "intent live target completed without LLM usage"
+
+
+def test_intent_fallback_without_usage_is_infrastructure_error():
+    record = LiveLlmRunner(
+        lambda target, state: {
+            "phase": "intent_done",
+            "error": None,
+            "intent": {
+                "confidence": 0.55,
+                "confidence_reason": "LLM unavailable, fallback to rule router: provider failed",
+            },
+        }
+    ).run(_loaded(), RunContext("run", False))[0]
+
+    assert record.infrastructure_error == "intent live target completed without LLM usage"
+
+
+@pytest.mark.parametrize("target", ["reviewer", "coder"])
+def test_direct_target_phase_error_is_infrastructure_even_with_usage(target):
+    def invoke(_target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return {"phase": "error", "error": "token=sk-secretvalue123"}
+
+    record = LiveLlmRunner(invoke).run(
+        _loaded(target=target),
+        RunContext("run", False),
+    )[0]
+
+    assert record.infrastructure_error == f"{target} infrastructure failure: phase_error"
+    assert "secretvalue" not in record.infrastructure_error
+
+
+def test_nonempty_agent_error_is_infrastructure_even_when_phase_is_not_error():
+    def invoke(target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return {"phase": "review_done", "error": "password=hunter2"}
+
+    record = LiveLlmRunner(invoke).run(
+        _loaded(target="reviewer"),
+        RunContext("run", False),
+    )[0]
+
+    assert record.infrastructure_error == "reviewer infrastructure failure: agent_error"
+    assert "hunter2" not in record.infrastructure_error
+
+
+def test_e2e_phase_failure_uses_safe_reason_code_without_raw_secret():
+    def invoke(target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return {
+            "phase": "completed",
+            "final_status": "failed",
+            "phase_failures": [
+                {
+                    "phase": "coder",
+                    "reason_code": "coder_timeout",
+                    "message": "Authorization=Bearer sk-secretvalue123",
+                }
+            ],
+        }
+
+    record = LiveLlmRunner(invoke).run(
+        _loaded(target="e2e"),
+        RunContext("run", False),
+    )[0]
+
+    assert record.infrastructure_error == "e2e infrastructure failure: coder_timeout"
+    assert "secretvalue" not in record.infrastructure_error
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (
+            {
+                "phase": "completed",
+                "final_status": "degraded_success",
+                "degraded": True,
+                "degraded_reasons": ["reviewer_exception"],
+            },
+            "e2e infrastructure failure: reviewer_exception",
+        ),
+        (
+            {
+                "phase": "completed",
+                "final_status": "failed",
+                "failed_phase": "coder",
+            },
+            "e2e infrastructure failure: coder_failed",
+        ),
+    ],
+)
+def test_e2e_swallowed_production_failure_is_infrastructure(output, expected):
+    def invoke(target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return output
+
+    record = LiveLlmRunner(invoke).run(
+        _loaded(target="e2e"),
+        RunContext("run", False),
+    )[0]
+
+    assert record.infrastructure_error == expected
+
+
+def test_e2e_build_quality_failure_without_phase_failure_is_not_infrastructure():
+    def invoke(target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return {
+            "phase": "completed",
+            "final_status": "success",
+            "build_result": {"success": False, "log": "npm build failed"},
+            "phase_failures": [],
+        }
+
+    record = LiveLlmRunner(invoke).run(
+        _loaded(target="e2e"),
+        RunContext("run", False),
+    )[0]
+
+    assert record.infrastructure_error is None
+    assert record.output["build_result"]["success"] is False
+
+
+def test_untrusted_e2e_reason_code_is_not_copied_into_error_summary():
+    def invoke(target, state):
+        record_llm_response(FakeResponse(), "fake-model")
+        return {
+            "phase": "completed",
+            "phase_failures": [
+                {"phase": "coder", "reason_code": "token=sk-secretvalue123"}
+            ],
+        }
+
+    record = LiveLlmRunner(invoke).run(
+        _loaded(target="e2e"),
+        RunContext("run", False),
+    )[0]
+
+    assert record.infrastructure_error == "e2e infrastructure failure: coder_failure"
+    assert "secretvalue" not in record.infrastructure_error
+
+
+def test_usage_metrics_are_total_for_overflow_and_malformed_entries():
+    huge = 10**10000
+    metrics = _usage_metrics(
+        [
+            {
+                "input_tokens": huge,
+                "output_tokens": 1,
+                "total_tokens": huge,
+                "cost_usd": 1e308,
+            },
+            {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "total_tokens": 2,
+                "cost_usd": 1e308,
+            },
+        ]
+    )
+    malformed = _usage_metrics([object(), {"input_tokens": True}])
+
+    assert metrics == {
+        "input_tokens": None,
+        "output_tokens": 2.0,
+        "total_tokens": None,
+        "cost_usd": None,
+    }
+    assert malformed == {
+        "input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+        "cost_usd": None,
+    }
+
+
+def test_bad_partial_usage_cannot_drop_a_sibling_attempt(monkeypatch):
+    calls = 0
+
+    @contextmanager
+    def bad_capture():
+        yield [
+            {
+                "input_tokens": 10**10000,
+                "output_tokens": "bad",
+                "total_tokens": -1,
+                "cost_usd": float("inf"),
+            }
+        ]
+
+    def invoke(target, state):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transport failed")
+        return {"phase": "intent_done"}
+
+    monkeypatch.setattr(live_module, "capture_llm_usage", bad_capture)
+    records = LiveLlmRunner(invoke).run(_loaded(repeats=2), RunContext("run", False))
+
+    assert len(records) == 2
+    assert records[0].infrastructure_error == "transport failed"
+    assert records[0].observed_metrics["input_tokens"] is None
+    assert records[1].infrastructure_error is None
+    assert records[1].output == {"phase": "intent_done"}
 
 
 def test_safe_app_id_is_ascii_bounded_and_never_empty():

@@ -78,8 +78,7 @@ def test_usage_metadata_wins_and_token_usage_is_the_fallback():
 )
 def test_capture_rejects_malformed_or_inconsistent_token_counts(usage):
     with capture_llm_usage() as captured:
-        with pytest.raises(ValueError, match="tokens"):
-            record_llm_response(FakeResponse(usage_metadata=usage), "model")
+        record_llm_response(FakeResponse(usage_metadata=usage), "model")
     assert captured == []
 
 
@@ -152,6 +151,29 @@ def test_model_router_records_plain_response_once(monkeypatch):
         assert ModelRouter().route("lightweight", ["prompt"], allow_degraded=False) == "plain"
 
     assert len(captured) == 1
+
+
+def test_bad_provider_usage_never_changes_a_successful_model_result(monkeypatch):
+    response = FakeResponse(
+        usage_metadata={"input_tokens": "broken", "output_tokens": 2, "total_tokens": 2},
+        content="business-result",
+    )
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def invoke(self, messages, config=None):
+            return response
+
+    monkeypatch.setattr(model_router_module, "ChatOpenAI", FakeClient)
+    monkeypatch.setattr(model_router_module, "record_llm_call", lambda *args, **kwargs: None)
+
+    with capture_llm_usage() as captured:
+        result = ModelRouter().route("lightweight", ["prompt"], allow_degraded=False)
+
+    assert result == "business-result"
+    assert captured == []
 
 
 def test_structured_response_is_recorded_exactly_once(monkeypatch):
