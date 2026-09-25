@@ -59,9 +59,9 @@ RAG 的正式 `Precision@K`、`Recall@K`、`MRR` 和 `nDCG` 只基于经复核�
 
 晋升前必须确认 Git SHA、Prompt 指纹、数据集版本/指纹、模型别名和 Suite 身份正确，并复核所有失败案例。`baseline promote` 采用不覆盖发布；重复晋升会返回 `2`，需要保留旧基线并通过新的兼容身份生成新文件，不得手工静默覆盖。
 
-GitHub Actions 的 `benchmark-pr` job 只运行 marker 测试和离线 PR Suite，不注入任何 LiteLLM 凭证。`benchmark-nightly` 只在定时或手动触发时运行，需在 GitHub Secrets 配置：
+GitHub Actions 的 `benchmark-pr` job 只运行 marker 测试和离线 PR Suite，不注入任何 LiteLLM 凭证。`benchmark-nightly` 只在定时或手动触发时运行，它会先以 `MILVUS_MODE=lite` 执行 `rag.seed_vector_store`；种子写入失败会直接阻断评测，避免空向量库产生伪结论。带标签的 `recall_at_k.mean` 还必须达到默认门禁 `0.75`。Nightly 需在 GitHub Secrets 配置：
 
 - `LITELLM_BASE_URL`
 - `LITELLM_API_KEY`
 
-密钥只由 nightly job 的环境变量读取，不得写入 Case、Fixture、基线或 Artifact。两个 job 都使用 `always()` 上传 `reports/` 和 `records/runs/`，因此门禁失败后仍可下载证据排查。
+密钥只注入 `Run nightly benchmark` 单个步骤；checkout、依赖安装、RAG seed 和 Artifact 上传步骤都无法读取它们。密钥不得写入 Case、Fixture、基线或 Artifact。两个 job 都使用 `always()` 上传 `reports/` 和 `records/runs/`，因此门禁失败后仍可下载证据排查。

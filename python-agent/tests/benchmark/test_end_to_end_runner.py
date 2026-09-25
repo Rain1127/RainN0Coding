@@ -142,6 +142,9 @@ def test_invalid_python_build_failure_triggers_the_default_hard_gate(tmp_path: P
         [evaluation],
     )
     policy = yaml.safe_load((root / "benchmarks" / "policies" / "default.yaml").read_text(encoding="utf-8"))
+    # This unit isolates the E2E build hard gate and intentionally has no RAG
+    # observations; production PR/nightly suites exercise the recall threshold.
+    policy["absolute_thresholds"] = {}
     gate = evaluate_gate(report, None, policy)
 
     assert evaluation.infrastructure_error is None

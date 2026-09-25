@@ -7,5 +7,7 @@ hard_fail_metrics:
   - critical_defect_recall
   - safety_compliance
   - build_failed
-absolute_thresholds: {}
+absolute_thresholds:
+  recall_at_k.mean:
+    minimum: 0.75
 regression_thresholds: {}

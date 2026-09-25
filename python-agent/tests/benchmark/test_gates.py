@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 import benchmark.baseline as baseline_module
 from benchmark.baseline import compatibility_key, promote
@@ -12,6 +13,25 @@ from benchmark.reporting.json_report import build_report
 
 
 pytestmark = pytest.mark.benchmark
+
+DEFAULT_POLICY = Path(__file__).parents[2] / "benchmarks" / "policies" / "default.yaml"
+
+
+def _rag_report(recalls: list[float]) -> BenchmarkReport:
+    metadata = _report().metadata
+    evaluations = [
+        CaseEvaluation(
+            case_id=f"rag-{index}",
+            target="rag",
+            category="retrieval",
+            passed=True,
+            assertions_passed=0,
+            assertions_total=0,
+            observed_metrics={"recall_at_k": recall},
+        )
+        for index, recall in enumerate(recalls)
+    ]
+    return build_report(metadata, evaluations)
 
 def _report(*, run_id: str = "run", git_sha: str = "sha", rate: float = 1.0, latency: float = 10.0) -> BenchmarkReport:
     return build_report(
@@ -55,6 +75,25 @@ def test_absolute_thresholds_accept_canonical_minimum_and_maximum() -> None:
     assert [(failure["metric"], failure["rule"]) for failure in result["failures"]] == [
         ("case_pass_rate", "minimum"), ("latency.mean", "maximum"),
     ]
+
+
+def test_default_policy_gates_labeled_rag_recall_without_breaking_pr_replay() -> None:
+    policy = yaml.safe_load(DEFAULT_POLICY.read_text(encoding="utf-8"))
+    pr_report = _rag_report([1.0, 1.0])
+    empty_live_report = _rag_report([1.0, 1.0, 0.0, 0.0])
+
+    assert pr_report.metrics["recall_at_k"]["mean"] == 1.0
+    assert empty_live_report.metrics["recall_at_k"]["mean"] == 0.5
+    assert evaluate_gate(pr_report, None, policy)["passed"] is True
+    result = evaluate_gate(empty_live_report, None, policy)
+    assert result["passed"] is False
+    assert result["failures"] == [{
+        "type": "absolute",
+        "metric": "recall_at_k.mean",
+        "rule": "minimum",
+        "candidate": 0.5,
+        "threshold": 0.75,
+    }]
 
 
 def test_absolute_thresholds_reject_conflicting_alias_and_canonical_value() -> None:

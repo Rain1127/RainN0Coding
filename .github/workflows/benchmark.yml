@@ -6,6 +6,9 @@ on:
   schedule:
     - cron: "30 18 * * *"
 
+permissions:
+  contents: read
+
 concurrency:
   group: benchmark-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -15,15 +18,17 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
           enable-cache: true
           cache-dependency-glob: python-agent/uv.lock
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -43,7 +48,7 @@ jobs:
           --html-output benchmarks/reports/pr-report.html
       - name: Upload PR benchmark report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: benchmark-pr-report
           path: |
@@ -53,19 +58,18 @@ jobs:
   benchmark-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    env:
-      LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-      LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
           enable-cache: true
           cache-dependency-glob: python-agent/uv.lock
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -73,8 +77,17 @@ jobs:
       - name: Install Python dependencies
         working-directory: python-agent
         run: uv sync --frozen
+      - name: Seed RAG vector store
+        working-directory: python-agent
+        env:
+          MILVUS_MODE: lite
+        run: uv run python -m rag.seed_vector_store
       - name: Run nightly benchmark
         working-directory: python-agent
+        env:
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          MILVUS_MODE: lite
         run: >-
           uv run python -m benchmark.cli run
           --suite benchmarks/suites/nightly.yaml
@@ -82,7 +95,7 @@ jobs:
           --html-output benchmarks/reports/nightly-report.html
       - name: Upload nightly benchmark report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: benchmark-nightly-report
           path: |
