@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from benchmark.reporting.html_report import render_html
 
+
+pytestmark = pytest.mark.benchmark
 
 def _report() -> dict:
     return {

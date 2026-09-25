@@ -64,6 +64,10 @@ docker compose up -d
 
 请仅在本地忽略文件中保存真实密钥、Token 和密码，不要提交任何真实敏感信息。
 
+## Benchmark
+
+PR 离线回归、Nightly 真实模型评测、基线门禁和 JSON/HTML 报告的操作方法见 [Benchmark 评测体系运行手册](python-agent/benchmarks/README.md)。
+
 ## 文档入口
 
 - [API文档](docs/API文档.md)

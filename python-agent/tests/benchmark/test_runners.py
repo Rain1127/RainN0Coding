@@ -11,6 +11,8 @@ from benchmark.runners.deterministic import DeterministicRunner
 from benchmark.runners.replay import ReplayRunner
 
 
+pytestmark = pytest.mark.benchmark
+
 def _loaded_case(
     *, target: str = "supervisor", record_path: Path | None = None, mode: str | None = None, repeats: int = 1
 ) -> LoadedCase:

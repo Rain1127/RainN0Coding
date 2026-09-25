@@ -8,6 +8,8 @@ from benchmark.contracts import RawRunRecord
 from benchmark.record_store import persist_raw_record
 
 
+pytestmark = pytest.mark.benchmark
+
 def _record(case_id: str) -> RawRunRecord:
     return RawRunRecord(case_id=case_id, started_at="2026-01-01T00:00:00+00:00", duration_ms=0)
 

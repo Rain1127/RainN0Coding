@@ -10,6 +10,8 @@ import pytest
 from benchmark.evaluators.code_execution import evaluate_code, materialize_files
 
 
+pytestmark = pytest.mark.benchmark
+
 def test_materialize_rejects_parent_traversal(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unsafe generated path"):
         materialize_files([{"path": "../escape.py", "content": "x = 1"}], tmp_path)

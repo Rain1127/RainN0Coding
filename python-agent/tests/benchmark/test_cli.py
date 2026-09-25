@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from benchmark.cli import _git_sha, _load_cases, _prompt_fingerprint, main
 from benchmark.config import load_suite
 from benchmark.contracts import BenchmarkCase, LoadedCase, RawRunRecord, RunMetadata
@@ -12,6 +14,8 @@ from benchmark.reporting.json_report import build_report
 from benchmark.reporting.json_report import write_report
 from benchmark.runners.base import RunContext
 
+
+pytestmark = pytest.mark.benchmark
 
 SUITE = "benchmarks/suites/pr.yaml"
 

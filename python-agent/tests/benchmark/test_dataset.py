@@ -10,6 +10,8 @@ import yaml
 from benchmark.dataset import load_cases
 
 
+pytestmark = pytest.mark.benchmark
+
 def _case(case_id: str, *, record: str | None = None) -> dict:
     execution = {"mode": "replay"}
     if record is not None:

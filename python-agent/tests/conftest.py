@@ -18,6 +18,23 @@ DEFAULT_GUARDRAIL_ENV_KEYS = [
 ]
 
 MARKER_FILE_ALLOWLIST = {
+    "benchmark": {
+        "test_assertions.py",
+        "test_ci_contract.py",
+        "test_cli.py",
+        "test_code_execution.py",
+        "test_dataset.py",
+        "test_end_to_end_runner.py",
+        "test_gates.py",
+        "test_html_report.py",
+        "test_live_runner.py",
+        "test_migrate_agent_eval.py",
+        "test_rag_benchmark.py",
+        "test_record_store.py",
+        "test_reporting.py",
+        "test_runners.py",
+        "test_usage_capture.py",
+    },
     "unit": {"test_guardrails_prompt.py", "test_workflow_resilience.py"},
     "integration": {
         "test_guardrails_tools.py",

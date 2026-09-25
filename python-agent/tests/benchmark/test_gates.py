@@ -11,6 +11,8 @@ from benchmark.gates import evaluate_gate
 from benchmark.reporting.json_report import build_report
 
 
+pytestmark = pytest.mark.benchmark
+
 def _report(*, run_id: str = "run", git_sha: str = "sha", rate: float = 1.0, latency: float = 10.0) -> BenchmarkReport:
     return build_report(
         RunMetadata(

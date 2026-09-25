@@ -17,6 +17,8 @@ from benchmark.runners.base import RunContext
 from benchmark.runners.rag import RagRunner, retrieve_with_engine
 
 
+pytestmark = pytest.mark.benchmark
+
 def _loaded_rag_case(
     *,
     case_id: str = "rag-replay",

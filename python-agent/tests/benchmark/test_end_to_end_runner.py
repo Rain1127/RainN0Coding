@@ -18,6 +18,8 @@ from benchmark.orchestrator import run_cases
 from benchmark.reporting.json_report import build_report
 
 
+pytestmark = pytest.mark.benchmark
+
 def _state(*, content: str = "<main>benchmark ready</main>") -> dict:
     return {
         "phase": "completed",

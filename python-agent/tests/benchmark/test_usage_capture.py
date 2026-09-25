@@ -12,6 +12,8 @@ from core.model_router import ModelRouter
 from request_context import capture_llm_usage, record_llm_response
 
 
+pytestmark = pytest.mark.benchmark
+
 class FakeResponse:
     def __init__(self, *, usage_metadata=None, response_metadata=None, content="ok"):
         self.usage_metadata = usage_metadata

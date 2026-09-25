@@ -8,6 +8,8 @@ from benchmark.dataset import load_cases
 from benchmark.migrate_agent_eval import migrate_directory
 
 
+pytestmark = pytest.mark.benchmark
+
 def test_migrate_dev_golden_cases_to_core_dataset(tmp_path):
     source = Path(__file__).parents[2] / "agent_eval" / "golden" / "dev"
     destination = tmp_path / "core-golden.yaml"

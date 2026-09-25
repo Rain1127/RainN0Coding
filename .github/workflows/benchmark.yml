@@ -1,0 +1,90 @@
+name: benchmark
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 18 * * *"
+
+concurrency:
+  group: benchmark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  benchmark-pr:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: python-agent/uv.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: RainN0Coding-frontend/package-lock.json
+      - name: Install Python dependencies
+        working-directory: python-agent
+        run: uv sync --frozen
+      - name: Run benchmark framework tests
+        working-directory: python-agent
+        run: uv run pytest -m benchmark -q --basetemp .test-tmp-benchmark
+      - name: Run offline benchmark gate
+        working-directory: python-agent
+        run: >-
+          uv run python -m benchmark.cli run
+          --suite benchmarks/suites/pr.yaml
+          --output benchmarks/reports/pr-result.json
+          --html-output benchmarks/reports/pr-report.html
+      - name: Upload PR benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-pr-report
+          path: |
+            python-agent/benchmarks/reports/
+            python-agent/benchmarks/records/runs/
+
+  benchmark-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+      LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: python-agent/uv.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: RainN0Coding-frontend/package-lock.json
+      - name: Install Python dependencies
+        working-directory: python-agent
+        run: uv sync --frozen
+      - name: Run nightly benchmark
+        working-directory: python-agent
+        run: >-
+          uv run python -m benchmark.cli run
+          --suite benchmarks/suites/nightly.yaml
+          --output benchmarks/reports/nightly-result.json
+          --html-output benchmarks/reports/nightly-report.html
+      - name: Upload nightly benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-nightly-report
+          path: |
+            python-agent/benchmarks/reports/
+            python-agent/benchmarks/records/runs/

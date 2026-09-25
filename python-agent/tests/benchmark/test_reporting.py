@@ -9,6 +9,8 @@ from benchmark.reporting.json_report import build_report, read_report, write_rep
 from benchmark.redaction import redact
 
 
+pytestmark = pytest.mark.benchmark
+
 def _evaluation(case_id: str, attempt: int, passed: bool, latency: float) -> CaseEvaluation:
     return CaseEvaluation(
         case_id=case_id, attempt_index=attempt, target="supervisor", category="routing",

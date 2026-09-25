@@ -15,6 +15,8 @@ from request_context import bind_request_context, get_request_metadata, record_l
 from tools import get_app_id, get_project_dir, get_user_role, set_tool_context
 
 
+pytestmark = pytest.mark.benchmark
+
 class FakeResponse:
     usage_metadata = {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}
     response_metadata = {"response_cost": 0.25}

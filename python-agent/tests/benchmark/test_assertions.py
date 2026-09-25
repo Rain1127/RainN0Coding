@@ -1,5 +1,10 @@
+import pytest
+
 from benchmark.contracts import BenchmarkCase
 from benchmark.evaluators.assertions import evaluate_assertions
+
+
+pytestmark = pytest.mark.benchmark
 
 
 def _case(expectations: dict, *, output_metrics: dict[str, str] | None = None) -> BenchmarkCase:
