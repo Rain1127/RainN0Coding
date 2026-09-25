@@ -51,7 +51,7 @@ def load_cases(dataset_path: str | Path, asset_root: str | Path | None = None) -
                     boundary_name = "asset root" if explicit_asset_root else "dataset root"
                     raise ValueError(f"record is outside {boundary_name}: {case.execution.record}") from exc
                 if not record_path.is_file():
-                    raise ValueError(f"record does not exist: {record_path}")
+                    raise ValueError(f"record does not exist: {case.id}")
             loaded.append(LoadedCase(case=case, source_path=source_path.resolve(), record_path=record_path))
     if not loaded:
         raise ValueError("dataset contains no benchmark cases")

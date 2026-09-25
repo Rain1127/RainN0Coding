@@ -139,6 +139,48 @@ def test_cli_infrastructure_error_is_printed_to_stdout(tmp_path: Path, capsys) -
     assert captured.err == ""
 
 
+def test_missing_replay_record_returns_two_without_exposing_absolute_path(
+    tmp_path: Path, capsys
+) -> None:
+    suite = tmp_path / "suite.yaml"
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    suite.write_text(
+        "schema_version: 1\nname: missing-replay\ndataset_roots: [dataset]\n"
+        "allowed_modes: [replay]\noffline: true\nfail_on_infrastructure_error: true\n"
+        "policy: policy.yaml\nbaseline_dir: baselines\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "policy.yaml").write_text(
+        "hard_fail_metrics: []\nabsolute_thresholds: {}\nregression_thresholds: {}\n",
+        encoding="utf-8",
+    )
+    (dataset / "case.yaml").write_text(
+        "schema_version: 1\ndataset_version: test\ncases:\n"
+        "- id: missing-replay-record\n"
+        "  target: intent\n"
+        "  category: replay\n"
+        "  execution:\n"
+        "    mode: replay\n"
+        "    record: ../fixtures/private-user/missing.json\n"
+        "  input: {}\n"
+        "  provenance: {source: synthetic, reviewed: true, sanitized: true}\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "report.json"
+
+    assert main([
+        "run", "--suite", str(suite), "--output", str(output),
+        "--git-sha", "test-sha", "--record-dir", str(tmp_path / "records"),
+    ]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("benchmark infrastructure error: record does not exist: ")
+    assert str(tmp_path) not in captured.out
+    assert captured.err == ""
+    assert not output.exists()
+
+
 def test_disallowed_modes_message_uses_sorted_list_representation() -> None:
     suite, suite_dir = load_suite(SUITE)
     restricted = suite.model_copy(update={"allowed_modes": ["deterministic"]})
