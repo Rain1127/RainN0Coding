@@ -16,6 +16,10 @@
 
 每个正式 Case 必须有稳定 `id`、`dataset_version`和 `provenance`。`provenance.reviewed` 与 `provenance.sanitized` 必须为 `true`。真实用户请求只能在去除姓名、账号、密钥、内网地址、绝对用户路径和业务数据，并完成人工复核后加入。禁止将原始对话或真实凭证复制到数据集、Fixture、基线或报告。
 
+Loader 默认按正式数据处理，直接调用 `load_cases()` 也会拒绝未审核或未脱敏的 Case。只有本地开发 Suite 可以同时设置 `offline: true` 与 `allow_unreviewed: true` 暂时加载草稿数据；线上 Suite 或缺少显式开关时不能放宽。此开发模式的结果不得用于质量声明、基线晋升或 CI 门禁。
+
+端到端 Case 只能通过 `input.execution_profile` 选择评测器拥有的命名静态检查。目前支持 `static_html`（使用 Python `HTMLParser` 读取和解析 HTML）与 `python_syntax`（使用 `ast.parse` 检查 Python 语法），二者都不执行生成代码，也不接受数据集提供的命令、参数或超时。未知 Profile 属于数据/评测配置错误。若未来需要真正执行生成代码，必须先提供容器或等价的操作系统级沙箱，并在接口和文档中明确资源、网络及文件系统隔离；临时工作目录、环境变量白名单或进程清理都不能宣称为 OS 沙箱。
+
 ## 本地命令
 
 以下命令均从 `python-agent/` 执行：

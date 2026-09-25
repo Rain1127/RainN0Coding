@@ -10,7 +10,7 @@ from typing import Any
 
 from benchmark.contracts import LoadedCase, RawRunRecord
 from benchmark.evaluators.code_execution import (
-    MAX_TIMEOUT_SECONDS,
+    EXECUTION_PROFILES,
     evaluate_code,
     normalize_generated_path,
     validate_generated_files,
@@ -44,21 +44,18 @@ class EndToEndRunner:
             else list(required_files)
         )
 
-        command = case.input.get("execution_command")
-        timeout_seconds = case.input.get("timeout_seconds", 60)
-        if command is not None:
-            if (
-                not isinstance(command, list)
-                or not command
-                or not all(isinstance(item, str) and item.strip() for item in command)
-            ):
-                raise ValueError(f"{case.id}: execution_command must be a non-empty string list")
-            if (
-                isinstance(timeout_seconds, bool)
-                or not isinstance(timeout_seconds, int)
-                or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS
-            ):
-                raise ValueError(f"{case.id}: timeout_seconds must be between 1 and {MAX_TIMEOUT_SECONDS}")
+        unsupported = sorted({"execution_command", "timeout_seconds"} & case.input.keys())
+        if unsupported:
+            raise ValueError(
+                f"{case.id}: unsupported execution settings: {', '.join(unsupported)}; "
+                "use execution_profile"
+            )
+        execution_profile = case.input.get("execution_profile")
+        if execution_profile is not None:
+            if not isinstance(execution_profile, str) or not execution_profile.strip():
+                raise ValueError(f"{case.id}: execution_profile must be a non-empty string")
+            if execution_profile not in EXECUTION_PROFILES:
+                raise ValueError(f"{case.id}: unknown execution_profile: {execution_profile}")
 
         records: list[RawRunRecord] = []
         for attempt_index in range(case.execution.repeats):
@@ -78,13 +75,12 @@ class EndToEndRunner:
                     "log": "generated files failed validation",
                     "infrastructure_error": None,
                 }
-            elif command is not None:
+            elif execution_profile is not None:
                 with tempfile.TemporaryDirectory(prefix="benchmark-code-") as temporary:
                     check = evaluate_code(
                         files=deepcopy(state["code_files"]),
                         project_dir=temporary,
-                        command=list(command),
-                        timeout_seconds=timeout_seconds,
+                        execution_profile=execution_profile,
                     )
                 infrastructure_error = check["infrastructure_error"]
                 if infrastructure_error is None:

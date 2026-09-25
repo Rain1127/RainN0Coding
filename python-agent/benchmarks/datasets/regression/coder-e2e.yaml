@@ -10,11 +10,7 @@ cases:
       mode: e2e
       record: ../../fixtures/e2e/success.json
     input:
-      execution_command:
-        - python
-        - -c
-        - "from pathlib import Path; text = Path('index.html').read_text(encoding='utf-8'); raise SystemExit(0 if 'benchmark-ready' in text else 1)"
-      timeout_seconds: 10
+      execution_profile: static_html
     expectations:
       equals:
         phase: completed

@@ -1,23 +1,79 @@
 from __future__ import annotations
+
 import re
 from typing import Any
-_SENSITIVE_KEY = re.compile(r"(?:apikey|accesstoken|password|secret|authorization|cookie|token|refreshtoken|authtoken|privatekey)$", re.I)
-_BEARER = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
+
+
+_REDACTED = "***REDACTED***"
+_REDACTED_USER_PATH = "***REDACTED_USER_PATH***"
+_SENSITIVE_KEY = re.compile(
+    r"(?:apikey|accesstoken|password|secret|authorization|cookie|token|"
+    r"refreshtoken|authtoken|privatekey)$",
+    re.IGNORECASE,
+)
+_BEARER = re.compile(r"\bBearer\s+[^\s,;\"']+", re.IGNORECASE)
+_BASIC = re.compile(r"\bBasic\s+[^\s,;\"']+", re.IGNORECASE)
 _SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
-_CREDENTIAL_VALUE = re.compile(r"(?i)\b(password|token|apikey|api_key|privatekey|private_key|secret|authorization)\s*([=:])\s*(?:Basic\s+)?[^\s,;]+")
-_BASIC = re.compile(r"(?i)\bBasic\s+[^\s,;]+")
+_CREDENTIAL_ASSIGNMENT = re.compile(
+    r"(?P<prefix>\b(?:password|token|api[_-]?key|private[_-]?key|"
+    r"authorization|access[_-]?token|refresh[_-]?token|auth[_-]?token|secret)"
+    r"\b[\"']?\s*[:=]\s*)"
+    r"(?:(?:Bearer|Basic)\s+[^\s,;\"']+|(?P<double>\"[^\"\r\n]*\")|"
+    r"(?P<single>'[^'\r\n]*')|[^\s,;\"']+)",
+    re.IGNORECASE,
+)
+_CONNECTION_URI = re.compile(
+    r"\b(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^:/\s\"']+:"
+    r"[^@\s/\"']+@",
+)
+_WINDOWS_USER_PATH = re.compile(
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s\"']+"
+    r"(?:[\\/][^\s\"']*)?",
+    re.IGNORECASE,
+)
+_UNIX_USER_PATH = re.compile(
+    r"(?<![A-Za-z0-9_])/(?:home|Users)/[^/\s\"']+(?:/[^\s\"']*)?",
+)
+
+
+def _redact_text(value: str) -> str:
+    redacted = _CONNECTION_URI.sub(
+        lambda match: f"{match.group('scheme')}{_REDACTED}:{_REDACTED}@",
+        value,
+    )
+    def replace_assignment(match: re.Match[str]) -> str:
+        quoted = match.group("double") or match.group("single")
+        replacement = f"{quoted[0]}{_REDACTED}{quoted[-1]}" if quoted else _REDACTED
+        return f"{match.group('prefix')}{replacement}"
+
+    redacted = _CREDENTIAL_ASSIGNMENT.sub(replace_assignment, redacted)
+    redacted = _BEARER.sub(f"Bearer {_REDACTED}", redacted)
+    redacted = _BASIC.sub(f"Basic {_REDACTED}", redacted)
+    redacted = _SECRET.sub(_REDACTED, redacted)
+    redacted = _WINDOWS_USER_PATH.sub(_REDACTED_USER_PATH, redacted)
+    return _UNIX_USER_PATH.sub(_REDACTED_USER_PATH, redacted)
+
+
 def redact(value: Any) -> Any:
+    """Recursively redact secrets and user-specific absolute paths."""
     if isinstance(value, dict):
-        return {key: "***REDACTED***" if _SENSITIVE_KEY.search(re.sub(r"[_\-\s]", "", str(key))) else redact(item) for key, item in value.items()}
-    if isinstance(value, list): return [redact(item) for item in value]
-    if isinstance(value, tuple): return tuple(redact(item) for item in value)
-    if isinstance(value, str): return _SECRET.sub("***REDACTED***", _BEARER.sub("Bearer ***REDACTED***", value))
+        return {
+            key: (
+                _REDACTED
+                if _SENSITIVE_KEY.search(re.sub(r"[_\-\s]", "", str(key)))
+                else redact(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact(item) for item in value)
+    if isinstance(value, str):
+        return _redact_text(value)
     return value
 
 
 def redact_error(error: BaseException | str) -> str:
-    """Return a safe, human-readable exception message for reports and the CLI."""
-    message = str(error)
-    message = str(redact(message))
-    message = _BASIC.sub("Basic ***REDACTED***", message)
-    return _CREDENTIAL_VALUE.sub(lambda match: f"{match.group(1)}{match.group(2)}***REDACTED***", message)
+    """Return a redacted, human-readable exception message."""
+    return _redact_text(str(error))

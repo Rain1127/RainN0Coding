@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from .contracts import ExecutionMode, StrictModel
 
@@ -15,6 +15,7 @@ class SuiteConfig(StrictModel):
     dataset_roots: list[str] = Field(min_length=1)
     allowed_modes: list[ExecutionMode] = Field(min_length=1)
     offline: bool
+    allow_unreviewed: bool = False
     fail_on_infrastructure_error: bool
     policy: str
     baseline_dir: str
@@ -25,6 +26,12 @@ class SuiteConfig(StrictModel):
         if not value.strip():
             raise ValueError("must not be blank")
         return value
+
+    @model_validator(mode="after")
+    def unreviewed_cases_require_offline_suite(self) -> "SuiteConfig":
+        if self.allow_unreviewed and not self.offline:
+            raise ValueError("allow_unreviewed requires an offline suite")
+        return self
 
 
 def load_suite(source: str | Path) -> tuple[SuiteConfig, Path]:

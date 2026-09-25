@@ -220,6 +220,44 @@ def test_suite_fails_only_when_all_configured_dataset_roots_are_missing() -> Non
         raise AssertionError("expected no benchmark cases")
 
 
+def test_suite_rejects_unreviewed_development_mode_when_online(tmp_path: Path) -> None:
+    suite = tmp_path / "suite.yaml"
+    suite.write_text(
+        "schema_version: 1\nname: unsafe-dev\ndataset_roots: [dataset]\n"
+        "allowed_modes: [replay]\noffline: false\nallow_unreviewed: true\n"
+        "fail_on_infrastructure_error: true\npolicy: policy.yaml\nbaseline_dir: baselines\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="allow_unreviewed requires an offline suite"):
+        load_suite(suite)
+
+
+def test_validate_allows_explicit_offline_development_suite(tmp_path: Path, capsys) -> None:
+    suite = tmp_path / "suite.yaml"
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    suite.write_text(
+        "schema_version: 1\nname: local-dev\ndataset_roots: [dataset]\n"
+        "allowed_modes: [replay]\noffline: true\nallow_unreviewed: true\n"
+        "fail_on_infrastructure_error: true\npolicy: policy.yaml\nbaseline_dir: baselines\n",
+        encoding="utf-8",
+    )
+    (dataset / "case.yaml").write_text(
+        "schema_version: 1\ndataset_version: dev\ncases:\n"
+        "- id: local-private-draft\n"
+        "  target: intent\n"
+        "  category: development\n"
+        "  execution: {mode: replay}\n"
+        "  input: {user_request: private draft}\n"
+        "  provenance: {source: sanitized_user, reviewed: false, sanitized: false}\n",
+        encoding="utf-8",
+    )
+
+    assert main(["validate", "--suite", str(suite)]) == 0
+    assert capsys.readouterr().out == "validated 1 benchmark cases for suite local-dev\n"
+
+
 def test_prompt_fingerprint_requires_fixed_files(tmp_path: Path) -> None:
     (tmp_path / "agents").mkdir()
     (tmp_path / "llm_factory.py").write_text("x", encoding="utf-8")

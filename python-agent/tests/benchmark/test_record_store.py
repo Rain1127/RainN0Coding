@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -27,3 +28,28 @@ def test_case_id_suffix_prevents_normalization_collisions_and_rejects_overwrite(
     assert first != second
     with pytest.raises(FileExistsError):
         persist_raw_record(tmp_path, "run", _record("case/a"))
+
+
+def test_raw_record_redacts_nested_generated_content_and_logs(tmp_path: Path) -> None:
+    record = _record("private-output").model_copy(
+        update={
+            "output": {
+                "code_files": [
+                    {
+                        "path": "config.py",
+                        "content": "api_key=raw-secret-value\nURL=mysql://app:db-password@localhost/db",
+                    }
+                ],
+                "log": "/home/alice/private/build.log token=token-value",
+            }
+        }
+    )
+
+    path = persist_raw_record(tmp_path, "run", record)
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    rendered = json.dumps(persisted)
+
+    assert "raw-secret-value" not in rendered
+    assert "db-password" not in rendered
+    assert "alice" not in rendered
+    assert "token-value" not in rendered

@@ -119,3 +119,35 @@ def test_malformed_yaml_error_includes_source_path(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=re.escape(str(source))):
         load_cases(tmp_path)
+
+
+@pytest.mark.parametrize(("reviewed", "sanitized"), [(False, True), (True, False), (False, False)])
+def test_formal_loader_rejects_unreviewed_or_unsanitized_cases_by_default(
+    tmp_path: Path, reviewed: bool, sanitized: bool
+) -> None:
+    case = _case("private-case")
+    case["provenance"] = {
+        "source": "sanitized_user",
+        "reviewed": reviewed,
+        "sanitized": sanitized,
+    }
+    _write_yaml(tmp_path / "cases.yaml", "2026.09.1", [case])
+
+    with pytest.raises(ValueError, match="must be reviewed and sanitized"):
+        load_cases(tmp_path)
+
+
+def test_loader_allows_unreviewed_cases_only_when_explicitly_enabled(tmp_path: Path) -> None:
+    case = _case("development-case")
+    case["provenance"] = {
+        "source": "sanitized_user",
+        "reviewed": False,
+        "sanitized": False,
+    }
+    _write_yaml(tmp_path / "cases.yaml", "dev", [case])
+
+    loaded = load_cases(tmp_path, allow_unreviewed=True)
+
+    assert loaded[0].case.id == "development-case"
+    assert loaded[0].case.provenance.reviewed is False
+    assert loaded[0].case.provenance.sanitized is False

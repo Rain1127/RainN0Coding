@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -115,10 +114,7 @@ def test_invalid_python_build_failure_triggers_the_default_hard_gate(tmp_path: P
     loaded = _loaded(
         tmp_path,
         state=state,
-        input_data={
-            "execution_command": [sys.executable, "-m", "py_compile", "main.py"],
-            "timeout_seconds": 10,
-        },
+        input_data={"execution_profile": "python_syntax"},
         expectations={
             "equals": {"benchmark_code_check.passed": True},
             "required_files": ["main.py"],
@@ -156,16 +152,15 @@ def test_invalid_python_build_failure_triggers_the_default_hard_gate(tmp_path: P
 
 
 def test_optional_code_execution_is_evaluated_as_quality(tmp_path: Path) -> None:
+    state = _state(content="def broken(:\n")
+    state["code_files"] = [{"path": "main.py", "content": "def broken(:\n"}]
     loaded = _loaded(
         tmp_path,
-        state=_state(content="def broken(:\n"),
-        input_data={
-            "execution_command": [sys.executable, "-m", "py_compile", "index.html"],
-            "timeout_seconds": 10,
-        },
+        state=state,
+        input_data={"execution_profile": "python_syntax"},
         expectations={
             "equals": {"benchmark_code_check.passed": True},
-            "required_files": ["index.html"],
+            "required_files": ["main.py"],
         },
     )
 
@@ -177,13 +172,11 @@ def test_optional_code_execution_is_evaluated_as_quality(tmp_path: Path) -> None
     assert evaluation.passed is False
 
 
-def test_code_execution_infrastructure_failure_is_not_quality(tmp_path: Path) -> None:
-    loaded = _loaded(tmp_path, input_data={"execution_command": ["missing-e2e-tool"], "timeout_seconds": 10})
+def test_unknown_execution_profile_is_rejected_as_dataset_error(tmp_path: Path) -> None:
+    loaded = _loaded(tmp_path, input_data={"execution_profile": "unknown-profile"})
 
-    record = EndToEndRunner().run(loaded, RunContext("run", True))[0]
-
-    assert record.infrastructure_error
-    assert "benchmark_code_check" not in record.output
+    with pytest.raises(ValueError, match="e2e-fixture: unknown execution_profile"):
+        EndToEndRunner().run(loaded, RunContext("run", True))
 
 
 @pytest.mark.parametrize(
@@ -253,7 +246,7 @@ def test_repeats_have_unique_attempts_and_temporary_roots(
     loaded = _loaded(
         tmp_path,
         repeats=2,
-        input_data={"execution_command": [sys.executable, "-V"], "timeout_seconds": 10},
+        input_data={"execution_profile": "static_html"},
     )
 
     records = EndToEndRunner().run(loaded, RunContext("run", True))
@@ -292,17 +285,16 @@ def test_runner_rejects_malformed_recorded_final_state(tmp_path: Path, state: ob
 @pytest.mark.parametrize(
     "input_data",
     [
-        {"execution_command": "python"},
-        {"execution_command": []},
-        {"execution_command": ["python", ""]},
-        {"execution_command": ["python"], "timeout_seconds": 0},
-        {"execution_command": ["python"], "timeout_seconds": 601},
+        {"execution_profile": ""},
+        {"execution_profile": 1},
+        {"execution_command": ["python", "generated.py"]},
+        {"timeout_seconds": 10},
     ],
 )
 def test_runner_rejects_invalid_execution_configuration(tmp_path: Path, input_data: dict) -> None:
     loaded = _loaded(tmp_path, input_data=input_data)
 
-    with pytest.raises(ValueError, match="e2e-fixture: (execution_command|timeout_seconds)"):
+    with pytest.raises(ValueError, match="e2e-fixture: (execution_profile|unsupported execution settings)"):
         EndToEndRunner().run(loaded, RunContext("run", True))
 
 

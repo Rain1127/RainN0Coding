@@ -2,11 +2,12 @@ import json
 import pytest
 from pydantic import ValidationError
 import math
+from pathlib import Path
 
 from benchmark.contracts import BenchmarkReport, CaseEvaluation, RunMetadata
 from benchmark.evaluators.metrics import describe
 from benchmark.reporting.json_report import build_report, read_report, write_report
-from benchmark.redaction import redact
+from benchmark.redaction import redact, redact_error
 
 
 pytestmark = pytest.mark.benchmark
@@ -138,6 +139,79 @@ def test_write_report_redacts_secrets_in_persisted_json(tmp_path):
     write_report(build_report(metadata, [result]), path)
     text = path.read_text(encoding="utf-8")
     assert "sk-secret-value" not in text and "abcdef123456" not in text
+
+
+@pytest.mark.parametrize(
+    ("sensitive", "visible"),
+    [
+        ("Bearer bearer-secret", "Bearer ***REDACTED***"),
+        ("Basic dXNlcjpwYXNzd29yZA==", "Basic ***REDACTED***"),
+        ("sk-secretvalue123", "***REDACTED***"),
+        ("password=hunter2", "password=***REDACTED***"),
+        ("token:token-value", "token:***REDACTED***"),
+        ("api_key = api-value", "api_key = ***REDACTED***"),
+        ("private_key='private-value'", "private_key='***REDACTED***'"),
+        ("authorization: Basic dXNlcjpwYXNz", "authorization: ***REDACTED***"),
+        (
+            "postgresql://dbuser:db-password@db.internal/app",
+            "postgresql://***REDACTED***:***REDACTED***@db.internal/app",
+        ),
+        (
+            '"token": "json-token", "safe": true',
+            '"token": "***REDACTED***", "safe": true',
+        ),
+        (
+            'const api_key = "code-secret"; next();',
+            'const api_key = "***REDACTED***"; next();',
+        ),
+        (r"C:\Users\Alice\private\config.json", "***REDACTED_USER_PATH***"),
+        ("C:/Users/Alice/private/config.json", "***REDACTED_USER_PATH***"),
+        ("/home/alice/private/config.json", "***REDACTED_USER_PATH***"),
+        ("/Users/alice/private/config.json", "***REDACTED_USER_PATH***"),
+    ],
+)
+def test_redact_sanitizes_sensitive_values_inside_arbitrary_strings(
+    sensitive: str, visible: str
+) -> None:
+    redacted = redact({"content": f"before {sensitive} after"})["content"]
+
+    assert sensitive not in redacted
+    assert visible in redacted
+
+
+def test_write_report_redacts_generated_file_content_and_build_log(tmp_path: Path) -> None:
+    metadata = RunMetadata(run_id="run", suite="nightly", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=False, started_at="now")
+    result = _evaluation("generated", 0, True, 10).model_copy(
+        update={
+            "output": {
+                "code_files": [
+                    {
+                        "path": "config.py",
+                        "content": "DATABASE_URL=postgresql://dbuser:db-password@db.internal/app\npassword=hunter2",
+                    }
+                ],
+                "build_result": {"log": r"failed under C:\Users\Alice\private\project"},
+            }
+        }
+    )
+    path = tmp_path / "report.json"
+
+    write_report(build_report(metadata, [result]), path)
+
+    text = path.read_text(encoding="utf-8")
+    assert "db-password" not in text
+    assert "hunter2" not in text
+    assert "Alice" not in text
+
+
+def test_redact_error_sanitizes_credentials_and_user_paths() -> None:
+    message = redact_error(
+        r"authorization=Basic dXNlcjpwYXNz password=hunter2 at C:\Users\Alice\project"
+    )
+
+    assert "dXNlcjpwYXNz" not in message
+    assert "hunter2" not in message
+    assert "Alice" not in message
 
 
 def test_describe_uses_nearest_rank_percentiles():

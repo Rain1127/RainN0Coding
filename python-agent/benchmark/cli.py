@@ -64,7 +64,13 @@ def _load_cases(suite: SuiteConfig, suite_dir: Path) -> list[LoadedCase]:
     for configured_root in suite.dataset_roots:
         root = (suite_dir / configured_root).resolve()
         if root.exists():
-            cases.extend(load_cases(root, asset_root=asset_root))
+            cases.extend(
+                load_cases(
+                    root,
+                    asset_root=asset_root,
+                    allow_unreviewed=suite.allow_unreviewed,
+                )
+            )
     if not cases:
         raise ValueError("suite contains no benchmark cases from existing dataset roots")
     ids = [item.case.id for item in cases]

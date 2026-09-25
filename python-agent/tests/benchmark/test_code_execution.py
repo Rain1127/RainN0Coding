@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -115,8 +113,7 @@ def test_python_syntax_failure_is_a_quality_failure(tmp_path: Path) -> None:
     result = evaluate_code(
         files=[{"path": "main.py", "content": "def broken(:\n"}],
         project_dir=tmp_path,
-        command=[sys.executable, "-m", "py_compile", "main.py"],
-        timeout_seconds=10,
+        execution_profile="python_syntax",
     )
 
     assert result["passed"] is False
@@ -129,8 +126,7 @@ def test_invalid_python_project_fixture_is_a_quality_failure(tmp_path: Path) -> 
     result = evaluate_code(
         files=[{"path": "main.py", "content": fixture.read_text(encoding="utf-8")}],
         project_dir=tmp_path,
-        command=[sys.executable, "-m", "py_compile", "main.py"],
-        timeout_seconds=10,
+        execution_profile="python_syntax",
     )
 
     assert result["passed"] is False
@@ -143,13 +139,7 @@ def test_valid_html_project_fixture_passes_offline_check(tmp_path: Path) -> None
     result = evaluate_code(
         files=[{"path": "index.html", "content": fixture.read_text(encoding="utf-8")}],
         project_dir=tmp_path,
-        command=[
-            sys.executable,
-            "-c",
-            "from pathlib import Path; text = Path('index.html').read_text(encoding='utf-8'); "
-            "raise SystemExit(0 if 'benchmark-ready' in text else 1)",
-        ],
-        timeout_seconds=10,
+        execution_profile="static_html",
     )
 
     assert result["passed"] is True
@@ -157,126 +147,40 @@ def test_valid_html_project_fixture_passes_offline_check(tmp_path: Path) -> None
     assert result["infrastructure_error"] is None
 
 
-def test_missing_tool_is_infrastructure_error(tmp_path: Path) -> None:
+def test_python_syntax_profile_never_executes_generated_code(tmp_path: Path) -> None:
+    marker = tmp_path / "must-not-exist.txt"
+    source = f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n"
     result = evaluate_code(
-        files=[{"path": "main.py", "content": "x = 1\n"}],
-        project_dir=tmp_path,
-        command=["definitely-missing-benchmark-tool"],
-        timeout_seconds=10,
-    )
-
-    assert result["infrastructure_error"]
-    assert result["passed"] is False
-
-
-def test_timeout_terminates_the_entire_process_tree_before_a_child_can_write(tmp_path: Path) -> None:
-    marker = tmp_path / "child-marker.txt"
-    child = "import pathlib,sys,time; time.sleep(1.4); pathlib.Path(sys.argv[1]).write_text('escaped')"
-    launcher = (
-        "import subprocess,sys,time; "
-        "subprocess.Popen([sys.executable, '-c', " + repr(child) + ", sys.argv[1]]); "
-        "time.sleep(30)"
-    )
-    started = time.monotonic()
-
-    result = evaluate_code(
-        files=[{"path": "launcher.py", "content": launcher}],
+        files=[{"path": "main.py", "content": source}],
         project_dir=tmp_path / "project",
-        command=[sys.executable, "launcher.py", str(marker)],
-        timeout_seconds=1,
-    )
-    elapsed = time.monotonic() - started
-    time.sleep(0.65)
-
-    assert result["infrastructure_error"] == "code execution timed out after 1 seconds"
-    assert elapsed < 1.9
-    assert not marker.exists()
-
-
-@pytest.mark.parametrize("parent_exit_code", [0, 3])
-def test_completed_parent_exit_still_cleans_a_detached_background_child(
-    tmp_path: Path, parent_exit_code: int
-) -> None:
-    marker = tmp_path / "background-marker.txt"
-    child = "import pathlib,sys,time; time.sleep(0.45); pathlib.Path(sys.argv[1]).write_text('escaped')"
-    launcher = (
-        "import subprocess,sys; "
-        "subprocess.Popen([sys.executable, '-c', " + repr(child) + ", sys.argv[1]], "
-        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True); "
-        f"raise SystemExit({parent_exit_code})"
-    )
-
-    result = evaluate_code(
-        files=[{"path": "launcher.py", "content": launcher}],
-        project_dir=tmp_path / "project",
-        command=[sys.executable, "launcher.py", str(marker)],
-        timeout_seconds=5,
-    )
-    time.sleep(0.7)
-
-    assert result["passed"] is (parent_exit_code == 0)
-    assert result["infrastructure_error"] is None
-    assert not marker.exists()
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object isolation is Windows-specific")
-def test_windows_job_setup_failure_never_resumes_the_suspended_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import benchmark.evaluators.code_execution as module
-
-    marker = tmp_path / "must-not-run.txt"
-    monkeypatch.setattr(module, "_create_windows_kill_job", lambda _process: None)
-    result = evaluate_code(
-        files=[{"path": "main.py", "content": "from pathlib import Path; Path(__import__('sys').argv[1]).write_text('ran')"}],
-        project_dir=tmp_path / "project",
-        command=[sys.executable, "main.py", str(marker)],
-        timeout_seconds=5,
-    )
-
-    assert result["passed"] is False
-    assert result["infrastructure_error"] == "Windows process isolation could not be established"
-    assert not marker.exists()
-
-
-def test_execution_uses_explicit_environment_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BENCHMARK_TEST_SECRET", "must-not-leak")
-    result = evaluate_code(
-        files=[{"path": "main.py", "content": "x = 1\n"}],
-        project_dir=tmp_path,
-        command=[sys.executable, "-c", "import os; print(os.getenv('BENCHMARK_TEST_SECRET', 'clean'))"],
-        timeout_seconds=10,
+        execution_profile="python_syntax",
     )
 
     assert result["passed"] is True
-    assert "clean" in result["log"]
-    assert "must-not-leak" not in result["log"]
-
-
-def test_execution_redacts_and_limits_logs(tmp_path: Path) -> None:
-    result = evaluate_code(
-        files=[{"path": "main.py", "content": "x = 1\n"}],
-        project_dir=tmp_path,
-        command=[sys.executable, "-c", "print('password=hunter2 ' + 'x' * 10000)"],
-        timeout_seconds=10,
-    )
-
-    assert "hunter2" not in result["log"]
-    assert "***REDACTED***" in result["log"]
-    assert len(result["log"]) <= 4000
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize(
-    ("command", "timeout"),
-    [([], 10), ([""], 10), ([sys.executable, 1], 10), ([sys.executable], 0), ([sys.executable], 601)],
+    ("profile", "files"),
+    [
+        ("python_syntax", [{"path": "index.html", "content": "<main>ok</main>"}]),
+        ("static_html", [{"path": "main.py", "content": "x = 1\n"}]),
+    ],
 )
-def test_execution_rejects_invalid_command_or_timeout(
-    tmp_path: Path, command: list[object], timeout: int
+def test_profiles_require_a_matching_generated_file(
+    tmp_path: Path, profile: str, files: list[dict[str, str]]
 ) -> None:
-    with pytest.raises(ValueError):
+    result = evaluate_code(files=files, project_dir=tmp_path, execution_profile=profile)
+
+    assert result["passed"] is False
+    assert result["metric"] == "build_failed"
+    assert result["infrastructure_error"] is None
+
+
+def test_evaluator_rejects_unknown_execution_profile(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown execution profile"):
         evaluate_code(
             files=[{"path": "main.py", "content": "x = 1\n"}],
             project_dir=tmp_path,
-            command=command,  # type: ignore[arg-type]
-            timeout_seconds=timeout,
+            execution_profile="arbitrary-command",
         )

@@ -8,7 +8,12 @@ import yaml
 from .contracts import BenchmarkCase, LoadedCase
 
 
-def load_cases(dataset_path: str | Path, asset_root: str | Path | None = None) -> list[LoadedCase]:
+def load_cases(
+    dataset_path: str | Path,
+    asset_root: str | Path | None = None,
+    *,
+    allow_unreviewed: bool = False,
+) -> list[LoadedCase]:
     dataset_root = Path(dataset_path).expanduser().resolve()
     if not dataset_root.is_dir():
         raise ValueError(f"dataset path must be an existing directory: {dataset_root}")
@@ -39,6 +44,12 @@ def load_cases(dataset_path: str | Path, asset_root: str | Path | None = None) -
                 raise ValueError(f"each case must be an object: {source_path}")
             case_data: dict[str, Any] = {**raw_case, "schema_version": 1, "dataset_version": dataset_version}
             case = BenchmarkCase.model_validate(case_data)
+            if not allow_unreviewed and not (
+                case.provenance.reviewed and case.provenance.sanitized
+            ):
+                raise ValueError(
+                    f"{case.id}: formal benchmark case must be reviewed and sanitized"
+                )
             if case.id in seen:
                 raise ValueError(f"duplicate benchmark case id: {case.id}")
             seen.add(case.id)
