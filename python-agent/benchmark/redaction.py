@@ -6,34 +6,37 @@ from typing import Any
 
 _REDACTED = "***REDACTED***"
 _REDACTED_USER_PATH = "***REDACTED_USER_PATH***"
-_SENSITIVE_KEY = re.compile(
-    r"(?:apikey|accesstoken|password|secret|authorization|cookie|token|"
-    r"refreshtoken|authtoken|privatekey)$",
+_SENSITIVE_KEY_SUFFIX = re.compile(
+    r"(?:^|[_.-])(?:password|token|api[_-]?key|private[_-]?key|"
+    r"authorization|secret|cookie|access[_-]?token|refresh[_-]?token|"
+    r"auth[_-]?token|apikey|privatekey|accesstoken|refreshtoken|authtoken)$",
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"\bBearer\s+[^\s,;\"']+", re.IGNORECASE)
 _BASIC = re.compile(r"\bBasic\s+[^\s,;\"']+", re.IGNORECASE)
 _SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
 _CREDENTIAL_ASSIGNMENT = re.compile(
-    r"(?P<prefix>\b(?:password|token|api[_-]?key|private[_-]?key|"
-    r"authorization|access[_-]?token|refresh[_-]?token|auth[_-]?token|secret)"
-    r"\b[\"']?\s*[:=]\s*)"
+    r"(?P<prefix>\b(?P<key>[A-Za-z][A-Za-z0-9_.-]*)[\"']?\s*[:=]\s*)"
     r"(?:(?:Bearer|Basic)\s+[^\s,;\"']+|(?P<double>\"[^\"\r\n]*\")|"
-    r"(?P<single>'[^'\r\n]*')|[^\s,;\"']+)",
+    r"(?P<single>'[^'\r\n]*')|[^\s,;\"')\]}]+)",
     re.IGNORECASE,
 )
 _CONNECTION_URI = re.compile(
-    r"\b(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^:/\s\"']+:"
-    r"[^@\s/\"']+@",
+    r"\b(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^@/\s\"']+@",
 )
 _WINDOWS_USER_PATH = re.compile(
-    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s\"']+"
-    r"(?:[\\/][^\s\"']*)?",
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]+Users[\\/]+[^\"'\r\n,;)\]}]+",
     re.IGNORECASE,
 )
 _UNIX_USER_PATH = re.compile(
-    r"(?<![A-Za-z0-9_])/(?:home|Users)/[^/\s\"']+(?:/[^\s\"']*)?",
+    r"(?<![A-Za-z0-9_])/(?:home|Users)/[^\"'\r\n,;)\]}]+",
 )
+
+
+def _is_sensitive_key(value: str) -> bool:
+    segmented = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value.strip("\"'"))
+    segmented = re.sub(r"\s+", "_", segmented)
+    return _SENSITIVE_KEY_SUFFIX.search(segmented) is not None
 
 
 def _redact_text(value: str) -> str:
@@ -41,7 +44,10 @@ def _redact_text(value: str) -> str:
         lambda match: f"{match.group('scheme')}{_REDACTED}:{_REDACTED}@",
         value,
     )
+
     def replace_assignment(match: re.Match[str]) -> str:
+        if not _is_sensitive_key(match.group("key")):
+            return match.group(0)
         quoted = match.group("double") or match.group("single")
         replacement = f"{quoted[0]}{_REDACTED}{quoted[-1]}" if quoted else _REDACTED
         return f"{match.group('prefix')}{replacement}"
@@ -60,7 +66,7 @@ def redact(value: Any) -> Any:
         return {
             key: (
                 _REDACTED
-                if _SENSITIVE_KEY.search(re.sub(r"[_\-\s]", "", str(key)))
+                if _is_sensitive_key(str(key))
                 else redact(item)
             )
             for key, item in value.items()

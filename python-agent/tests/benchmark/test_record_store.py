@@ -53,3 +53,34 @@ def test_raw_record_redacts_nested_generated_content_and_logs(tmp_path: Path) ->
     assert "db-password" not in rendered
     assert "alice" not in rendered
     assert "token-value" not in rendered
+
+
+def test_raw_record_redacts_prefixed_config_keys_empty_user_uri_and_spaced_user_paths(
+    tmp_path: Path,
+) -> None:
+    sensitive = (
+        "OPENAI_API_KEY=plainvalue123\n"
+        "DATABASE_PASSWORD: hunter2\n"
+        "SESSION_COOKIE='session-cookie-value'\n"
+        'settings = {"REFRESH_TOKEN": "json-refresh-value", "client_id": "safe-client-id"}\n'
+        "REDIS_URL=redis://:password123@host/0\n"
+        'windows_path = "C:\\Users\\Alice Smith\\private\\config.json", safe = true\n'
+        'unix_path: "/Users/Alice Smith/private/config.json"; next'
+    )
+    record = _record("prefixed-secrets").model_copy(
+        update={"output": {"code_files": [{"path": "config.py", "content": sensitive}]}}
+    )
+
+    path = persist_raw_record(tmp_path, "run", record)
+
+    text = path.read_text(encoding="utf-8")
+    for leaked in (
+        "plainvalue123",
+        "hunter2",
+        "session-cookie-value",
+        "json-refresh-value",
+        "password123",
+        "Alice Smith",
+    ):
+        assert leaked not in text
+    assert "safe-client-id" in text

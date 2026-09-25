@@ -204,6 +204,39 @@ def test_write_report_redacts_generated_file_content_and_build_log(tmp_path: Pat
     assert "Alice" not in text
 
 
+def test_write_report_redacts_prefixed_config_keys_empty_user_uri_and_spaced_user_paths(
+    tmp_path: Path,
+) -> None:
+    metadata = RunMetadata(run_id="run", suite="pr", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now")
+    sensitive = (
+        "OPENAI_API_KEY=plainvalue123\n"
+        "DATABASE_PASSWORD: hunter2\n"
+        "SESSION_COOKIE='session-cookie-value'\n"
+        'settings = {"AUTH_TOKEN": "json-auth-value", "client_id": "safe-client-id"}\n'
+        "REDIS_URL=redis://:password123@host/0\n"
+        'windows_path = "C:\\Users\\Alice Smith\\private\\config.json", safe = true\n'
+        'unix_path: "/Users/Alice Smith/private/config.json"; next'
+    )
+    result = _evaluation("sensitive", 0, True, 10).model_copy(
+        update={"output": {"code_files": [{"path": "config.py", "content": sensitive}]}}
+    )
+    path = tmp_path / "report.json"
+
+    write_report(build_report(metadata, [result]), path)
+
+    text = path.read_text(encoding="utf-8")
+    for leaked in (
+        "plainvalue123",
+        "hunter2",
+        "session-cookie-value",
+        "json-auth-value",
+        "password123",
+        "Alice Smith",
+    ):
+        assert leaked not in text
+    assert "safe-client-id" in text
+
+
 def test_redact_error_sanitizes_credentials_and_user_paths() -> None:
     message = redact_error(
         r"authorization=Basic dXNlcjpwYXNz password=hunter2 at C:\Users\Alice\project"
@@ -212,6 +245,31 @@ def test_redact_error_sanitizes_credentials_and_user_paths() -> None:
     assert "dXNlcjpwYXNz" not in message
     assert "hunter2" not in message
     assert "Alice" not in message
+
+
+def test_redact_error_handles_prefixed_keys_empty_user_uri_and_spaced_user_paths() -> None:
+    message = redact_error(
+        'OPENAI_API_KEY=plainvalue123, DATABASE_PASSWORD=hunter2; '
+        'SESSION_COOKIE="session-cookie-value"\n'
+        'redis://:password123@host/0 at "C:\\Users\\Alice Smith\\private\\config.json", '
+        'then "/home/Alice Smith/private/config.json"; client_id=safe-client-id'
+    )
+
+    for leaked in (
+        "plainvalue123",
+        "hunter2",
+        "session-cookie-value",
+        "password123",
+        "Alice Smith",
+    ):
+        assert leaked not in message
+    assert "OPENAI_API_KEY=***REDACTED***," in message
+    assert "DATABASE_PASSWORD=***REDACTED***;" in message
+    assert 'SESSION_COOKIE="***REDACTED***"' in message
+    assert "redis://***REDACTED***:***REDACTED***@host/0" in message
+    assert "client_id=safe-client-id" in message
+    assert 'at "***REDACTED_USER_PATH***", then' in message
+    assert '"***REDACTED_USER_PATH***"; client_id=safe-client-id' in message
 
 
 def test_describe_uses_nearest_rank_percentiles():
