@@ -179,6 +179,42 @@ def test_redact_sanitizes_sensitive_values_inside_arbitrary_strings(
     assert visible in redacted
 
 
+def test_redact_handles_secret_key_families_bracketed_assignments_and_safe_suffixes() -> None:
+    value = {
+        "AWS_SECRET_ACCESS_KEY": "aws-dict-secret",
+        "nested": {"DJANGO_SECRET_KEY": "django-dict-secret"},
+        "message": (
+            "AWS_SECRET_ACCESS_KEY=aws-string-secret; "
+            "DJANGO_SECRET_KEY: django-string-secret; "
+            'os.environ["OPENAI_API_KEY"] = "bracket-openai-secret"; '
+            "config['AWS_SECRET_ACCESS_KEY']='bracket-aws-secret'; next()"
+        ),
+        "client_id": "safe-client-id",
+        "clientId": "safe-client-id-camel",
+        "monkey": "safe-monkey",
+        "hockey": "safe-hockey",
+        "password_policy": "safe-password-policy",
+        "auth_token_count": "safe-token-count",
+    }
+
+    redacted = redact(value)
+
+    assert redacted["AWS_SECRET_ACCESS_KEY"] == "***REDACTED***"
+    assert redacted["nested"]["DJANGO_SECRET_KEY"] == "***REDACTED***"
+    assert redacted["message"] == (
+        "AWS_SECRET_ACCESS_KEY=***REDACTED***; "
+        "DJANGO_SECRET_KEY: ***REDACTED***; "
+        'os.environ["OPENAI_API_KEY"] = "***REDACTED***"; '
+        "config['AWS_SECRET_ACCESS_KEY']='***REDACTED***'; next()"
+    )
+    assert redacted["client_id"] == "safe-client-id"
+    assert redacted["clientId"] == "safe-client-id-camel"
+    assert redacted["monkey"] == "safe-monkey"
+    assert redacted["hockey"] == "safe-hockey"
+    assert redacted["password_policy"] == "safe-password-policy"
+    assert redacted["auth_token_count"] == "safe-token-count"
+
+
 def test_write_report_redacts_generated_file_content_and_build_log(tmp_path: Path) -> None:
     metadata = RunMetadata(run_id="run", suite="nightly", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=False, started_at="now")
     result = _evaluation("generated", 0, True, 10).model_copy(
@@ -237,6 +273,42 @@ def test_write_report_redacts_prefixed_config_keys_empty_user_uri_and_spaced_use
     assert "safe-client-id" in text
 
 
+def test_write_report_redacts_secret_key_families_and_bracketed_assignments(
+    tmp_path: Path,
+) -> None:
+    metadata = RunMetadata(run_id="run", suite="pr", git_sha="g", dataset_versions=["d"], dataset_fingerprint="df", prompt_fingerprint="pf", model_aliases={}, offline=True, started_at="now")
+    result = _evaluation("secret-keys", 0, True, 10).model_copy(
+        update={
+            "output": {
+                "AWS_SECRET_ACCESS_KEY": "aws-dict-secret",
+                "nested": {"DJANGO_SECRET_KEY": "django-dict-secret"},
+                "log": (
+                    "AWS_SECRET_ACCESS_KEY=aws-string-secret\n"
+                    "DJANGO_SECRET_KEY=django-string-secret\n"
+                    'os.environ["OPENAI_API_KEY"] = "bracket-openai-secret"\n'
+                    "config['AWS_SECRET_ACCESS_KEY']='bracket-aws-secret'\n"
+                    "client_id=safe-client-id"
+                ),
+            }
+        }
+    )
+    path = tmp_path / "report.json"
+
+    write_report(build_report(metadata, [result]), path)
+
+    text = path.read_text(encoding="utf-8")
+    for leaked in (
+        "aws-dict-secret",
+        "django-dict-secret",
+        "aws-string-secret",
+        "django-string-secret",
+        "bracket-openai-secret",
+        "bracket-aws-secret",
+    ):
+        assert leaked not in text
+    assert "safe-client-id" in text
+
+
 def test_redact_error_sanitizes_credentials_and_user_paths() -> None:
     message = redact_error(
         r"authorization=Basic dXNlcjpwYXNz password=hunter2 at C:\Users\Alice\project"
@@ -270,6 +342,27 @@ def test_redact_error_handles_prefixed_keys_empty_user_uri_and_spaced_user_paths
     assert "client_id=safe-client-id" in message
     assert 'at "***REDACTED_USER_PATH***", then' in message
     assert '"***REDACTED_USER_PATH***"; client_id=safe-client-id' in message
+
+
+def test_redact_error_handles_secret_key_families_and_bracketed_assignments() -> None:
+    message = redact_error(
+        "AWS_SECRET_ACCESS_KEY=aws-error-secret; "
+        "DJANGO_SECRET_KEY=django-error-secret; "
+        'os.environ["OPENAI_API_KEY"] = "bracket-error-secret"; '
+        "clientId=safe-client-id; monkey=safe-monkey; hockey=safe-hockey; "
+        "password_policy=safe-policy; auth_token_count=7"
+    )
+
+    for leaked in ("aws-error-secret", "django-error-secret", "bracket-error-secret"):
+        assert leaked not in message
+    for visible in (
+        "clientId=safe-client-id",
+        "monkey=safe-monkey",
+        "hockey=safe-hockey",
+        "password_policy=safe-policy",
+        "auth_token_count=7",
+    ):
+        assert visible in message
 
 
 def test_describe_uses_nearest_rank_percentiles():

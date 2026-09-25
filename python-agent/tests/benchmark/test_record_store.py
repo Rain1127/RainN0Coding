@@ -84,3 +84,37 @@ def test_raw_record_redacts_prefixed_config_keys_empty_user_uri_and_spaced_user_
     ):
         assert leaked not in text
     assert "safe-client-id" in text
+
+
+def test_raw_record_redacts_secret_key_families_and_bracketed_assignments(
+    tmp_path: Path,
+) -> None:
+    record = _record("secret-key-families").model_copy(
+        update={
+            "output": {
+                "AWS_SECRET_ACCESS_KEY": "aws-dict-secret",
+                "nested": {"DJANGO_SECRET_KEY": "django-dict-secret"},
+                "log": (
+                    "AWS_SECRET_ACCESS_KEY=aws-string-secret\n"
+                    "DJANGO_SECRET_KEY=django-string-secret\n"
+                    'os.environ["OPENAI_API_KEY"] = "bracket-openai-secret"\n'
+                    "config['AWS_SECRET_ACCESS_KEY']='bracket-aws-secret'\n"
+                    "client_id=safe-client-id"
+                ),
+            }
+        }
+    )
+
+    path = persist_raw_record(tmp_path, "run", record)
+
+    text = path.read_text(encoding="utf-8")
+    for leaked in (
+        "aws-dict-secret",
+        "django-dict-secret",
+        "aws-string-secret",
+        "django-string-secret",
+        "bracket-openai-secret",
+        "bracket-aws-secret",
+    ):
+        assert leaked not in text
+    assert "safe-client-id" in text
