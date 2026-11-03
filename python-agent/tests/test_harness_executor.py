@@ -184,3 +184,28 @@ def test_coder_repairs_from_real_check_result(sandbox, tmp_path, monkeypatch):
     events = store.public_events('check-run', 'owner', 'app')['events']
     assert [event['payload']['result']['ok'] for event in events
             if event['type'] == 'tool_result' and event['payload']['tool'] == 'run_checks'] == [False, True]
+
+
+def test_generated_vue_build_and_browser_contract_in_rootless_worker(sandbox):
+    from agents.builder_agent import builder_agent
+    from workflow.acceptance import AcceptanceProposal, freeze_contract, validate_fixed_contract
+
+    root, _ = sandbox
+    state = {
+        'project_dir': str(root), 'artifact_run_id': root.stem, 'app_id': 'vue-fixture',
+        'mode': 'new', 'code_gen_type': 'vue_project', 'user_request': '显示候选 Vue 页面',
+        'harness_policy': {'executor': True, 'acceptance': True},
+        'review': {'passed': True, 'score': 95, 'issues': []},
+        'code_files': [
+            {'path': 'src/main.ts', 'content': "import {createApp} from 'vue'; import App from './App.vue'; createApp(App).mount('#app')"},
+            {'path': 'src/App.vue', 'content': '<template><main>候选 Vue 页面</main></template>'},
+        ],
+    }
+    freeze_contract(state, AcceptanceProposal.model_validate({'features': [{
+        'name': 'Visible Vue content', 'source_quote': '候选 Vue 页面',
+        'steps': [{'action': 'text', 'value': '候选 Vue 页面'}],
+    }]}))
+    built = builder_agent(state)
+    assert built['build_result']['status'] == 'succeeded', built['build_result']
+    result = validate_fixed_contract(built, root / 'dist', root.parent / (root.stem + '.acceptance'))
+    assert result['status'] == 'succeeded', result

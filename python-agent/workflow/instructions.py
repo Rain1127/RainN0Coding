@@ -145,7 +145,8 @@ def propose(state, text):
         '判断这条纠偏能否安全应用到当前任务。禁止扩展原修改权限，且保留未被明确更改的验收条件。'
         '只在需要收紧文件范围时返回 files，其他情况返回 null。改变行为必须返回独立可执行的 features，'
         '每个 source_quote 必须逐字来自该条纠偏，保留行为也可用新断言验证。'
-        '明确改变既有功能时列出对应 supersedes ID，保留其他条件。缺前提或指令不属于当前任务时填写 rejection。'
+        '明确改变既有功能时列出对应 supersedes ID，保留其他条件。浏览器会主动加载候选页面；页面加载不是外部前提。'
+        '可执行条件的 preconditions=[]、unverified_reason=""。缺前提或指令不属于当前任务时填写 rejection。'
     ), context=json.dumps({
         'goal': state.get('user_request'), 'plan': state.get('change_plan'),
         'scope': state.get('instruction_scope'), 'architecture': state.get('architecture'),

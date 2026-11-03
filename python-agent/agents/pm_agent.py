@@ -14,7 +14,7 @@ from llm_factory import create_json_parser
 from prompt_builder import compose_messages
 from state.code_gen_state import CodeGenState
 from config import get_lang_config
-from workflow.acceptance import AcceptanceStep, AcceptanceFeature, AcceptanceProposal, freeze_contract
+from workflow.acceptance import ASSERTIONS, AcceptanceStep, AcceptanceFeature, AcceptanceProposal, freeze_contract
 from workflow.harness_policy import enabled
 
 
@@ -90,7 +90,7 @@ PRD_FIELD_SPEC = """Output ONLY a valid JSON object with these EXACT field names
       "interactions": ["string", "string"],
       "source_quote": "exact quote from user request",
       "acceptance_steps": [],
-      "unverified_reason": "待确认 when rules or verification details are missing"
+      "unverified_reason": ""
     }
   ],
   "target_audience": "string",
@@ -121,7 +121,12 @@ def pm_agent(state: CodeGenState) -> CodeGenState:
 
     code_gen_type = state.get("code_gen_type", "vue_project")
 
-    messages = compose_messages(agent="pm_agent", system=_build_pm_prompt(code_gen_type),
+    system = _build_pm_prompt(code_gen_type)
+    if enabled(state, 'acceptance'):
+        system += ('\n功能引用必须是用户原文的一段连续文本。针对可观察行为给出 acceptance_steps，'
+                   '例如 {"action":"text","selector":"nav","value":"用户指定的精确文本"}。'
+                   '可直接执行的验收使用空 unverified_reason。缺失的外部依赖填写具体原因。')
+    messages = compose_messages(agent="pm_agent", system=system,
                                 request=f"用户需求：{user_request}")
 
     try:
@@ -142,7 +147,10 @@ def pm_agent(state: CodeGenState) -> CodeGenState:
     import hashlib
     for feature in state['prd']['features']:
         feature['id'] = 'F-' + hashlib.sha256((feature['source_quote'] + '\n' + feature['name']).encode()).hexdigest()[:16]
-    if enabled(state, 'acceptance') and state.get('mode') != 'modify' and all(f.acceptance_steps or f.unverified_reason for f in prd.features):
+    if enabled(state, 'acceptance') and state.get('mode') != 'modify' and prd.features and all(
+        f.source_quote and f.source_quote in user_request and not f.unverified_reason
+        and any(step.action in ASSERTIONS for step in f.acceptance_steps) for f in prd.features
+    ):
         freeze_contract(state, AcceptanceProposal(features=[AcceptanceFeature(
             name=f.name, source_quote=f.source_quote, steps=f.acceptance_steps,
             unverified_reason=f.unverified_reason) for f in prd.features]))

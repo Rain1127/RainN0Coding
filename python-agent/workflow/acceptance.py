@@ -5,9 +5,10 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Literal
-from pydantic import BaseModel, Field, ValidationError, AliasChoices, model_validator
+from pydantic import BaseModel, Field, ValidationError, AliasChoices, field_validator, model_validator
 
 ASSERTIONS = {'text', 'absent_text', 'count', 'value', 'visible', 'attribute', 'style', 'invalid', 'click_change'}
+LOADED_PAGE = {'页面已加载', '页面加载完成', 'page loaded', 'page is loaded'}
 
 
 class AcceptanceStep(BaseModel):
@@ -36,16 +37,28 @@ class AcceptanceStep(BaseModel):
 
 class AcceptanceFeature(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    source_quote: str = Field(default='', max_length=2000)
-    preconditions: list[str] = Field(default_factory=list, max_length=10)
+    source_quote: str = Field(default='', max_length=2000, description='One exact contiguous quotation from this user request.')
+    preconditions: list[str] = Field(default_factory=list, max_length=10,
+        description='Only unmet external dependencies such as a missing API or account. Page loading is already performed by the verifier.')
     steps: list[AcceptanceStep] = Field(default_factory=list, max_length=40)
-    unverified_reason: str = Field(default='', max_length=1000)
+    unverified_reason: str = Field(default='', max_length=1000,
+        description='Empty string for executable browser assertions. Otherwise name the specific missing prerequisite or unsupported operation.')
     supersedes: list[str] = Field(default_factory=list, max_length=30,
         description='Prior feature IDs explicitly changed by this new user requirement; never used during repair of the same request.')
+
+    @field_validator('preconditions')
+    @classmethod
+    def external_only(cls, values):
+        # validate_page always navigates to the candidate before using the steps.
+        return [value for value in values if value.strip().rstrip('。.!！').lower() not in LOADED_PAGE]
 
 
 class AcceptanceProposal(BaseModel):
     features: list[AcceptanceFeature] = Field(min_length=1, max_length=30)
+
+
+class ProposalAmbiguity(ValueError):
+    pass
 
 
 def content_hash(value):
@@ -171,23 +184,34 @@ def ensure_contract(state):
                '搜索/筛选/分页的结果数量用 count 且 scope=visible；隐藏结果不要求删除DOM。script/link等结构检查用 scope=all。'
                '搜索/筛选必须断言结果集合，分页必须断言切换后的内容，表单必须断言实际反馈。'
                '新需求明确改变旧行为时，在新功能 supersedes 中列出被替代的旧功能ID；仅替代明确改变的条件，其他条件保留。'
-               '缺接口、账号、业务规则或不支持的能力写 unverified_reason=待确认，不得捏造。'
-               'preconditions 只记录未满足的外部前提；已满足时为空。新页面可约定稳定的 data-testid。'
+               '缺接口、账号、业务规则或不支持的能力时，在 unverified_reason 中具体说明缺失项，不得捏造。'
+               '浏览器会主动加载页面，页面加载不是外部前提。无缺失前提时 preconditions=[]。'
+               '可执行时 unverified_reason=""，不可填写笼统的“待确认”。source_quote 是连续原文，不可拼接两段。'
+               '新页面可约定稳定的 data-testid。'
                '保留既有行为；CSS属性断言使用浏览器计算值。',
         context=json.dumps({'prd': state.get('prd'), 'plan': state.get('change_plan'),
                             'previous_contract': previous,
                             'existing_files': state.get('existing_code_files', [])}, ensure_ascii=False),
         request=state.get('user_request', ''))
+    request = state.get('user_request', '')
     for attempt in range(2):
         state['acceptance_generation_attempts'] = attempt + 1
         try:
             proposal = parser(messages, user_id=state.get('user_id'))
+            if proposal is not None and not attempt:
+                wrong = [feature.name for feature in proposal.features
+                         if not feature.source_quote or feature.source_quote not in request or
+                         feature.unverified_reason.strip().rstrip('。.!！') in ('待确认', '待验证', 'unknown')]
+                if wrong:
+                    raise ProposalAmbiguity('需要连续原文或具体未验证原因的功能：' + ', '.join(wrong))
             break
         except Exception as exc:
             root = exc
             while root.__cause__ is not None:
                 root = root.__cause__
-            if isinstance(root, ValidationError):
+            if isinstance(root, ProposalAmbiguity):
+                diagnostic = str(root)
+            elif isinstance(root, ValidationError):
                 diagnostic = json.dumps([{'field': e['loc'], 'message': e['msg'],
                     'fields_present': sorted(e['input']) if isinstance(e.get('input'), dict) else []}
                     for e in root.errors(include_url=False)], ensure_ascii=False)
