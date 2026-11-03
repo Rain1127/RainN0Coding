@@ -16,10 +16,16 @@ PROMPT = '用原生 HTML 做一个单文件展示页。顶部导航显示精确�
 CORRECTION = '保留顶部导航和正文，在页脚增加精确可见的文字「联调已确认」。'
 
 
+class RateLimited(RuntimeError):
+    pass
+
+
 def response(client, method, path, **kwargs):
     result = client.request(method, BASE + path, **kwargs)
     result.raise_for_status()
     payload = result.json()
+    if payload['code'] == 42900:
+        raise RateLimited(path)
     if payload['code'] != 0:
         raise RuntimeError(f"{path}: {payload['code']} {payload.get('message')}")
     return payload.get('data')
@@ -29,8 +35,12 @@ def login(client):
     account = 'harness' + secrets.token_hex(4)
     password = secrets.token_hex(12)
     body = {'userAccount': account, 'userPassword': password}
-    response(client, 'POST', '/user/register', json={**body, 'checkPassword': password})
-    response(client, 'POST', '/user/login', json=body)
+    for path, data in (('/user/register', {**body, 'checkPassword': password}), ('/user/login', body)):
+        try:
+            response(client, 'POST', path, json=data)
+        except RateLimited:
+            time.sleep(61)
+            response(client, 'POST', path, json=data)
 
 
 def events(client, path, *, after=None, stop_after=None):
