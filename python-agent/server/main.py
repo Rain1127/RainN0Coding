@@ -12,6 +12,8 @@ Run:
 import asyncio
 import importlib
 import logging
+from typing import Literal
+from uuid import UUID
 
 import httpx
 from fastapi import FastAPI
@@ -156,6 +158,56 @@ def pause_generation(request: GenerationControlRequest):
 @app.post("/api/generation/status")
 def generation_status(request: GenerationControlRequest):
     return _control(request, "public_status")
+
+
+class GenerationEventsRequest(GenerationControlRequest):
+    after: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class GenerationInstructionRequest(GenerationControlRequest):
+    action: Literal['list', 'submit', 'cancel'] = 'list'
+    instruction_id: UUID | None = Field(default=None, alias='instructionId')
+    target: Literal['next_step', 'next_run'] | None = None
+    content: str | None = Field(default=None, max_length=1200)
+
+
+@app.post('/api/generation/instructions')
+def generation_instructions(request: GenerationInstructionRequest):
+    from guardrails.engine import evaluate_prompt
+    from guardrails.models import PromptContext
+    from workflow import instructions
+    from workflow.run_control import default_run_store, RunControlError
+    store = default_run_store()
+    owner = (request.run_id, request.user_id, request.app_id)
+    try:
+        if request.action == 'list':
+            return instructions.list_for_owner(store, *owner)
+        if request.instruction_id is None:
+            raise RunControlError('Instruction ID is required', 400)
+        if request.action == 'cancel':
+            return instructions.cancel(store, *owner, str(request.instruction_id))
+        content = (request.content or '').strip()
+        if not content or request.target is None:
+            raise RunControlError('Instruction target and content are required', 400)
+        store.get(*owner)
+        decision = evaluate_prompt(PromptContext(content, request_id=request.run_id, user_id=request.user_id,
+                                                app_id=request.app_id))
+        if decision.action == 'block':
+            raise RunControlError('Instruction was rejected by the prompt policy', 400)
+        return instructions.submit(store, *owner, str(request.instruction_id), request.target, content)
+    except RunControlError as exc:
+        return JSONResponse({'detail': str(exc)}, status_code=exc.status_code)
+
+
+@app.post('/api/generation/events')
+def generation_events(request: GenerationEventsRequest):
+    from workflow.run_control import default_run_store, RunControlError
+    try:
+        return default_run_store().public_events(request.run_id, request.user_id, request.app_id,
+                                                  request.after, request.limit)
+    except RunControlError as exc:
+        return JSONResponse({'detail': str(exc)}, status_code=exc.status_code)
 
 
 class RouteCodeGenTypeResponse(BaseModel):

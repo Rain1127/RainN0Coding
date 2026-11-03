@@ -38,6 +38,19 @@ class CodeGenState(TypedDict, total=False):
 
     # ========== PM Agent 产出 ==========
     prd: dict | None           # {page_name, page_type, features, target_audience, ...}
+    harness_policy: dict
+    active_instructions: list[dict]
+    instruction_scope: list[str]
+    acceptance_contract: dict
+    acceptance_contract_path: str
+    acceptance_generation_attempts: int
+    context_report: dict
+    retrieval_events: list[dict]
+    coder_current_error: str
+    context_stop_reason: str
+    coder_file_hashes: dict
+    build_scope_result: dict
+    recovery_status: str
 
     # ========== Architect Agent 产出 ==========
     architecture: dict | None  # {tech_stack, component_tree, file_list, data_flow}

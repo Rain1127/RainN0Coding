@@ -75,7 +75,8 @@ def _with_system_field_spec(messages: list, field_spec: str) -> list:
 
 
 def create_json_parser(output_schema: type[BaseModel], field_spec: str,
-                       group: str = "structured", agent_name: str = None):
+                       group: str = "structured", agent_name: str = None,
+                       allow_degraded: bool = True):
     """
     创建 JSON 解析器，由 LiteLLM 处理模型选择和故障转移。
 
@@ -107,7 +108,7 @@ def create_json_parser(output_schema: type[BaseModel], field_spec: str,
             parser=lambda msgs, **kw: _call_with_parser(
                 msgs, output_schema, field_spec, group, **kw
             ),
-            allow_degraded=True,
+            allow_degraded=allow_degraded,
             langsmith_extra=langsmith_extra,
             budget_extra_input=field_spec,
         )

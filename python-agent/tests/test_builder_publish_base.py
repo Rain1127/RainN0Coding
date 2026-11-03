@@ -1,8 +1,7 @@
-from types import SimpleNamespace
-
 import pytest
 
 from agents.builder_agent import builder_agent
+from workflow.execution import ExecutionResult
 
 
 @pytest.mark.parametrize("kind, expected", [
@@ -14,9 +13,9 @@ def test_build_supports_subdirectory_without_changing_node_backend(tmp_path, mon
 
     def run(command, **kwargs):
         calls.append(command)
-        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+        return ExecutionResult('succeeded', None, 0, 'ok', 0, 'local')
 
-    monkeypatch.setattr("agents.builder_agent.subprocess.run", run)
+    monkeypatch.setattr("workflow.execution.process_result", run)
     result = builder_agent({
         "code_gen_type": kind, "project_dir": str(tmp_path),
         "code_files": [{"path": "index.html", "content": "<html></html>"}],
@@ -28,12 +27,10 @@ def test_build_supports_subdirectory_without_changing_node_backend(tmp_path, mon
 
 
 @pytest.mark.parametrize("kind, mode", [("html", "modify"), ("multi_file", "new")])
-def test_static_page_does_not_get_shadowed_by_vue_scaffold(tmp_path, monkeypatch, kind, mode):
+def test_static_page_does_not_get_shadowed_by_vue_scaffold(tmp_path, kind, mode):
     nested = tmp_path / "src" / "index.html"
     nested.parent.mkdir()
     nested.write_text("<html><body>generated static content</body></html>", encoding="utf-8")
-    monkeypatch.setattr("agents.builder_agent.subprocess.run", lambda *a, **k:
-                        SimpleNamespace(returncode=0, stdout="ok", stderr=""))
     result = builder_agent({
         "code_gen_type": kind, "mode": mode, "project_dir": str(tmp_path),
         "code_files": [{"path": "src/index.html", "content": nested.read_text(encoding="utf-8")}],

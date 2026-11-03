@@ -24,7 +24,7 @@ export interface StartGenerationOptions {
   preserve?: boolean
 }
 
-function newRequestId(): string {
+export function newRequestId(): string {
   // Public IP deployments use HTTP, where randomUUID may be unavailable.
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   const bytes = crypto.getRandomValues(new Uint8Array(16))

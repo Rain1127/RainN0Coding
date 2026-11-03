@@ -197,11 +197,17 @@ def normalize_llm_usage(response: object, requested_model: str) -> dict[str, obj
 
 def record_llm_response(response: object, model: str) -> None:
     """Record usage without allowing telemetry to affect the model call."""
+    if (getattr(response, 'response_metadata', {}) or {}).get('harness_replayed'):
+        return
     usage = normalize_llm_usage(response, model)
     from workflow.budget import active_budget
     budget = active_budget.get()
     if budget and budget.pending:
         budget.observe(usage)
+    from workflow.run_journal import active_journal
+    journal = active_journal.get()
+    if journal:
+        journal.capture_response(response, usage)
     if usage is None:
         return
     captured = _llm_usage.get()

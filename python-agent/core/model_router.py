@@ -7,7 +7,7 @@ from core.model_registry import get_model_alias
 from monitoring import record_llm_call
 from request_context import build_litellm_metadata, record_llm_response
 from tracing import start_span
-from workflow.budget import active_budget, BudgetExceeded
+from workflow.budget import active_budget, active_output_limit, BudgetExceeded
 
 
 class ModelRouter:
@@ -23,9 +23,28 @@ class ModelRouter:
         budget_extra_input: str = "",
     ):
         model_alias = get_model_alias(group_name)
+        from workflow.run_journal import active_journal
+        journal = active_journal.get()
+        metadata = (langsmith_extra or {}).get('metadata', {})
+        coder_round = metadata.get('react_round') if (langsmith_extra or {}).get('run_name') == 'coder_agent' else None
+        replay = journal.prepare_model(messages, model_alias, group_name, budget_extra_input,
+                                       metadata.get('instruction_ids'), coder_round) if journal else None
+        if replay is not None:
+            class ReplayClient:
+                def bind_tools(self, *args, **kwargs):
+                    return self
+                def invoke(self, *args, **kwargs):
+                    return replay
+            return parser(messages, _client=ReplayClient(), _model=model_alias, _config=langsmith_extra) if parser else replay.content
         budget = active_budget.get()
-        output_limit = budget.reserve(messages, budget_extra_input) if budget else None
+        output_limit = budget.reserve(messages, budget_extra_input) if budget else active_output_limit.get()
+        if journal:
+            journal.reserved(model_alias, output_limit, min(config.LLM_TIMEOUT, budget.remaining_seconds()) if budget else config.LLM_TIMEOUT)
         runnable_config = dict(langsmith_extra or {})
+        if journal:
+            runnable_config['metadata'] = {**runnable_config.get('metadata', {}),
+                'harness_step_id': journal.frame['request_step'], 'artifact_run_id': journal.state.get('artifact_run_id'),
+                'contract_version': (journal.state.get('acceptance_contract') or {}).get('version')}
         litellm_metadata = build_litellm_metadata(
             runnable_config.get("metadata", {})
         )

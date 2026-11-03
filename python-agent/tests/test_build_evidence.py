@@ -1,12 +1,11 @@
 import importlib
-import subprocess
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 builder = importlib.import_module("agents.builder_agent")
 from workflow.resilience import finalize_state
+from workflow.execution import ExecutionResult
 
 
 @pytest.mark.parametrize("outcome,status,kind", [
@@ -17,12 +16,13 @@ from workflow.resilience import finalize_state
 def test_build_evidence_is_not_fabricated(tmp_path, monkeypatch, outcome, status, kind):
     def run(cmd, **kwargs):
         if outcome == "missing":
-            raise FileNotFoundError("npm")
+            return ExecutionResult('unverified', 'environment', None, 'npm missing', 0, 'local')
         if outcome == "timeout":
-            raise subprocess.TimeoutExpired(cmd, 180)
+            return ExecutionResult('failed', 'timeout', None, 'npm timed out', 0, 'local')
         failed = outcome == "dependency" or (outcome == "code" and "build" in cmd)
-        return SimpleNamespace(returncode=int(failed), stdout="src/App.vue:42 error" if failed else "ok", stderr="")
-    monkeypatch.setattr(builder.subprocess, "run", run)
+        return ExecutionResult('failed' if failed else 'succeeded', kwargs['failure'] if failed else None,
+                               int(failed), 'src/App.vue:42 error' if failed else 'ok', 0, 'local')
+    monkeypatch.setattr("workflow.execution.process_result", run)
     index = Mock()
     feedback = Mock()
     monkeypatch.setattr("rag.rag_builder.index_code_files", index)

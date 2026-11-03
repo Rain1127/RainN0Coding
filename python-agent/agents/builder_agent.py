@@ -16,6 +16,7 @@ import tempfile
 import shutil
 import glob as glob_mod
 import shlex
+from pathlib import Path
 from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from state.code_gen_state import CodeGenState
 from config import get_lang_config, config
@@ -26,6 +27,24 @@ def _build_timeout(default=180):
     from workflow.budget import active_budget
     budget=active_budget.get()
     return min(default, budget.remaining_seconds()) if budget else default
+
+
+def _source_snapshot(project_dir):
+    import hashlib
+    excluded = {'node_modules', '.git', '.venv', 'dist', 'build', 'target', '__pycache__'}
+    metadata = {'prd.json', 'architecture.json', 'images.json', 'acceptance.json', 'review-coverage.json', '.generation-run-id'}
+    result = {}
+    for directory, dirs, names in os.walk(project_dir):
+        dirs[:] = sorted(d for d in dirs if d not in excluded)
+        for name in sorted(names):
+            if name in metadata or name.endswith(('.pyc', '.log', '.tmp')):
+                continue
+            path = Path(directory, name)
+            if path.is_symlink():
+                raise ValueError('Source symlink is not supported')
+            with path.open('rb') as handle:
+                result[path.relative_to(project_dir).as_posix()] = hashlib.file_digest(handle, 'sha256').hexdigest()
+    return result
 
 
 def _syntax_command(template, *, files=(), **values):
@@ -331,6 +350,18 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
             return state
 
     try:
+        from workflow.harness_policy import enabled
+        strict_modify = enabled(state, 'editing') and state.get('mode') == 'modify'
+        source_before_build = _source_snapshot(project_dir) if strict_modify else None
+        if enabled(state, 'editing'):
+            import hashlib
+            from tools.path_guard import resolve_project_path
+            for path, expected in state.get('coder_file_hashes', {}).items():
+                full = Path(resolve_project_path(project_dir, path))
+                if not full.is_file() or hashlib.sha256(full.read_bytes()).hexdigest() != expected:
+                    state['build_result'] = make_build_result('unverified', '候选文件在审查后发生变更，请重新读取并审查：' + path, project_dir, 'conflict')
+                    state['phase'] = 'build_done'
+                    return state
         # 1. 写入图片 URL 映射
         if images:
             with open(os.path.join(project_dir, "images.json"), "w", encoding="utf-8") as fh:
@@ -341,12 +372,21 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
         # Static HTML needs no Vue shell: a root scaffold would shadow src/index.html.
         # Only frontend projects that actually build with npm need these defaults.
         if lc.get("is_frontend") and lc.get("needs_npm_build"):
+            if enabled(state, 'editing') and state.get('mode') == 'modify':
+                required = ['package.json', 'index.html']
+                if not any(os.path.exists(os.path.join(project_dir, name)) for name in ('vite.config.ts', 'vite.config.js')):
+                    required.append('vite.config.ts')
+                missing = [name for name in required if not os.path.isfile(os.path.join(project_dir, name))]
+                if missing:
+                    state['build_result'] = make_build_result('unverified', '待确认：修改模式缺少构建配置，需要先扩展修改计划：' + ','.join(missing), project_dir, 'specification')
+                    state['phase'] = 'build_done'
+                    return state
             if not os.path.exists(os.path.join(project_dir, "package.json")):
                 _create_default_package_json(project_dir)
             if not os.path.exists(os.path.join(project_dir, "vite.config.ts")) and \
                not os.path.exists(os.path.join(project_dir, "vite.config.js")):
                 _create_default_vite_config(project_dir)
-            if not os.path.exists(os.path.join(project_dir, "tailwind.config.js")):
+            if not os.path.exists(os.path.join(project_dir, "tailwind.config.js")) and not (enabled(state, 'editing') and state.get('mode') == 'modify'):
                 _create_default_tailwind_config(project_dir)
             if not os.path.exists(os.path.join(project_dir, "index.html")):
                 _create_default_index_html(project_dir)
@@ -357,45 +397,25 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
         build_log = ""
         build_log_mode = "unknown"
         if lc.get("needs_npm_build"):
+            from workflow.execution import execution_request, executor
             build_status = "succeeded"
-            npm = shutil.which("npm") or "npm"
-            try:
-                result = subprocess.run(
-                    [npm, "install"], cwd=project_dir,
-                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_build_timeout(),
-                )
-                if result.returncode != 0:
-                    build_status = "failed"
-                    failure_kind = "dependency"
-                    build_log = "npm install failed:\n" + result.stderr[-2000:]
-                    build_log_mode = "npm_install_failed"
-                else:
-                    build_command = [npm, "run", "build"]
-                    if lc.get("is_frontend"):
-                        # Vite assets must resolve under the app's preview/publish directory.
-                        build_command += ["--", "--base=./"]
-                    result = subprocess.run(
-                        build_command, cwd=project_dir,
-                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_build_timeout(),
-                    )
-                    if result.returncode != 0:
-                        build_status = "failed"
-                        failure_kind = "code"
-                        build_log = "npm run build failed:\n" + (result.stdout + result.stderr)[-8000:]
-                        build_log_mode = "npm_build_failed"
-                    else:
-                        build_log = result.stdout[-1000:]
-                        build_log_mode = "npm_build"
-            except FileNotFoundError:
-                build_log = "[本地无 Node.js，跳过实际构建。代码文件已写入磁盘。]"
-                build_status = "unverified"
-                failure_kind = "environment"
-                build_log_mode = "node_missing"
-            except subprocess.TimeoutExpired:
-                build_log = "构建超时（超过 180 秒）"
-                build_status = "failed"
-                failure_kind = "timeout"
-                build_log_mode = "build_timeout"
+            backend = executor(state)
+            install_profile = 'npm-install'
+            if strict_modify:
+                install_profile = ('npm-install-locked' if os.path.isfile(os.path.join(project_dir, 'package-lock.json'))
+                                   else 'npm-install-preserve')
+            result = backend.run(execution_request(state, install_profile, _build_timeout()))
+            build_log_mode = "npm_install_failed"
+            if result.status == 'succeeded':
+                # Vite assets must resolve under the app's preview/publish directory.
+                profile = 'vite-build' if lc.get('is_frontend') else 'npm-build'
+                result = backend.run(execution_request(state, profile, _build_timeout()))
+                build_log_mode = 'npm_build' if result.status == 'succeeded' else 'npm_build_failed'
+            build_status = 'failed' if result.status == 'cancelled' else result.status
+            failure_kind = result.failure_kind
+            build_log = result.log[-1000:] if result.status == 'succeeded' else result.log[-8000:]
+            if not build_log:
+                build_log = f'[{result.backend}: {result.status}, {result.failure_kind or build_log_mode}]'
         else:
             build_log = f"[{code_gen_type} 项目无需 npm build，文件已就绪]"
             build_log_mode = "no_npm_build"
@@ -411,7 +431,13 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
         lc = get_lang_config(code_gen_type)
 
         review_gate = _check_review_quality_gate(state, config.QUALITY_SCORE_THRESHOLD)
-        syntax_result = _run_syntax_check(project_dir, code_files, lc)
+        isolated_syntax = enabled(state, 'executor') and lc.get('needs_syntax_check')
+        if isolated_syntax:
+            from workflow.execution import execution_request, executor
+            syntax = executor(state).run(execution_request(state, f'{code_gen_type}-syntax', lc.get('syntax_check_timeout', 60)))
+            syntax_result = {'passed': syntax.status == 'succeeded', 'log': syntax.log, 'tool_available': syntax.status != 'unverified'}
+        else:
+            syntax_result = _run_syntax_check(project_dir, code_files, lc)
 
         if lc.get("needs_syntax_check") and not lc.get("needs_npm_build"):
             build_status = ("unverified" if not syntax_result["tool_available"] else
@@ -419,7 +445,18 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
             failure_kind = ("environment" if not syntax_result["tool_available"] else
                             "timeout" if "TIMEOUT" in syntax_result["log"] or "timeout" in syntax_result["log"] else
                             "code" if not syntax_result["passed"] else None)
+            if isolated_syntax:
+                failure_kind = syntax.failure_kind
             state["build_result"] = make_build_result(build_status, syntax_result["log"], project_dir, failure_kind)
+        if source_before_build is not None:
+            after = _source_snapshot(project_dir)
+            changed = sorted(p for p in source_before_build.keys() | after.keys() if source_before_build.get(p) != after.get(p))
+            allowed = set((state.get('change_plan') or {}).get('files', []))
+            unexpected = [path for path in changed if path not in allowed]
+            state['build_scope_result'] = {'changed': changed, 'unexpected': unexpected}
+            if unexpected:
+                state['build_result'] = make_build_result('unverified', '构建改动了计划外源文件，候选已保留：' + ','.join(unexpected), project_dir, 'conflict')
+                return state
         build_success = verified(state["build_result"])
 
         quality_gate_passed = review_gate["passed"] and syntax_result["passed"]

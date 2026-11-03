@@ -5,6 +5,21 @@ import type {
 } from '@/types/app'
 import type { PageResult, DeleteRequest } from '@/types/api'
 import type { EntityId } from '@/types/entity'
+import type { GenerationInstruction, GenerationStepEvent, InstructionTarget } from '@/types/generation'
+
+export const listGenerationSteps = (appId: EntityId, runId: string, after = 0) =>
+  apiClient.get<any, { events: GenerationStepEvent[]; step_cursor: number; has_more: boolean }>('/app/chat/gen/steps', {
+    params: { appId, runId, after, limit: 100 },
+  })
+
+export const listGenerationInstructions = (appId: EntityId, runId: string) =>
+  apiClient.get<any, { enabled: boolean; run_status: string; instructions: GenerationInstruction[] }>('/app/chat/gen/instructions', {
+    params: { appId, runId },
+  })
+
+export const updateGenerationInstruction = (appId: EntityId, runId: string, instructionId: string,
+  payload: { action: 'submit'; target: InstructionTarget; content: string } | { action: 'cancel' }) =>
+  apiClient.post<any, GenerationInstruction>('/app/chat/gen/instructions', { appId, runId, instructionId, ...payload })
 
 export const createApp = (body: AppAddRequest) =>
   apiClient.post<any, EntityId>('/app/add', body)

@@ -12,6 +12,8 @@ import AgentProgress from '@/components/generation/AgentProgress.vue'
 import GeneratedFileList from '@/components/generation/GeneratedFileList.vue'
 import ArtifactVersions from '@/components/generation/ArtifactVersions.vue'
 import BuildEvidence from '@/components/generation/BuildEvidence.vue'
+import StepTimeline from '@/components/generation/StepTimeline.vue'
+import GenerationInstructions from '@/components/generation/GenerationInstructions.vue'
 import ChatLayout from '@/layouts/ChatLayout.vue'
 import { useAppsStore } from '@/stores/apps'
 import { useChatStore } from '@/stores/chat'
@@ -480,6 +482,10 @@ onBeforeUnmount(() => {
         <aside class="workbench__inspector" aria-label="生成详情">
           <AgentProgress :phase="generation.phase" :status="generation.status" />
           <BuildEvidence :events="generation.events" />
+          <StepTimeline v-if="appId && generation.requestId" :app-id="appId" :run-id="generation.requestId" :events="generation.events" />
+          <GenerationInstructions v-if="appId && generation.requestId" :key="generation.requestId" :app-id="appId"
+            :run-id="generation.requestId" :active="hasUnfinishedRun" :event-count="generation.events.length"
+            @next-run="input = $event" />
 
           <section class="event-log" aria-labelledby="event-log-title">
             <div class="panel-heading panel-heading--compact">

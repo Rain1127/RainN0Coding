@@ -15,6 +15,10 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
     "modify_file": ["admin", "user"],
     "delete_file": ["admin"],            # 仅 admin 可删除
     "exit_tool":   ["admin", "user"],
+    "search_code": ["admin", "user"],
+    "retrieve_context": ["admin", "user"],
+    "read_progress": ["admin", "user"],
+    "apply_patch": ["admin", "user"],
 }
 
 PERMISSION_DENIED_MSG = "权限不足：当前用户角色无权执行此操作"

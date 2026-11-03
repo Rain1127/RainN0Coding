@@ -5,12 +5,18 @@ from contextvars import ContextVar
 _current_project_dir: ContextVar[str] = ContextVar("tool_project_dir", default="")
 _current_app_id: ContextVar[str] = ContextVar("tool_app_id", default="")
 _current_user_role: ContextVar[str] = ContextVar("tool_user_role", default="user")
+_current_policy: ContextVar[dict] = ContextVar('tool_harness_policy', default={})
 
 
-def set_tool_context(project_dir: str, app_id: str, user_role: str = "user") -> None:
+def set_tool_context(project_dir: str, app_id: str, user_role: str = "user", policy: dict | None = None) -> None:
     _current_project_dir.set(project_dir)
     _current_app_id.set(app_id)
     _current_user_role.set(user_role)
+    _current_policy.set(dict(policy or {}))
+
+
+def get_tool_policy() -> dict:
+    return dict(_current_policy.get())
 
 
 def get_project_dir() -> str:

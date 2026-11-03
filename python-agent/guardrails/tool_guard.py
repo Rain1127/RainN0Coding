@@ -19,6 +19,8 @@ def evaluate_tool_action_context(action: ToolAction) -> GuardrailDecision:
     target_lower = normalized.lower()
     _, ext = os.path.splitext(target_name)
     ext = ext.lower()  # 文件扩展名
+    if target_name == 'acceptance.json' and action.tool_name in {'create_file', 'modify_file', 'delete_file', 'apply_patch'}:
+        return GuardrailDecision.block('tool.contract_read_only', 'Acceptance contracts are owned by the verifier')
 
     # 防止跳出上一级，路径穿越
     if ".." in [part for part in normalized.split("/") if part]:

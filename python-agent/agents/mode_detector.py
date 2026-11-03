@@ -100,7 +100,7 @@ def _collect_code_files(project_dir: str) -> list[dict]:
         dirs[:] = [d for d in dirs if d not in
                    {"node_modules", ".git", "__pycache__", ".venv", "dist", "build"}]
         for name in files:
-            if name.endswith((".pyc", ".log", ".lock", ".tmp")) or name in {"prd.json", "architecture.json", "images.json", "review-coverage.json", ".generation-run-id"}:
+            if name.endswith((".pyc", ".log", ".lock", ".tmp")) or name in {"prd.json", "architecture.json", "images.json", "review-coverage.json", ".generation-run-id", "acceptance.json"}:
                 continue
             full = os.path.join(root, name)
             rel = os.path.relpath(full, project_dir).replace("\\", "/")

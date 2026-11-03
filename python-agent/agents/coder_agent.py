@@ -11,6 +11,7 @@ Coder Agent —— 程序员（工具增强版）
 """
 import json
 import os
+from pathlib import Path
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
@@ -256,7 +257,7 @@ def _collect_code_files(project_dir: str) -> list[dict]:
         dirs[:] = [d for d in dirs if d not in
                    {"node_modules", ".git", "__pycache__", ".venv", "dist", "build"}]
         for name in files:
-            if name.endswith((".pyc", ".log", ".lock", ".tmp")) or name in {"prd.json", "architecture.json", "images.json", "review-coverage.json", ".generation-run-id"}:
+            if name.endswith((".pyc", ".log", ".lock", ".tmp")) or name in {"prd.json", "architecture.json", "images.json", "review-coverage.json", ".generation-run-id", "acceptance.json"}:
                 continue
             full = os.path.join(root, name)
             rel = os.path.relpath(full, project_dir).replace("\\", "/")
@@ -286,6 +287,13 @@ _TOOL_FAILURE_PREFIXES = (
 
 def _tool_result_failed(result: object) -> bool:
     text = str(result).strip()
+    if text.startswith('{'):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and parsed.get('ok') is False:
+                return True
+        except ValueError:
+            pass
     return text.startswith(_TOOL_FAILURE_PREFIXES)
 
 
@@ -308,6 +316,23 @@ def _missing_required_files(project_dir: str, file_list: list[dict]) -> list[str
 # ============ Agent 主函数 ============
 
 def coder_agent(state: CodeGenState) -> CodeGenState:
+    from workflow.run_journal import journal_scope, RecoveryConflict
+    try:
+        with journal_scope(state) as journal:
+            if journal and journal.frame.get('completed'):
+                journal.validate_completed()
+                return state
+            result = _coder_agent(state, journal)
+            if journal:
+                journal.finish(result)
+            return result
+    except RecoveryConflict as exc:
+        state.update(phase='error', error=str(exc), recovery_status='conflict',
+                     recovery_hint='候选与步骤记录已保留；先核对冲突，不重复执行未确认的操作。')
+        return state
+
+
+def _coder_agent(state: CodeGenState, journal=None) -> CodeGenState:
     """Coder Agent — ReAct 循环，LLM 通过工具操作文件系统"""
 
     code_gen_type = state.get("code_gen_type", "vue_project")
@@ -356,14 +381,37 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
         state["project_dir"] = project_dir
     os.makedirs(project_dir, exist_ok=True)
     user_role = state.get("user_role", "user")
-    set_tool_context(project_dir, app_id, user_role)
+    from workflow.harness_policy import enabled
+    manage_context = enabled(state, 'context')
+    set_tool_context(project_dir, app_id, user_role, state.get('harness_policy'))
+    if manage_context or enabled(state, 'editing'):
+        from tools.on_demand import set_coder_state
+        set_coder_state(state)
+    if enabled(state, 'editing'):
+        system_prompt += '\n## 精准编辑\nmodify_file 默认只允许唯一匹配。批量替换必须 mode=all 且 expected_count 精确一致。'
+        system_prompt += '\n编辑前 read_file 获取 sha256 并作为 expected_hash；可使用 apply_patch(path,hunks,expected_hash) 原子验证全部上下文片段。'
+        system_prompt += '\n不得用 create_file 覆盖已有文件来绕过校验。保留原始换行，冲突时重新读取；不得修改计划外文件。'
+    if manage_context:
+        system_prompt += '\n## 按需上下文\nread_file 支持 start_line/end_line、offset/limit，返回哈希和 next_offset；长文件先 search_code 定位，再分段读取。'
+        system_prompt += '\n仅在需要参考时调用 retrieve_context(query,target_file,offset,limit)，不必逐文件检索。read_progress 可读取交接中的原始记录引用；文件现状以重新 read_file 为准。'
+    from workflow.acceptance import ensure_contract
+    try:
+        contract = ensure_contract(state)
+    except Exception as exc:
+        state.update(phase='error', error=f'需求验收合同未固定：{exc}')
+        return state
     can_complete_from_file_coverage = (
         mode != "modify" and bool(_missing_required_files(project_dir, file_list))
     )
+    if journal:
+        can_complete_from_file_coverage = journal.frame.get('coverage_completion', can_complete_from_file_coverage)
+        journal.save(coverage_completion=can_complete_from_file_coverage)
 
     # === 重试上下文（含 AutoGen 讨论结论） ===
     review = state.get("review")
     retry_context = ""
+    if contract:
+        retry_context += '\n## 固定需求验收合同（只读；不得删改条件或填写通过状态）\n' + json.dumps(contract, ensure_ascii=False)
     if state.get("change_plan"):
         retry_context += "\n## 允许修改的计划（不得改动其他源文件）\n" + json.dumps(state["change_plan"], ensure_ascii=False)
     if state.get("build_repair_context"):
@@ -388,7 +436,7 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
 
     # === RAG 检索 ===
     rag_contexts: dict[str, str] = {}
-    for f in file_list:
+    for f in ([] if manage_context else file_list):
         from rag.feedback_tracker import attribution_scope
         with attribution_scope(state.get("artifact_run_id", ""), f.get("path", "")):
             ctx = build_rag_context(
@@ -453,7 +501,11 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
     )
     current_request = f"{mode_instruction}\n\n{state.get('user_request', '')}"
 
-    tools = get_all_tools()
+    if enabled(state, 'executor') and journal:
+        system_prompt += '\n## 快速检查\n可以用 run_checks 运行已登记的 typecheck、lint 或单个测试文件。根据实际错误定点修复；快速检查通过后仍需最终构建与需求验收。'
+    tools = get_all_tools(state.get('harness_policy')) if (manage_context or enabled(state, 'editing') or enabled(state, 'executor')) else get_all_tools()
+    tool_map = dict(_TOOL_MAP)
+    tool_map.update({tool.name: tool for tool in tools if tool.name not in tool_map})
     llm = create_tool_enabled_llm(tools, group="reasoning")
 
     # ===== LangSmith trace metadata =====
@@ -471,58 +523,116 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
         context="\n".join(user_prompt_parts), rag=rag_section,
         retry=retry_context, request=current_request,
     )
+    context_manager = None
+    if manage_context:
+        from workflow.coder_context import CoderContext, ContextWindowExceeded
+        context_manager = CoderContext(state, tools)
+        messages = [messages[0], HumanMessage(content='\n'.join(user_prompt_parts))]
 
     # === ReAct 循环 ===
     code_files: list[dict] = []
-    exited = False
-    completed = False
+    exited = bool(journal and journal.frame.get('exited'))
+    completed = bool(journal and journal.frame.get('loop_completed'))
+    pending_response = None
+    start_round = 1
+    if journal and journal.frame.get('messages'):
+        messages = journal.restore_messages()
+        start_round = journal.frame['round']
+        if journal.frame.get('response_pending'):
+            pending_response = next(m for m in reversed(messages) if isinstance(m, AIMessage))
 
-    for round_num in range(1, MAX_TOOL_ROUNDS + 1):
+    for round_num in range(start_round if not completed else MAX_TOOL_ROUNDS + 1, MAX_TOOL_ROUNDS + 1):
+        reused_response = pending_response is not None
         try:
+            instruction_id = None
+            if journal and not reused_response and enabled(state, 'instructions'):
+                from workflow.instructions import prepare_next
+                instruction_id = prepare_next(journal)
+                directives = state.get('active_instructions')
+                if directives and not context_manager:
+                    current = HumanMessage(
+                        id='harness-active-directives',
+                        content='## 当前用户纠偏、权限和验收合同（优先于旧消息中的对应部分）\n'
+                        + json.dumps({'instructions': directives, 'scope': state.get('instruction_scope'),
+                                      'acceptance_contract': state.get('acceptance_contract')}, ensure_ascii=False),
+                    )
+                    messages = [messages[0], current, *[message for message in messages[1:]
+                               if getattr(message, 'id', None) != current.id]]
+            if context_manager and not reused_response:
+                messages = context_manager.prepare(messages)
             round_extra = dict(_base_langsmith_extra)
-            round_extra.setdefault("metadata", {})
-            round_extra["metadata"]["react_round"] = round_num
-            response = llm.invoke(messages, config=round_extra)
+            round_extra['metadata'] = {**_base_langsmith_extra['metadata'], 'react_round': round_num}
+            if instruction_id:
+                round_extra['metadata']['instruction_ids'] = [instruction_id]
+            from workflow.budget import output_limit_scope
+            if reused_response:
+                response, pending_response = pending_response, None
+            else:
+                if journal:
+                    journal.save(messages, round=round_num, response_pending=False, next_tool=0)
+                with output_limit_scope(context_manager.output_reserve if context_manager else None):
+                    response = llm.invoke(messages, config=round_extra)
+            if context_manager and not reused_response:
+                context_manager.observe(response)
         except Exception as e:
+            if manage_context and isinstance(e, ContextWindowExceeded):
+                state.update(phase='error', error=str(e), context_stop_reason='context_window_exhausted',
+                             code_files=_collect_code_files(project_dir), recovery_hint='候选文件及原始进度已保留；调整上下文容量后恢复任务。')
+                return state
             log_agent_fail("Coder Agent", f"第{round_num}轮 LLM 调用失败，原因={e}")
             state["error"] = f"Coder Agent LLM 调用失败 (第{round_num}轮): {e}"
             state["phase"] = "error"
             return state
 
         _sanitize_ai_message(response)
-        messages.append(response)
+        if not reused_response:
+            messages.append(response)
+            if journal:
+                journal.frame_response(messages, round_num)
 
         # 是否有 tool_calls
         if hasattr(response, "tool_calls") and response.tool_calls:
-            round_had_tool_failure = False
-            for tc in response.tool_calls:
+            round_had_tool_failure = bool(reused_response and journal and journal.frame.get('round_had_tool_failure'))
+            for tool_index, tc in enumerate(response.tool_calls):
+                if reused_response and journal and tool_index < journal.frame.get('next_tool', 0):
+                    continue
                 tool_name = tc.get("name", "")
                 tool_args = tc.get("args", {})
                 tool_id = tc.get("id", "")
 
-                func = _TOOL_MAP.get(tool_name)
+                func = tool_map.get(tool_name)
                 if func is None:
-                    tool_result = f"未知工具: {tool_name}"
+                    tool_result = journal.execute(tc, tool_index, None) if journal else f"未知工具: {tool_name}"
                 else:
                     try:
-                        tool_result = func.invoke(tool_args)
+                        tool_result = journal.execute(tc, tool_index, func) if journal else func.invoke(tool_args)
                     except Exception as e:
+                        from workflow.run_journal import RecoveryConflict
+                        if isinstance(e, RecoveryConflict):
+                            raise
                         tool_result = f"工具执行失败: {e}"
 
                 round_had_tool_failure = (
                     round_had_tool_failure or _tool_result_failed(tool_result)
                 )
+                if _tool_result_failed(tool_result):
+                    state['coder_current_error'] = str(tool_result)[-6000:]
 
                 if tool_name == "exit_tool":
                     exited = True
 
                 messages.append(ToolMessage(content=str(tool_result),
                                             tool_call_id=tool_id))
+                if journal:
+                    journal.save(messages, round=round_num, response_pending=True, next_tool=tool_index + 1,
+                                 exited=exited, round_had_tool_failure=round_had_tool_failure)
 
             log_agent_ok("Coder Agent", f"第{round_num}轮工具调用完成，tool_calls={len(response.tool_calls)}")
 
             if exited:
                 completed = True
+                if journal:
+                    journal.save(messages, loop_completed=True, response_pending=False)
                 log_agent_ok("Coder Agent", "收到 exit_tool，结束代码生成循环")
                 break
 
@@ -530,11 +640,16 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
                 missing_required_files = _missing_required_files(project_dir, file_list)
                 if not missing_required_files:
                     completed = True
+                    if journal:
+                        journal.save(messages, loop_completed=True, response_pending=False)
                     log_agent_ok(
                         "Coder Agent",
                         f"目标文件已全部生成，提前结束工具循环，round={round_num}/{MAX_TOOL_ROUNDS}",
                     )
                     break
+            if journal:
+                journal.save(messages, round=round_num + 1, response_pending=False, next_tool=0,
+                             round_had_tool_failure=False)
         else:
             # 没有 tool_calls —— 可能是 LLM 直接输出了文本（旧 JSON 模式兜底）
             completed = True
@@ -543,6 +658,17 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
                 try:
                     parsed = json.loads(_strip_code_fences(content))
                     if "files" in parsed:
+                        if enabled(state, 'editing'):
+                            if mode == 'modify':
+                                state.update(phase='error', error='修改模式需要带哈希的文件工具；未执行全文JSON覆盖')
+                                return state
+                            for file_index, item in enumerate(parsed['files']):
+                                args = {'path': item['path'], 'content': item['content']}
+                                written = journal.execute({'name': 'create_file', 'args': args, 'id': 'json-file-' + str(file_index)},
+                                                          file_index, create_file) if journal else create_file.invoke(args)
+                                if _tool_result_failed(written):
+                                    state.update(phase='error', error=str(written))
+                                    return state
                         code_files = [{"path": f["path"], "content": f["content"]}
                                       for f in parsed["files"]]
                         log_agent_ok("Coder Agent", f"LLM 直接返回文件结果，files={len(code_files)}")
@@ -580,6 +706,10 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
         return state
 
     state["code_files"] = code_files
+    if enabled(state, 'editing'):
+        import hashlib
+        state['coder_file_hashes'] = {f['path']: hashlib.sha256(Path(resolve_project_path(project_dir, f['path'])).read_bytes()).hexdigest()
+                                     for f in code_files}
     if code_gen_type == "html" and mode != "modify":
         if not any(f.get("path") == "index.html" and f.get("content", "").strip() for f in code_files):
             state["error"] = "HTML 生成结果缺少非空的根目录 index.html"

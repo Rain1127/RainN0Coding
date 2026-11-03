@@ -1,65 +1,38 @@
-"""Modify file tool."""
-
-import os
-
-from guardrails.audit import audit_from_decision
-from guardrails.engine import evaluate_tool_action
-from guardrails.models import ToolAction
+"""Unique-by-default edits with explicit batch count and optional stale-read guard."""
 from langchain_core.tools import tool
-from tools.context import get_app_id, get_project_dir, get_user_role
-from tools.guard import PERMISSION_DENIED_MSG, check_tool_permission
-from tools.path_guard import resolve_project_path
+from tools.file_edit import authorize, file_lock, check_hash, atomic_write, result, failure, replace_checked, EditRejected
+from tools.context import get_tool_policy
 
 
 @tool
-def modify_file(path: str, old_content: str, new_content: str) -> str:
-    """Replace all matching old_content with new_content in a file."""
-    if not check_tool_permission("modify_file"):
-        return PERMISSION_DENIED_MSG
-
-    project_dir = get_project_dir()
-    if not project_dir:
-        return "错误：未设置工作目录，无法修改文件"
-
+def modify_file(path: str, old_content: str, new_content: str, mode: str = 'unique',
+                expected_count: int | None = None, expected_hash: str | None = None) -> str:
+    """Replace one exact match. Batch mode='all' REQUIRES expected_count. Pass read_file.sha256 as expected_hash; newline differences require rereading."""
     try:
-        decision = evaluate_tool_action(
-            ToolAction(
-                tool_name="modify_file",
-                project_dir=project_dir,
-                relative_path=path,
-                old_content=old_content,
-                new_content=new_content,
-                user_role=get_user_role(),
-            )
-        )
-        audit_from_decision(
-            decision,
-            app_id=get_app_id(),
-            tool_name="modify_file",
-            path=path,
-        )
-        if decision.action == "block":
-            return f"guardrail_blocked:{decision.rule_id}:{decision.message}"
-
-        full_path = resolve_project_path(project_dir, path)
-        if not os.path.isfile(full_path):
-            return f"错误：文件不存在或不是文件 - {path}"
-        with open(full_path, "r", encoding="utf-8") as f:
-            original = f.read()
-
-        if old_content not in original:
-            return f"警告：文件中未找到要替换的内容，文件未修改 - {path}"
-
-        modified = original.replace(old_content, new_content)
-
-        if modified == original:
-            return f"信息：替换后文件内容未发生变化 - {path}"
-
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(modified)
-
-        return f"文件修改成功: {path}"
-    except ValueError as e:
-        return f"错误：{e}"
-    except Exception as e:
-        return f"修改文件失败: {path}, 错误: {e}"
+        full = authorize('modify_file', path, old_content=old_content, new_content=new_content)
+        if get_tool_policy().get('editing') and expected_hash is None:
+            raise EditRejected('modify_requires_expected_hash', next_action='read_file to obtain sha256')
+        with file_lock(full):
+            if not full.is_file():
+                raise EditRejected('file_not_found', path=path)
+            raw = full.read_bytes()
+            check_hash(raw, expected_hash)
+            modified, count = replace_checked(raw.decode('utf-8'), old_content, new_content,
+                                              mode=mode, expected_count=expected_count)
+            updated = modified.encode('utf-8')
+            if updated != raw:
+                atomic_write(full, updated, raw)
+            if not get_tool_policy().get('editing'):
+                return f'文件修改成功: {path}' if updated != raw else f'信息：替换后文件内容未发生变化 - {path}'
+            return result(path, raw, updated, matches=count, status='modified' if updated != raw else 'unchanged')
+    except Exception as exc:
+        if not get_tool_policy().get('editing'):
+            if isinstance(exc, EditRejected) and exc.reason == 'file_not_found':
+                return f'错误：文件不存在或不是文件 - {path}'
+            if isinstance(exc, EditRejected) and exc.reason == 'match_count_mismatch':
+                return f'警告：文件中未找到要替换的内容，文件未修改 - {path}'
+            if isinstance(exc, EditRejected) and exc.reason == 'permission_denied':
+                return '权限不足：当前用户角色无权执行此操作'
+            if isinstance(exc, EditRejected) and exc.reason == 'guardrail_blocked':
+                return 'guardrail_blocked:' + str(exc.details.get('rule_id'))
+        return failure(exc)

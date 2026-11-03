@@ -53,6 +53,8 @@ def change_plan(state: dict) -> dict:
     from tools.path_guard import resolve_project_path
     for path in plan.files:
         resolve_project_path(state["project_dir"], path)
+    plan.files = [Path(resolve_project_path(state['project_dir'], path)).relative_to(Path(state['project_dir']).resolve()).as_posix()
+                  for path in plan.files]
     state["change_plan"] = plan.model_dump()
     state["phase"] = "change_planned"
     return state

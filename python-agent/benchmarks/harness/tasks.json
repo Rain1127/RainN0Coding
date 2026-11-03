@@ -1,0 +1,14 @@
+{
+  "version": "harness-v1",
+  "prompt_version": "harness-eval-v1",
+  "repeats": 1,
+  "gate": {"deterministic_required_rate": 1.0, "live_quality_allowed_drop": 0, "efficiency_target": "report observed changes; no minimum gain claimed"},
+  "cases": [
+    {"id": "new-page", "kind": "new_page", "request": "创建一个纯 HTML 单文件商品搜索页。只需两件示例商品：苹果、香蕉；搜索输入框 id=search，输入苹果并按 Enter 后，只显示苹果，香蕉隐藏。不要使用外部依赖。", "files": {}, "steps": [{"action":"fill","selector":"#search","value":"苹果"},{"action":"press","selector":"#search","value":"Enter"},{"action":"text","value":"苹果"},{"action":"absent_text","value":"香蕉"}]},
+    {"id": "local-modify", "kind": "local_modify", "request": "仅修改 index.html 中顶部导航背景颜色为蓝色，保留导航文字“首页”和计数按钮。按钮 id=add，点击后计数从0变成1。", "files":{"index.html":"<!doctype html><meta charset='utf-8'><nav style='background:red'>首页</nav><button id='add' onclick=\"document.querySelector('#count').textContent=Number(document.querySelector('#count').textContent)+1\">增加</button><span id='count'>0</span>"}, "steps":[{"action":"click","selector":"#add"},{"action":"text","value":"1"},{"action":"text","value":"首页"}]},
+    {"id": "cross-file", "kind": "cross_file", "request": "修改 index.html 和 app.js，增加 id=search 的搜索框，输入苹果并按 Enter 后隐藏香蕉，仅显示苹果。保持外部 app.js 引用。", "files":{"index.html":"<!doctype html><meta charset='utf-8'><ul><li>苹果</li><li>香蕉</li></ul><script src='app.js'></script>","app.js":"// list behavior\n"}, "steps":[{"action":"fill","selector":"#search","value":"苹果"},{"action":"press","selector":"#search","value":"Enter"},{"action":"text","value":"苹果"},{"action":"absent_text","value":"香蕉"}]},
+    {"id": "repair", "kind": "build_repair", "request": "修复 index.html 中的 JavaScript 语法错误；保持 id=add 按钮点击后显示“已完成”的功能，输出纯 HTML。", "files":{"index.html":"<!doctype html><meta charset='utf-8'><button id='add'>执行</button><p id='status'></p><script>document.querySelector('#add').onclick=()=>{document.querySelector('#status').textContent='已完成';</script>"}, "steps":[{"action":"click","selector":"#add"},{"action":"text","value":"已完成"}]},
+    {"id": "long-context", "kind": "long_context", "request": "只修改 index.html 的页尾文字为“版本二”，保留顶部“保留导航”和所有其他段落。请分段读取并检查页尾。", "long_lines": 1000, "files":{}, "steps":[{"action":"text","value":"版本二"},{"action":"text","value":"保留导航"}]},
+    {"id": "interruption", "kind": "interruption_recovery", "request": "在现有 index.html 增加 id=add 的按钮，点击后显示“恢复完成”，保留“原始页面”文字。", "files":{"index.html":"<!doctype html><meta charset='utf-8'><h1>原始页面</h1>"}, "steps":[{"action":"click","selector":"#add"},{"action":"text","value":"恢复完成"},{"action":"text","value":"原始页面"}], "fault_injection":"P4 deterministic process-exit protocol; model run measures generated behavior separately"}
+  ]
+}

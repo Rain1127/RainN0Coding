@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Thread
 from urllib.parse import urlsplit
 import json
+import os
 import time
 
 
@@ -47,9 +48,10 @@ def acceptance_contract(request: str) -> dict:
 def validate_page(root: Path, contract: dict, *, report_dir: Path, timeout_ms: int = 5000) -> dict:
     started = time.monotonic()
     result = {"status": "unverified", "failure_kind": "environment", "log": "", "steps": [],
-              "contract": contract["version"], "interaction_status": "not_required" if not contract["steps"] else "unverified"}
+              "contract": contract["version"], "verifier_version": "harness-browser-v2",
+              "interaction_status": "not_required" if not contract["steps"] else "unverified"}
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import sync_playwright, expect
     except ImportError:
         result["log"] = "Playwright is not installed"
         return result
@@ -59,11 +61,14 @@ def validate_page(root: Path, contract: dict, *, report_dir: Path, timeout_ms: i
     thread.start()
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            executable = os.getenv('PLAYWRIGHT_CHROMIUM_EXECUTABLE')
+            browser = playwright.chromium.launch(headless=True, **({'executable_path': executable} if executable else {}))
             try:
                 page = browser.new_page(viewport={"width": 1280, "height": 800})
                 page.set_default_timeout(timeout_ms)
                 errors = []
+                blocked_external = set()
+                offline = os.getenv('HARNESS_BROWSER_OFFLINE') == 'true'
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.on("requestfailed", lambda request: errors.append(f"resource failed: {request.url}"))
                 page.on("response", lambda response: errors.append(f"HTTP {response.status}: {response.url}") if response.status >= 400 else None)
@@ -72,9 +77,12 @@ def validate_page(root: Path, contract: dict, *, report_dir: Path, timeout_ms: i
                 allowed = {"fonts.googleapis.com", "fonts.gstatic.com", "cdn.tailwindcss.com", "cdn.jsdelivr.net"}
                 def route_request(route):
                     url = urlsplit(route.request.url)
-                    if route.request.url.startswith(base + "/") or (url.scheme == "https" and url.hostname in allowed):
+                    public_asset = url.scheme == "https" and url.hostname in allowed
+                    if route.request.url.startswith(base + "/") or (public_asset and not offline):
                         route.continue_()
                     else:
+                        if public_asset and offline:
+                            blocked_external.add(url.hostname)
                         route.abort()
                 page.route("**/*", route_request)
                 result.update(status="failed", failure_kind="code")
@@ -86,7 +94,7 @@ def validate_page(root: Path, contract: dict, *, report_dir: Path, timeout_ms: i
                     raise AssertionError("Blank page")
                 result["steps"].append({"action": "load", "expected": "nonblank entry without resource/script failures", "actual": "loaded"})
                 for step in contract["steps"]:
-                    observation = {**step, "expected": step["action"], "actual": "failed"}
+                    observation = {**step, "expected": step.get('expected') or step.get('value') or step.get('count') or step["action"], "actual": "failed"}
                     result["steps"].append(observation)
                     locator = page.locator(step["selector"]).first if "selector" in step else None
                     action = step["action"]
@@ -97,12 +105,35 @@ def validate_page(root: Path, contract: dict, *, report_dir: Path, timeout_ms: i
                     elif action == "press":
                         locator.press(step["value"])
                     elif action == "text":
-                        page.get_by_text(step["value"], exact=True).first.wait_for(state="visible")
+                        target = page.get_by_text(step["value"], exact=True)
+                        if step.get('selector'):
+                            scope = page.locator(step['selector'])
+                            target = scope.get_by_text(step['value'], exact=True).or_(target.and_(scope))
+                        target.filter(visible=True).first.wait_for(state="visible")
                     elif action == "absent_text":
-                        page.get_by_text(step["value"], exact=True).first.wait_for(state="hidden")
+                        target = page.get_by_text(step["value"], exact=True)
+                        if step.get('selector'):
+                            scope = page.locator(step['selector'])
+                            target = scope.get_by_text(step['value'], exact=True).or_(target.and_(scope))
+                        expect(target.filter(visible=True)).to_have_count(0)
                     elif action == "check":
                         locator.check()
                         assert locator.is_checked()
+                    elif action == 'select':
+                        locator.select_option(step['value'])
+                    elif action == 'count':
+                        targets = page.locator(step['selector'])
+                        if step.get('scope', 'all') == 'visible':
+                            targets = targets.filter(visible=True)
+                        expect(targets).to_have_count(step['count'])
+                    elif action == 'value':
+                        expect(locator).to_have_value(step['value'])
+                    elif action == 'visible':
+                        expect(locator).to_be_visible()
+                    elif action == 'attribute':
+                        expect(locator).to_have_attribute(step['attribute'], step['value'])
+                    elif action == 'style':
+                        expect(locator).to_have_css(step['attribute'], step['value'])
                     elif action == "click":
                         locator.click()
                     elif action == "click_change":
@@ -124,6 +155,11 @@ def validate_page(root: Path, contract: dict, *, report_dir: Path, timeout_ms: i
                               interaction_status="passed" if contract["steps"] else "not_required")
             except Exception as exc:
                 result["log"] = str(exc)
+                if blocked_external:
+                    result.update(status='unverified', failure_kind='environment',
+                                  log='Offline browser blocked external assets: ' + ', '.join(sorted(blocked_external)))
+                elif 'Unexpected token' in str(exc) or 'Unknown engine' in str(exc):
+                    result.update(status='unverified', failure_kind='specification')
                 if result["status"] == "failed":
                     page.screenshot(path=str(report_dir / "failure.png"), full_page=True)
                     result["screenshot"] = str(report_dir / "failure.png")
@@ -140,18 +176,40 @@ def validate_page(root: Path, contract: dict, *, report_dir: Path, timeout_ms: i
     return result
 
 
+def validate_candidate_page(state, root, contract, report_dir):
+    from workflow.harness_policy import enabled
+    if not enabled(state, 'executor'):
+        return validate_page(root, contract, report_dir=report_dir)
+    from workflow.execution import execution_request, executor
+    project = Path(state['project_dir'])
+    evidence_root = project.parent / (state['artifact_run_id'] + '.acceptance')
+    feature = report_dir.relative_to(evidence_root).as_posix()
+    result = executor(state).run(execution_request(
+        state, 'browser', 90, target=root.relative_to(project).as_posix(),
+        browser={'contract': contract, 'feature': '' if feature == '.' else feature},
+    ))
+    return result.report or {'status': result.status, 'failure_kind': result.failure_kind, 'steps': [],
+                             'log': result.log, 'elapsed_ms': result.elapsed_ms}
+
+
 def runtime_validation(state: dict) -> dict:
     from workflow.repair import after_validation
+    from workflow.harness_policy import enabled
     kind = state.get("code_gen_type")
     if kind not in ("html", "multi_file", "vue_project"):
-        state["runtime_result"] = {"status": "not_required", "log": "No browser profile for this language"}
+        state["runtime_result"] = {"status": "unverified" if enabled(state, 'acceptance') else "not_required",
+                                   "failure_kind": "specification", "log": "No registered behavior verifier for this language/API specification"}
     else:
         project = Path(state["project_dir"])
         root = project / "dist" if kind == "vue_project" else project
         if not (root / "index.html").is_file() and (root / "src/index.html").is_file():
             root = root / "src"
-        state["runtime_result"] = validate_page(root, acceptance_contract(state.get("user_request", "")),
-            report_dir=project.parent / (state.get("artifact_run_id", project.name) + ".acceptance"))
+        report_dir = project.parent / (state.get("artifact_run_id", project.name) + ".acceptance")
+        if enabled(state, 'acceptance'):
+            from workflow.acceptance import validate_fixed_contract
+            state['runtime_result'] = validate_fixed_contract(state, root, report_dir)
+        else:
+            state["runtime_result"] = validate_candidate_page(state, root, acceptance_contract(state.get("user_request", "")), report_dir)
     state["phase"] = "runtime_done"
     state["validation_route"] = after_validation(state, "runtime")
     return state

@@ -126,6 +126,10 @@ async def stream_workflow(
                 **({"session": session} if session else {}),
             )) as states:
                 async for state in states:
+                    if state.get('__harness_events__'):
+                        for event in state['__harness_events__']:
+                            yield _event('step_event', step_event=event, step_cursor=event['seq'])
+                        continue
                     if state.get("__paused__"):
                         yield _event("paused", message="已保存进度，可继续生成")
                         yield _event("done", status="paused")
@@ -407,12 +411,13 @@ async def stream_persistent_workflow(
 ):
     """Production entry: lock and register the run before publishing workflow_start."""
     from workflow.run_control import RunSession, default_run_store
+    from workflow.harness_policy import snapshot_policy
 
     request_id = request_id or str(uuid4())
     try:
         async with RunSession(
             default_run_store(), request_id, user_id, app_id, resume=resume,
-            payload={"prompt": user_request, "code_gen_type": code_gen_type},
+            payload={"prompt": user_request, "code_gen_type": code_gen_type, "harness_policy": snapshot_policy()},
         ) as session:
             session.user_role = user_role
             async with aclosing(stream_workflow(

@@ -110,12 +110,25 @@ public class PythonAiClient {
         return generationControl("/api/generation/status", userId, appId, runId);
     }
 
+    public Map<String, Object> generationEvents(String userId, String appId, String runId, long after, int limit) {
+        return generationControl("/api/generation/events", Map.of("userId", userId, "appId", appId,
+                "runId", runId, "after", after, "limit", limit));
+    }
+
+    public Map<String, Object> generationInstructions(Map<String, Object> body) {
+        return generationControl("/api/generation/instructions", body);
+    }
+
     private Map<String, Object> generationControl(String endpoint, String userId, String appId, String runId) {
+        return generationControl(endpoint, Map.of("userId", userId, "appId", appId, "runId", runId));
+    }
+
+    private Map<String, Object> generationControl(String endpoint, Map<String, Object> body) {
         WebClient.RequestBodySpec request = webClient.post().uri(endpoint);
         if (StringUtils.hasText(properties.getInternalToken())) {
             request.header("X-Internal-Token", properties.getInternalToken());
         }
-        Map<String, Object> response = request.bodyValue(Map.of("userId", userId, "appId", appId, "runId", runId))
+        Map<String, Object> response = request.bodyValue(body)
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .timeout(properties.getRouteTimeout())

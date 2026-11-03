@@ -14,6 +14,8 @@ from llm_factory import create_json_parser
 from prompt_builder import compose_messages
 from state.code_gen_state import CodeGenState
 from config import get_lang_config
+from workflow.acceptance import AcceptanceStep, AcceptanceFeature, AcceptanceProposal, freeze_contract
+from workflow.harness_policy import enabled
 
 
 # ============ Pydantic 输出模型 ============
@@ -23,6 +25,9 @@ class Feature(BaseModel):
     description: str = Field(description="功能描述，一句话说明这个功能做什么")
     priority: str = Field(description="优先级：high / medium / low")
     interactions: list[str] = Field(description="用户交互方式列表，如['点击跳转', '左右滑动']")
+    source_quote: str = Field(default='', description='逐字引用原始需求，不确定的规则待确认')
+    acceptance_steps: list[AcceptanceStep] = Field(default_factory=list)
+    unverified_reason: str = ''
 
 
 class PRD(BaseModel):
@@ -82,7 +87,10 @@ PRD_FIELD_SPEC = """Output ONLY a valid JSON object with these EXACT field names
       "name": "string",
       "description": "string",
       "priority": "string (one of: high, medium, low)",
-      "interactions": ["string", "string"]
+      "interactions": ["string", "string"],
+      "source_quote": "exact quote from user request",
+      "acceptance_steps": [],
+      "unverified_reason": "待确认 when rules or verification details are missing"
     }
   ],
   "target_audience": "string",
@@ -131,6 +139,13 @@ def pm_agent(state: CodeGenState) -> CodeGenState:
         return state
 
     state["prd"] = prd.model_dump()
+    import hashlib
+    for feature in state['prd']['features']:
+        feature['id'] = 'F-' + hashlib.sha256((feature['source_quote'] + '\n' + feature['name']).encode()).hexdigest()[:16]
+    if enabled(state, 'acceptance') and state.get('mode') != 'modify' and all(f.acceptance_steps or f.unverified_reason for f in prd.features):
+        freeze_contract(state, AcceptanceProposal(features=[AcceptanceFeature(
+            name=f.name, source_quote=f.source_quote, steps=f.acceptance_steps,
+            unverified_reason=f.unverified_reason) for f in prd.features]))
 
     # 持久化 PRD 到磁盘，供后续修改模式复用
     _persist_prd(state)

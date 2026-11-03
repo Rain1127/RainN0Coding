@@ -49,6 +49,14 @@ class RunStore:
                 payload TEXT NOT NULL, updated_at REAL NOT NULL)""")
             db.execute("CREATE TABLE IF NOT EXISTS generation_effects "
                        "(run_id TEXT NOT NULL, effect TEXT NOT NULL, PRIMARY KEY(run_id,effect))")
+            from workflow.run_journal import migrate_public
+            migrate_public(db)
+            from workflow.instructions import migrate
+            migrate(db)
+
+    def public_events(self, run_id, user_id, app_id, after=0, limit=100):
+        from workflow.run_journal import public_events
+        return public_events(self, run_id, user_id, app_id, after, limit)
 
     def claim_effect(self, run_id, effect):
         """At-most-once best-effort ancillary effects (conversation summaries)."""
@@ -91,6 +99,8 @@ class RunStore:
         with self.connection() as db:
             db.execute("UPDATE generation_runs SET status=?, updated_at=? WHERE run_id=?",
                        (status, time.time(), run_id))
+            from workflow.instructions import settle
+            settle(db, run_id, status)
 
     def pause(self, run_id, user_id, app_id):
         self.get(run_id, user_id, app_id)
@@ -98,6 +108,10 @@ class RunStore:
             db.execute("UPDATE generation_runs SET pause_requested=1,status='pausing',updated_at=? "
                        "WHERE run_id=? AND status IN ('running','pausing')", (time.time(), run_id))
         return self.public_status(run_id, user_id, app_id)
+
+    def clear_pause(self, run_id):
+        with self.connection() as db:
+            db.execute('UPDATE generation_runs SET pause_requested=0 WHERE run_id=?', (run_id,))
 
     def public_status(self, run_id, user_id, app_id):
         row = self.get(run_id, user_id, app_id)
@@ -198,13 +212,12 @@ class RunSession:
 
     async def pause_gate(self, state):
         await self.wait_workers()
-        row = self.store.get(self.run_id, self.user_id, self.app_id)
+        row = await asyncio.to_thread(self.store.get, self.run_id, self.user_id, self.app_id)
         if row["pause_requested"]:
             # Keep the flag set until interrupt returns: on resume this node must
             # execute the same interrupt call to consume Command(resume=...).
             interrupt({"run_id": self.run_id, "reason": "user_pause"})
-            with self.store.connection() as db:
-                db.execute("UPDATE generation_runs SET pause_requested=0 WHERE run_id=?", (self.run_id,))
+            await asyncio.to_thread(self.store.clear_pause, self.run_id)
         return {"user_role": self.user_role} if hasattr(self, "user_role") else {}
 
     async def states(self, workflow, initial):
@@ -228,7 +241,11 @@ class RunSession:
                 graph_input = Command(resume=True) if checkpoint.interrupts else None
         self.store.update_status(self.run_id, "running")
         previous = None
-        async for state in graph.astream(graph_input, self.config, stream_mode="values", durability="sync"):
+        from workflow.step_stream import states_with_steps
+        async for state in states_with_steps(graph.astream(graph_input, self.config, stream_mode="values", durability="sync"), self):
+            if state.get('__harness_events__'):
+                yield state
+                continue
             if state != previous:
                 previous = state
                 yield state

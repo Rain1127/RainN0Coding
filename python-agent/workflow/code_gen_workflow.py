@@ -39,6 +39,7 @@ from workflow.autogen_discussion import autogen_discussion_node
 from workflow.resilience import ensure_availability_defaults, finalize_state, guarded_phase_call
 from workflow.repair import after_validation, record_repair_diff
 from workflow.runtime_validation import runtime_validation
+from workflow.harness_policy import snapshot_policy
 from agents.change_plan import change_plan, simple_target, diff_changes
 
 
@@ -217,7 +218,10 @@ def _build_initial_state(
 ) -> CodeGenState:
     """构建工作流初始 State。"""
     project_dir = os.path.join(config.CODE_OUTPUT_DIR, f"{code_gen_type}_{app_id}")
+    from workflow.run_control import current_run
+    session = current_run.get()
     return {
+        "harness_policy": session.payload.get("harness_policy", {}) if session else snapshot_policy(),
         "user_request": user_request,
         "user_id": user_id,
         "app_id": app_id,
