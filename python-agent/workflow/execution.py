@@ -84,7 +84,7 @@ def node_command(request: ExecutionRequest, *, isolated: bool) -> list[str]:
             validate_install(root)
             args += ['--registry=https://registry.npmjs.org', '--userconfig=/tmp/npm-user.conf',
                      '--globalconfig=/tmp/npm-global.conf', '--ignore-scripts', '--no-audit', '--no-fund',
-                     '--fetch-retries=0']
+                     '--fetch-retries=0', '--fetch-timeout=20000', '--prefer-offline']
         elif profile != 'npm-install':
             args.append('--ignore-scripts')
         return args

@@ -157,6 +157,17 @@ def execute(payload, config):
                    '--env', 'GOPROXY=off', '--env', 'CARGO_HOME=/tmp/cargo']
     network = 'bridge' if request.profile in NPM_INSTALL else 'none'
     failure = 'dependency' if request.profile in NPM_INSTALL else 'code'
+    cache = config.get('npm_cache')
+    install_mounts = []
+    cache_args = []
+    if cache:
+        cache_path = Path(cache).resolve(strict=True)
+        if str(cache_path) != cache or not cache_path.is_dir() or cache_path.stat().st_uid != os.geteuid():
+            raise ValueError('Expected a private registry cache owned by the service account')
+        install_mounts = ['--mount', f'type=bind,source={cache_path},target=/registry-cache']
+        cache_args = ['--cache=/registry-cache']
+    if request.profile in NPM_INSTALL:
+        mounts += install_mounts
     with (RUNTIME / 'slot').open('a') as slot:
         try:
             fcntl.flock(slot, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -175,6 +186,8 @@ def execute(payload, config):
                 prepare_node(root, workspace, request.profile in NPM_INSTALL)
                 command = node_command(ExecutionRequest(request.run_id, str(workspace), request.profile,
                                                         request.timeout, request.target), isolated=True)
+                if request.profile in NPM_INSTALL:
+                    command += cache_args
             if cancel.exists():
                 return ExecutionResult('cancelled', 'cancelled', None, '', 0, 'docker')
             cancellation = Cancellation()
@@ -184,8 +197,9 @@ def execute(payload, config):
                     install = 'npm-install-locked' if (workspace / 'package-lock.json').is_file() else 'npm-install-preserve'
                     prepared = replace(request, workspace=str(workspace), profile=install, target=None, timeout=min(25, request.timeout))
                     started = time.monotonic()
-                    result = run_container(prepared, name, image, 'bridge', workspace, [], False,
-                                           node_command(prepared, isolated=True), None, 'dependency', cancellation, None)
+                    result = run_container(prepared, name, image, 'bridge', workspace, install_mounts, False,
+                                           node_command(prepared, isolated=True) + cache_args,
+                                           None, 'dependency', cancellation, None)
                     if result.status != 'succeeded':
                         return result
                     remaining = request.timeout - (time.monotonic() - started)
