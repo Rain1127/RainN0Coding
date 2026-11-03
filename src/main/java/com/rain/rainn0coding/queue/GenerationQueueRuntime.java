@@ -27,18 +27,21 @@ public class GenerationQueueRuntime {
     private final KafkaTemplate<String,String> kafka;
     private final KafkaListenerEndpointRegistry listeners;
     private final MeterRegistry meters;
+    private final GenerationTaskRecovery recovery;
     private volatile boolean ready;
+    private volatile boolean infrastructurePaused;
     private final AtomicLong queued=new AtomicLong(),running=new AtomicLong();
     public GenerationQueueRuntime(GenerationTaskStore store,GenerationTaskExecutor executor,GenerationQueueProperties config,
-            KafkaTemplate<String,String> kafka,KafkaListenerEndpointRegistry listeners,MeterRegistry meters) {
+            KafkaTemplate<String,String> kafka,KafkaListenerEndpointRegistry listeners,MeterRegistry meters,GenerationTaskRecovery recovery) {
         this.store=store;this.executor=executor;this.config=config;this.kafka=kafka;this.listeners=listeners;this.meters=meters;
+        this.recovery=recovery;
         meters.gauge("generation.queue.pending",queued);
         meters.gauge("generation.queue.running",running);
+        meters.gauge("generation.queue.infrastructure.paused",this,r->r.infrastructurePaused?1:0);
     }
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
-        if(config.getMaxPending()<1||config.getTaskTimeoutMinutes()<1||config.getMaxWaitHours()<1)throw new IllegalArgumentException("Invalid generation queue limits");
-        executor.recoverInterrupted();
+        config.validate();
         ready=true;
         var container=listeners.getListenerContainer("generationTasks");
         if(container!=null)container.start();
@@ -65,21 +68,42 @@ public class GenerationQueueRuntime {
     @KafkaListener(id="generationTasks",topics="${app.generation-queue.topic:rain-code-generation-v1}",
             groupId="${app.generation-queue.group-id:rain-code-generation-workers-v1}",containerFactory="generationKafkaListenerFactory")
     public void consume(ConsumerRecord<String,String> record,Acknowledgment ack) {
+        try {consumeDurably(record,ack);}
+        catch(RuntimeException failure) {
+            infrastructurePaused=true;
+            var container=listeners.getListenerContainer("generationTasks");
+            if(container!=null)container.pause();
+            meters.counter("generation.queue.infrastructure.pauses").increment();
+            // No ack: the current record remains retryable while the container is paused.
+            throw failure;
+        }
+    }
+    private void consumeDurably(ConsumerRecord<String,String> record,Acknowledgment ack) {
         String id;
         try {
             var msg=JSONUtil.parseObj(record.value());
             if(msg.getInt("version",0)!=1)throw new IllegalArgumentException("unknown schema");
             id=msg.getStr("taskId"); java.util.UUID.fromString(id);
         } catch(Exception malformed) {
+            store.quarantine("record:"+cn.hutool.crypto.SecureUtil.sha256(record.topic()+":"+record.partition()+":"+record.offset()),null,"invalid_message");
             meters.counter("generation.queue.invalid.messages").increment();
             log.error("Invalid generation message at partition {} offset {}",record.partition(),record.offset());
             ack.acknowledge(); return;
         }
         long start=System.nanoTime();
         var before=store.get(id);
+        if(store.paused())throw new IllegalStateException("Generation queue maintenance enabled");
         if(before!=null&&"QUEUED".equals(before.status()))
             meters.timer("generation.queue.wait").record(store.waitMillis(id),TimeUnit.MILLISECONDS);
-        executor.execute(id);
+        try {executor.execute(id);}
+        catch(RuntimeException failure) {
+            if(GenerationFailurePolicy.classify(failure)==GenerationFailurePolicy.Kind.INFRASTRUCTURE)throw failure;
+            var current=store.get(id);
+            if(current==null||!"QUEUED".equals(current.status()))throw failure;
+            if(GenerationFailurePolicy.classify(failure)==GenerationFailurePolicy.Kind.RETRY)
+                store.delayQueued(id,true,()->recovery.completeFailed(current));
+            else store.rejectQueued(current,()->recovery.completeFailed(current));
+        }
         meters.timer("generation.queue.delivery.duration").record(System.nanoTime()-start,TimeUnit.NANOSECONDS);
         var after=store.get(id);
         if(before!=null&&after!=null&&!before.settled()&&after.settled())
@@ -90,6 +114,12 @@ public class GenerationQueueRuntime {
     public void maintenance() {
         if(!ready)return;
         try {
+            if(infrastructurePaused&&recovery.infrastructureHealthy()) {
+                var container=listeners.getListenerContainer("generationTasks");
+                if(container!=null)container.resume();
+                infrastructurePaused=false;
+            }
+            recovery.recover();
             executor.expireQueued();
             queued.set(store.count("QUEUED"));running.set(store.count("RUNNING")+store.count("PAUSING"));
         } catch(Exception e) {log.warn("Generation queue maintenance failed: {}",e.toString());}

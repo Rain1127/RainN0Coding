@@ -62,10 +62,13 @@ async function checkServices() {
   const requestId = ++serviceCheckSequence
   javaStatus.value = 'checking'
   pythonStatus.value = 'checking'
-  const pythonBase = (import.meta.env.VITE_PYTHON_API_BASE ?? 'http://localhost:8000').replace(/\/$/, '')
+  const pythonBase = (
+    import.meta.env.VITE_PYTHON_API_BASE || (import.meta.env.DEV ? 'http://localhost:8000' : '')
+  ).replace(/\/$/, '')
+  const pythonHealthUrl = pythonBase ? `${pythonBase}/api/health` : apiUrl('/health/python')
   const [java, python] = await Promise.all([
     probe(apiUrl('/health/'), 'include'),
-    probe(`${pythonBase}/api/health`),
+    probe(pythonHealthUrl),
   ])
   if (viewUnmounted || requestId !== serviceCheckSequence) return
   javaStatus.value = java

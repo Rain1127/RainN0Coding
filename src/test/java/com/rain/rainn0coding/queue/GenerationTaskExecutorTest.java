@@ -22,36 +22,37 @@ class GenerationTaskExecutorTest {
     @Test void doneIsNotPublishedUntilStreamAndFinalizationComplete() {
         ready(Flux.just("{\"type\":\"progress\"}","{\"type\":\"done\",\"status\":\"success\"}"));
         executor.execute("id");
-        verify(store).append("id","{\"type\":\"progress\"}");
-        verify(store,never()).append(eq("id"),contains("done"));
-        verify(store).finish(eq("id"),eq("SUCCEEDED"),isNull(),any());
+        verify(store).appendOwned(eq("id"),anyString(),eq("{\"type\":\"progress\"}"));
+        verify(store,never()).appendOwned(eq("id"),anyString(),contains("done"));
+        verify(store).finishOwned(eq("id"),anyString(),eq("SUCCEEDED"),isNull(),any());
     }
     @Test void postDoneFailureNeverBecomesSuccess() {
         ready(Flux.concat(Flux.just("{\"type\":\"done\",\"status\":\"success\"}"),Flux.error(new IllegalStateException("build failed"))));
         executor.execute("id");
-        verify(store,never()).finish(anyString(),eq("SUCCEEDED"),any(),any());
-        verify(store).finish(eq("id"),eq("FAILED"),anyString(),any());
+        verify(store,never()).finishOwned(anyString(),anyString(),eq("SUCCEEDED"),any(),any());
+        verify(store).finishOwned(eq("id"),anyString(),eq("FAILED"),anyString(),any());
     }
     @Test void missingSuccessfulDoneFailsClosed() {
         ready(Flux.just("{\"type\":\"progress\"}")); executor.execute("id");
-        verify(store).finish(eq("id"),eq("FAILED"),anyString(),any());
+        verify(store).finishOwned(eq("id"),anyString(),eq("FAILED"),anyString(),any());
     }
     @Test void semanticErrorCannotBeOverriddenBySuccessDone() {
         ready(Flux.just("{\"type\":\"error\",\"message\":\"rejected\"}","{\"type\":\"done\",\"status\":\"success\"}")); executor.execute("id");
-        verify(store).finish(eq("id"),eq("FAILED"),eq("rejected"),any());
+        verify(store).finishOwned(eq("id"),anyString(),eq("FAILED"),eq("rejected"),any());
     }
     @Test void duplicateTerminalMessageNeverExecutesAgain() {
         when(store.get("id")).thenReturn(task("SUCCEEDED")); executor.execute("id"); verifyNoInteractions(work);
     }
     @Test void orphanedPythonExecutionPreventsNewClaim() {
         when(store.get("id")).thenReturn(task("QUEUED")); when(work.busy(1)).thenReturn(true);
-        assertThrows(IllegalStateException.class,()->executor.execute("id"));
+        executor.execute("id");
+        verify(store).delayQueued(eq("id"),eq(false),any());
         verify(store,never()).claim(anyString(),anyString());
     }
     @Test void pausedCheckpointIsNotSuccessOrFailureAndDoesNotWriteCompletionHistory() {
         ready(Flux.just("{\"type\":\"done\",\"status\":\"paused\"}"));executor.execute("id");
-        verify(store).pauseCompleted("id",true);
-        verify(store,never()).finish(anyString(),anyString(),any(),any());
+        verify(store).pauseOwned(eq("id"),anyString());
+        verify(store,never()).finishOwned(anyString(),anyString(),anyString(),any(),any());
         verify(work,never()).completeHistory(any(),anyString(),any());
     }
     @Test void pausedDuplicateDoesNotResumeWithoutExplicitUserRequest() {

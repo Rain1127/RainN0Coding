@@ -26,6 +26,7 @@ MARKER_FILE_ALLOWLIST = {
         "test_dataset.py",
         "test_end_to_end_runner.py",
         "test_gates.py",
+        "test_optimization_gate.py",
         "test_html_report.py",
         "test_live_runner.py",
         "test_migrate_agent_eval.py",
@@ -118,7 +119,7 @@ def tool_context():
 @pytest.fixture
 def fake_conversation_memory():
     class _FakeConversationMemory:
-        def get_context(self, thread_id):
+        def get_context(self, thread_id, query=None):
             return {"summary": "", "recent_messages": []}
 
         def add_message(self, thread_id, role, content):

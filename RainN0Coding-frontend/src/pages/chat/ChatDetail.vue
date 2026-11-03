@@ -10,6 +10,8 @@ import {
 import { deployApp, downloadApp } from '@/api/app'
 import AgentProgress from '@/components/generation/AgentProgress.vue'
 import GeneratedFileList from '@/components/generation/GeneratedFileList.vue'
+import ArtifactVersions from '@/components/generation/ArtifactVersions.vue'
+import BuildEvidence from '@/components/generation/BuildEvidence.vue'
 import ChatLayout from '@/layouts/ChatLayout.vue'
 import { useAppsStore } from '@/stores/apps'
 import { useChatStore } from '@/stores/chat'
@@ -50,6 +52,11 @@ const isGenerating = computed(() => (
 ))
 const hasUnfinishedRun = computed(() => isGenerating.value || generation.status === 'paused')
 const isPaused = computed(() => generation.status === 'paused')
+const codeDiffs = computed(() => generation.events.filter(event => event.type === 'code_diff')
+  .flatMap(event => {
+    const changes = event.changes as { files?: Array<{ path: string; diff: string }> } | undefined
+    return changes?.files ?? []
+  }))
 
 const safeEventMessages = computed(() => generation.events
   .filter((event) => event.type !== 'code_file' && typeof event.message === 'string' && event.message.trim())
@@ -472,6 +479,7 @@ onBeforeUnmount(() => {
 
         <aside class="workbench__inspector" aria-label="生成详情">
           <AgentProgress :phase="generation.phase" :status="generation.status" />
+          <BuildEvidence :events="generation.events" />
 
           <section class="event-log" aria-labelledby="event-log-title">
             <div class="panel-heading panel-heading--compact">
@@ -488,6 +496,13 @@ onBeforeUnmount(() => {
           </section>
 
           <GeneratedFileList :files="generation.files" :status="generation.status" />
+          <details v-if="codeDiffs.length">
+            <summary>查看修改差异</summary>
+            <article v-for="(file, index) in codeDiffs" :key="`${file.path}-${index}`">
+              <h3>{{ file.path }}</h3><pre style="max-height: 24rem; overflow: auto; white-space: pre-wrap">{{ file.diff }}</pre>
+            </article>
+          </details>
+          <ArtifactVersions v-if="appId" :app-id="appId" :disabled="hasUnfinishedRun" @restored="refreshAfterSuccess(appId!)" />
         </aside>
       </div>
     </div>

@@ -30,6 +30,12 @@ export const deployApp = (appId: EntityId) =>
 export const downloadApp = (appId: EntityId) =>
   `/api/app/download/${appId}`
 
+export interface ArtifactVersion { id: string; number: number; description: string }
+export const listArtifactVersions = (appId: EntityId) =>
+  apiClient.get<any, ArtifactVersion[]>(`/app/${encodeURIComponent(String(appId))}/versions`)
+export const rollbackArtifactVersion = (appId: EntityId, versionId: string) =>
+  apiClient.post<any, boolean>(`/app/${encodeURIComponent(String(appId))}/versions/${encodeURIComponent(versionId)}/rollback`)
+
 // Admin
 export const adminListApps = (body: AppQueryRequest) =>
   apiClient.post<any, PageResult<AppVO>>('/app/admin/list/page/vo', body)

@@ -1,0 +1,12 @@
+schema_version: 1
+dataset_version: optimization-browser-v1
+cases:
+  - id: login
+    code_gen_type: html
+    request: 做一个登录页面，包含用户名、必填密码、提交按钮和提交反馈，使用标准 HTML 表单。
+  - id: todo
+    code_gen_type: html
+    request: 做一个待办页面，文本输入后按 Enter 新增，可用复选框完成，删除按钮提供包含“删除”的 aria-label。
+  - id: static
+    code_gen_type: html
+    request: 做一个有标题、介绍和联系信息的静态个人主页。

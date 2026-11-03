@@ -13,6 +13,7 @@ from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start, 
 from config import config
 from intent_tree import INTENT_ROOT, format_intent_tree_flat
 from llm_factory import create_json_parser
+from prompt_builder import compose_messages
 from server.codegen_type_router import route_code_gen_type
 from state.code_gen_state import CodeGenState
 
@@ -122,10 +123,8 @@ def recognize_intent(user_request: str, user_id: str | None = None) -> IntentRec
         group="lightweight",
         agent_name="intent_agent",
     )
-    messages = [
-        SystemMessage(content=_build_intent_prompt()),
-        HumanMessage(content=f"用户输入：{user_request}"),
-    ]
+    messages = compose_messages(agent="intent_agent", system=_build_intent_prompt(),
+                                request=f"用户输入：{user_request}")
     return parser(messages, user_id=user_id)
 
 

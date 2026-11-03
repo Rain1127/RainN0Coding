@@ -34,7 +34,7 @@ class SemanticRetriever:
         try:
             query_vector = embedding_service.embed(query_text)
         except Exception:
-            return []
+            raise
 
         queries = [(c["collection"], query_vector, c["top_k"]) for c in self.SEMANTIC_COLLECTIONS]
         raw_results = vector_store.search_multi(queries)

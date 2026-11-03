@@ -80,6 +80,8 @@ def evaluate_gate(candidate: BenchmarkReport, baseline: BenchmarkReport | None, 
     regression = _section(policy, "regression_thresholds", "regression")
     if baseline is None:
         warnings.append({"type": "no_baseline"})
+        if policy.get("require_baseline", False):
+            failures.append({"type": "no_baseline", "message": "A compatible baseline is required"})
     else:
         if not all(isinstance(metric, str) and metric for metric in regression):
             raise ValueError("policy regression_thresholds metric name must be non-empty")

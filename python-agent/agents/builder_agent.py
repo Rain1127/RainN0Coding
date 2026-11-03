@@ -7,7 +7,7 @@ Builder Agent —— 构建验证
       本地无 Node.js 时自动降级为文件写入模式。
 
 P0 质量门禁：Review 评分 >= 阈值 + 无 critical issue + 语法校验通过 → 才允许入库
-P2 反馈闭环：构建完成后根据结果更新检索过的 code_store 条目质量分
+反馈与入库在最终验收后由 workflow.validation_feedback 处理。
 """
 import os
 import json
@@ -15,10 +15,27 @@ import subprocess
 import tempfile
 import shutil
 import glob as glob_mod
+import shlex
 from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from state.code_gen_state import CodeGenState
 from config import get_lang_config, config
-from rag.rag_builder import index_code_files
+from workflow.build_status import build_result as make_build_result, verified
+
+
+def _build_timeout(default=180):
+    from workflow.budget import active_budget
+    budget=active_budget.get()
+    return min(default, budget.remaining_seconds()) if budget else default
+
+
+def _syntax_command(template, *, files=(), **values):
+    command=[]
+    for part in shlex.split(template):
+        if part == "{files}":
+            command.extend(files)
+        else:
+            command.append(part.format(**values))
+    return command
 
 
 def _create_default_package_json(project_dir: str):
@@ -154,7 +171,7 @@ def _run_syntax_check(project_dir: str, code_files: list, lang_config: dict) -> 
       - 逐文件检查（如 Python py_compile）：逐个文件运行语法检查
       - 项目级检查（如 Java javac、Go vet）：在项目根目录运行编译命令
 
-    工具不可用时降级通过（passed=True, tool_available=False）。
+    工具不可用时返回 passed=False、tool_available=False，由 Builder 标记未验证。
 
     Returns:
         {passed, log, tool_available}
@@ -164,7 +181,7 @@ def _run_syntax_check(project_dir: str, code_files: list, lang_config: dict) -> 
 
     cmd_template = lang_config.get("syntax_check_cmd", "")
     if not cmd_template:
-        return {"passed": True, "log": "[no syntax check cmd configured]", "tool_available": True}
+        return {"passed": False, "log": "[no syntax check cmd configured]", "tool_available": False}
 
     per_file = lang_config.get("syntax_check_per_file", False)
     file_glob = lang_config.get("syntax_check_file_glob", None)
@@ -183,24 +200,24 @@ def _run_syntax_check(project_dir: str, code_files: list, lang_config: dict) -> 
                     matching_files.append(fpath)
 
         if not matching_files:
-            return {"passed": True, "log": "[no matching files for syntax check]", "tool_available": True}
+            return {"passed": False, "log": "[no matching files for syntax check]", "tool_available": True}
 
         # 检查工具是否可用
         tool_name = cmd_template.split()[0]
         if not shutil.which(tool_name):
             return {
-                "passed": True,
+                "passed": False,
                 "log": f"[{tool_name} not installed, syntax check skipped]",
                 "tool_available": False,
             }
 
         all_errors = []
         for fpath in matching_files:
-            cmd = cmd_template.format(file=fpath, project_dir=project_dir)
+            cmd = _syntax_command(cmd_template, file=fpath, project_dir=project_dir)
             try:
                 result = subprocess.run(
-                    cmd, shell=True, cwd=os.path.dirname(fpath) or project_dir,
-                    capture_output=True, text=True, timeout=timeout,
+                    cmd, cwd=os.path.dirname(fpath) or project_dir,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_build_timeout(timeout),
                 )
                 if result.returncode != 0:
                     all_errors.append(
@@ -220,29 +237,22 @@ def _run_syntax_check(project_dir: str, code_files: list, lang_config: dict) -> 
 
     else:
         # === 项目级检查模式 ===
-        # 检查工具是否可用
         tool_name = cmd_template.split()[0]
         if not shutil.which(tool_name):
-            return {
-                "passed": True,
-                "log": f"[{tool_name} not installed, compile check skipped]",
-                "tool_available": False,
-            }
-
+            return {"passed": False, "log": f"[{tool_name} not installed]", "tool_available": False}
         tmpdir = tempfile.mkdtemp(prefix="syntax_check_")
         try:
             # 收集文件路径用于需要一次性传入所有文件的命令（如 javac）
-            files_str = ""
+            matching = []
             if file_glob:
                 matching = glob_mod.glob(
                     os.path.join(project_dir, "**", file_glob), recursive=True)
-                files_str = " ".join(f'"{f}"' for f in matching) if matching else ""
-
-            cmd = cmd_template.format(
-                project_dir=project_dir, files=files_str, tmpdir=tmpdir)
+                if not matching:
+                    return {"passed": False, "log": "[no matching files for compile check]", "tool_available": True}
+            cmd = _syntax_command(cmd_template, project_dir=project_dir, files=matching, tmpdir=tmpdir)
             result = subprocess.run(
-                cmd, shell=True, cwd=project_dir,
-                capture_output=True, text=True, timeout=timeout,
+                cmd, cwd=project_dir,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_build_timeout(timeout),
             )
             if result.returncode != 0:
                 return {
@@ -258,7 +268,7 @@ def _run_syntax_check(project_dir: str, code_files: list, lang_config: dict) -> 
         except FileNotFoundError:
             tool_name = cmd_template.split()[0]
             return {
-                "passed": True,
+                "passed": False,
                 "log": f"[{tool_name} not installed, compile check skipped]",
                 "tool_available": False,
             }
@@ -289,14 +299,36 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
     if not code_files:
         state["error"] = "code_files 为空，Builder 无文件可构建"
         state["phase"] = "error"
+        state["build_result"] = make_build_result("failed", state["error"], project_dir, "code")
         log_agent_fail("Builder Agent", "缺少 code_files，无法执行构建")
         return state
 
     if not project_dir or not os.path.isdir(project_dir):
         state["error"] = f"project_dir 不存在: {project_dir}"
         state["phase"] = "error"
+        state["build_result"] = make_build_result("unverified", state["error"], project_dir, "environment")
         log_agent_fail("Builder Agent", f"project_dir 不存在，无法执行构建: {project_dir}")
         return state
+
+    if code_gen_type == "html" and state.get("mode", "new") != "modify":
+        entry = os.path.join(project_dir, "index.html")
+        has_entry = any(
+            f.get("path") == "index.html" and f.get("content", "").strip()
+            for f in code_files
+        )
+        entry_ready = False
+        if has_entry:
+            try:
+                with open(entry, encoding="utf-8-sig") as fh:
+                    entry_ready = bool(fh.read().strip())
+            except (OSError, UnicodeError):
+                pass
+        if not entry_ready:
+            state["error"] = "HTML 构建缺少非空的根目录 index.html"
+            state["phase"] = "error"
+            state["build_result"] = make_build_result("failed", state["error"], project_dir, "code")
+            log_agent_fail("Builder Agent", state["error"])
+            return state
 
     try:
         # 1. 写入图片 URL 映射
@@ -320,56 +352,59 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                 _create_default_index_html(project_dir)
 
         # 3. 仅需要对 npm build 的项目执行构建
-        build_success = True
+        build_status = "not_required"
+        failure_kind = None
         build_log = ""
         build_log_mode = "unknown"
         if lc.get("needs_npm_build"):
+            build_status = "succeeded"
+            npm = shutil.which("npm") or "npm"
             try:
                 result = subprocess.run(
-                    ["npm", "install"], cwd=project_dir,
-                    capture_output=True, text=True, timeout=180,
+                    [npm, "install"], cwd=project_dir,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_build_timeout(),
                 )
                 if result.returncode != 0:
-                    build_success = False
+                    build_status = "failed"
+                    failure_kind = "dependency"
                     build_log = "npm install failed:\n" + result.stderr[-2000:]
                     build_log_mode = "npm_install_failed"
                 else:
-                    build_command = ["npm", "run", "build"]
+                    build_command = [npm, "run", "build"]
                     if lc.get("is_frontend"):
                         # Vite assets must resolve under the app's preview/publish directory.
                         build_command += ["--", "--base=./"]
                     result = subprocess.run(
                         build_command, cwd=project_dir,
-                        capture_output=True, text=True, timeout=180,
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_build_timeout(),
                     )
                     if result.returncode != 0:
-                        build_success = False
-                        build_log = "npm run build failed:\n" + result.stderr[-2000:]
+                        build_status = "failed"
+                        failure_kind = "code"
+                        build_log = "npm run build failed:\n" + (result.stdout + result.stderr)[-8000:]
                         build_log_mode = "npm_build_failed"
                     else:
                         build_log = result.stdout[-1000:]
                         build_log_mode = "npm_build"
             except FileNotFoundError:
                 build_log = "[本地无 Node.js，跳过实际构建。代码文件已写入磁盘。]"
-                build_success = True
+                build_status = "unverified"
+                failure_kind = "environment"
                 build_log_mode = "node_missing"
             except subprocess.TimeoutExpired:
                 build_log = "构建超时（超过 180 秒）"
-                build_success = False
+                build_status = "failed"
+                failure_kind = "timeout"
                 build_log_mode = "build_timeout"
         else:
             build_log = f"[{code_gen_type} 项目无需 npm build，文件已就绪]"
             build_log_mode = "no_npm_build"
 
-        state["build_result"] = {
-            "success": build_success,
-            "log": build_log,
-            "project_dir": project_dir,
-        }
+        state["build_result"] = make_build_result(build_status, build_log, project_dir, failure_kind)
         state["phase"] = "build_done"
         log_agent_ok(
             "Builder Agent",
-            f"构建阶段完成，build_success={'yes' if build_success else 'no'} log_mode={build_log_mode}",
+            f"构建阶段完成，status={build_status} log_mode={build_log_mode}",
         )
 
         # === 3.5 质量门禁 (P0) ===
@@ -377,6 +412,15 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
 
         review_gate = _check_review_quality_gate(state, config.QUALITY_SCORE_THRESHOLD)
         syntax_result = _run_syntax_check(project_dir, code_files, lc)
+
+        if lc.get("needs_syntax_check") and not lc.get("needs_npm_build"):
+            build_status = ("unverified" if not syntax_result["tool_available"] else
+                            "succeeded" if syntax_result["passed"] else "failed")
+            failure_kind = ("environment" if not syntax_result["tool_available"] else
+                            "timeout" if "TIMEOUT" in syntax_result["log"] or "timeout" in syntax_result["log"] else
+                            "code" if not syntax_result["passed"] else None)
+            state["build_result"] = make_build_result(build_status, syntax_result["log"], project_dir, failure_kind)
+        build_success = verified(state["build_result"])
 
         quality_gate_passed = review_gate["passed"] and syntax_result["passed"]
 
@@ -413,62 +457,9 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
                 f"reason={state['quality_gate_result']['reason']}",
             )
 
-        # === 4. 索引代码到 RAG 知识库（检索闭环 + 质量门禁） ===
-        review_score = state.get("review", {}).get("score", 0)
-
-        if app_id and code_files and build_success and quality_gate_passed:
-            try:
-                index_code_files(code_files, app_id, code_gen_type,
-                                 review_score=review_score)
-                state["indexing_result"] = {
-                    "success": True,
-                    "message": "代码已索引到 RAG 知识库",
-                    "indexed_count": len(code_files),
-                    "total_count": len(code_files),
-                }
-                log_agent_ok("Builder Agent", f"索引完成，files={len(code_files)} app_id={app_id}")
-            except Exception as e:
-                state["indexing_result"] = {
-                    "success": False,
-                    "message": f"索引失败（构建不受影响）: {e}",
-                    "indexed_count": 0,
-                    "total_count": len(code_files),
-                }
-                log_agent_fail("Builder Agent", f"索引失败，但不影响构建，原因={e}")
-        elif not app_id:
-            state["indexing_result"] = {
-                "success": False,
-                "message": "跳过索引: app_id 缺失",
-                "indexed_count": 0,
-                "total_count": len(code_files),
-            }
-            log_agent_ok("Builder Agent", "跳过索引，reason=app_id missing")
-        elif not build_success:
-            state["indexing_result"] = {
-                "success": False,
-                "message": "跳过索引: build_success=False",
-                "indexed_count": 0,
-                "total_count": len(code_files),
-            }
-            log_agent_ok("Builder Agent", "跳过索引，reason=build_success false")
-        else:
-            # quality_gate_passed == False
-            reason = state.get("quality_gate_result", {}).get("reason", "质量门禁未通过")
-            state["indexing_result"] = {
-                "success": False,
-                "message": f"跳过索引: {reason}",
-                "indexed_count": 0,
-                "total_count": len(code_files),
-            }
-            log_agent_ok("Builder Agent", f"跳过索引，reason={reason}")
-
-        # === 5. 反馈闭环 (P2)：根据构建结果更新检索过的条目质量分 ===
-        if app_id:
-            try:
-                from rag.feedback_tracker import feedback_tracker
-                feedback_tracker.apply_feedback(app_id, build_success)
-            except Exception as e:
-                log_agent_fail("Builder Agent", f"反馈更新失败，但不影响构建，原因={e}")
+        # Publication and RAG evidence are handled after runtime acceptance.
+        state["indexing_result"] = {"success": False, "message": "等待最终验收与版本发布",
+                                    "indexed_count": 0, "total_count": len(code_files)}
 
         log_agent_ok(
             "Builder Agent",
@@ -479,7 +470,7 @@ def builder_agent(state: CodeGenState) -> CodeGenState:
         return state
 
     except Exception as e:
-        state["build_result"] = {"success": False, "log": str(e), "project_dir": project_dir}
+        state["build_result"] = make_build_result("failed", str(e), project_dir, "environment")
         state["phase"] = "build_done"
         state["error"] = str(e)
         log_agent_fail("Builder Agent", f"构建异常，原因={e}")

@@ -112,7 +112,7 @@ def test_build_write_read_report_aggregates_cases_and_metrics(tmp_path):
         started_at="2026-09-22T00:00:00+00:00",
     )
     report = build_report(metadata, [_evaluation("case-a", 0, True, 10), _evaluation("case-b", 0, False, 30)])
-    assert report.summary == {"cases": 2, "passed": 1, "case_pass_rate": 0.5, "observations": 2, "passed_observations": 1, "observation_pass_rate": 0.5, "assertion_pass_rate": 0.5}
+    assert report.summary == {"cases": 2, "passed": 1, "case_pass_rate": 0.5, "observations": 2, "passed_observations": 1, "observation_pass_rate": 0.5, "assertion_pass_rate": 0.5, "infrastructure_errors": 0, "quality_failures": 1}
     assert report.metrics["latency_ms"]["p50"] == 10
     assert report.metrics["latency_ms"]["p95"] == 30
     assert "cost_usd" not in report.metrics

@@ -37,6 +37,9 @@ from config import config
 from state.code_gen_state import CodeGenState
 from workflow.autogen_discussion import autogen_discussion_node
 from workflow.resilience import ensure_availability_defaults, finalize_state, guarded_phase_call
+from workflow.repair import after_validation, record_repair_diff
+from workflow.runtime_validation import runtime_validation
+from agents.change_plan import change_plan, simple_target, diff_changes
 
 
 def _route_after_intent(state: CodeGenState) -> str:
@@ -44,7 +47,7 @@ def _route_after_intent(state: CodeGenState) -> str:
     if state.get("phase") != "intent_done":
         return "end"
     if state.get("mode") in ("modify",):
-        return "coder_agent"
+        return "change_plan"
     return "pm_agent"
 
 
@@ -64,25 +67,65 @@ async def fork_coder_and_images(state: CodeGenState) -> CodeGenState:
     """Fork 节点：先 Image Collector（零 LLM，快），再 Coder（LLM 调用）。"""
     state = await guarded_phase_call("image_collector", state, image_collector_agent)
     state = await guarded_phase_call("coder", state, coder_agent)
+    state = record_repair_diff(state)
+    if state.get("mode") == "modify" and not state.get("error"):
+        state = diff_changes(state)
     return state
 
 
 async def builder_agent_node(state: CodeGenState) -> CodeGenState:
-    return await guarded_phase_call("builder", state, builder_agent)
+    state = await guarded_phase_call("builder", state, builder_agent)
+    state["validation_route"] = after_validation(state)
+    return state
 
 
 async def coder_agent_node(state: CodeGenState) -> CodeGenState:
-    return await guarded_phase_call("coder", state, coder_agent)
+    state = await guarded_phase_call("coder", state, coder_agent)
+    state = record_repair_diff(state)
+    if state.get("mode") == "modify" and not state.get("error"):
+        state = diff_changes(state)
+    return state
+
+
+async def change_plan_node(state: CodeGenState) -> CodeGenState:
+    return await guarded_phase_call("architect", state, change_plan)
 
 
 async def reviewer_agent_node(state: CodeGenState) -> CodeGenState:
     return await guarded_phase_call("reviewer", state, reviewer_agent)
 
 
+async def runtime_validation_node(state: CodeGenState) -> CodeGenState:
+    return await guarded_phase_call("builder", state, runtime_validation)
+
+
+async def discussion_node(state: CodeGenState) -> CodeGenState:
+    return await guarded_phase_call("architect", state, autogen_discussion_node)
+
+
 def end_node(state: CodeGenState) -> CodeGenState:
     """终止节点：汇总最终结果。"""
     state = ensure_availability_defaults(state)
-    return finalize_state(state)
+    state = finalize_state(state)
+    if state.get("final_status") in ("success", "degraded_success") and state.get("build_result"):
+        try:
+            from workflow.artifacts import publish
+            if state.get("artifact_publish_owner") == "gateway":
+                state["artifact_status"] = "validated_candidate"
+                with open(os.path.join(state["project_dir"], ".generation-run-id"), "w", encoding="utf-8") as marker:
+                    marker.write(state["artifact_run_id"])
+            else:
+                state = publish(state)
+            from workflow.validation_feedback import finalize_evidence
+            state = finalize_evidence(state)
+            state = finalize_state(state)
+        except Exception as exc:
+            state["error"] = f"Artifact publication failed: {exc}"
+            state = finalize_state(state)
+    elif state.get("artifact_run_id"):
+        from workflow.validation_feedback import finalize_evidence
+        state = finalize_evidence(state)
+    return state
 
 
 def create_code_gen_workflow(session=None) -> StateGraph:
@@ -91,14 +134,16 @@ def create_code_gen_workflow(session=None) -> StateGraph:
 
     # ===== 注册节点 =====
     wf.add_node("mode_detector", mode_detector)
+    wf.add_node("change_plan", change_plan_node)
     wf.add_node("intent_agent", intent_agent_node)
     wf.add_node("pm_agent", pm_agent_node)
     wf.add_node("architect_agent", architect_agent_node)
     wf.add_node("fork_coder_and_images", fork_coder_and_images)
     wf.add_node("coder_agent", coder_agent_node)
     wf.add_node("reviewer_agent", reviewer_agent_node)
-    wf.add_node("autogen_discussion", autogen_discussion_node)  # AutoGen 三方讨论
+    wf.add_node("autogen_discussion", discussion_node)
     wf.add_node("builder_agent", builder_agent_node)
+    wf.add_node("runtime_validation", runtime_validation_node)
     wf.add_node("human_intervention", end_node)
     wf.add_node("end", end_node)
 
@@ -114,12 +159,17 @@ def create_code_gen_workflow(session=None) -> StateGraph:
                 wf.add_edge(entry(name), name)
 
     wf.set_entry_point(entry("mode_detector"))
-    wf.add_edge("mode_detector", entry("intent_agent"))
+    wf.add_conditional_edges("mode_detector", lambda state: "change_plan" if simple_target(state) else "intent_agent", {
+        "change_plan": entry("change_plan"), "intent_agent": entry("intent_agent"),
+    })
+    wf.add_conditional_edges("change_plan", lambda state: "pm_agent" if state.get("task_complexity") == "cross_module" else "coder_agent", {
+        "pm_agent": entry("pm_agent"), "coder_agent": entry("coder_agent"),
+    })
     # Intent -> PM (new/rebuild) 或 Coder (modify 跳过 PM+Architect) 或 END (clarify/error)
     wf.add_conditional_edges(
         "intent_agent",
         _route_after_intent,
-        {"pm_agent": entry("pm_agent"), "coder_agent": entry("coder_agent"), "end": "end"},
+        {"pm_agent": entry("pm_agent"), "change_plan": entry("change_plan"), "end": "end"},
     )
     wf.add_edge("pm_agent", entry("architect_agent"))
     wf.add_edge("architect_agent", entry("fork_coder_and_images"))
@@ -145,7 +195,12 @@ def create_code_gen_workflow(session=None) -> StateGraph:
     wf.add_edge("coder_agent", entry("reviewer_agent"))
 
     # 终止
-    wf.add_edge("builder_agent", "end")
+    wf.add_conditional_edges("builder_agent", lambda state: state.get("validation_route", "end"), {
+        "coder_agent": entry("coder_agent"), "runtime_validation": entry("runtime_validation"), "end": "end",
+    })
+    wf.add_conditional_edges("runtime_validation", lambda state: state.get("validation_route", "end"), {
+        "coder_agent": entry("coder_agent"), "end": "end",
+    })
     wf.add_edge("end", END)
     wf.add_edge("human_intervention", END)
 
@@ -229,6 +284,7 @@ async def run_workflow_async(
     """执行完整工作流（异步流式）。"""
     initial: CodeGenState = _build_initial_state(user_request, user_id, app_id, code_gen_type, user_role, trace_id)
     if session is not None:
+        initial["artifact_publish_owner"] = "gateway"
         async with aclosing(session.states(create_code_gen_workflow(session), initial)) as states:
             async for state in states:
                 yield state

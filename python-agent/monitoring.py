@@ -66,8 +66,33 @@ ai_code_gen_files_generated = Histogram(
 ai_rag_cache_hit_total = Counter(
     "ai_rag_cache_hit_total",
     "RAG 缓存命中/未命中次数",
-    ["status"],  # status: hit / miss
+    ["phase", "channel", "status"],  # status: hit / miss / bypass
 )
+
+ai_prompt_cache_tokens_total = Counter(
+    "ai_prompt_cache_tokens_total",
+    "Provider-reported prompt cache and input tokens",
+    ["phase", "request_model", "actual_model", "kind"],
+)
+
+ai_memory_compaction_total = Counter(
+    "ai_memory_compaction_total", "Redis session compaction attempts", ["status"],
+)
+
+ai_memory_compaction_duration_seconds = Histogram(
+    "ai_memory_compaction_duration_seconds", "Redis session compaction duration",
+    ["status"], buckets=[0.01, 0.1, 0.5, 1, 2.5, 5, 10, 30, 60],
+)
+
+_KNOWN_PHASES = {"intent", "pm", "arch", "code", "coder", "review", "builder",
+                 "memory_summary", "unknown"}
+_KNOWN_RAG_CHANNELS = {"grep_fa", "grep_cl", "grep_ep", "grep_cs", "semantic",
+                       "intent_directed", "global_vector", "unknown"}
+_KNOWN_ACTUAL_MODELS = {"deepseek", "glm", "claude", "openai", "unknown"}
+
+
+def _bounded(value: str, allowed: set[str]) -> str:
+    return value if value in allowed else "unknown"
 
 # ============ Agent 阶段追踪（contextvars，跨越异步上下文） ============
 
@@ -83,6 +108,15 @@ def set_current_phase(phase: str) -> None:
 
 def get_current_phase() -> str:
     return _current_phase.get("unknown")
+
+
+@contextmanager
+def phase_scope(phase: str):
+    token = _current_phase.set(phase)
+    try:
+        yield
+    finally:
+        _current_phase.reset(token)
 
 
 # ============ 便捷记录函数 ============
@@ -136,9 +170,37 @@ def record_files_generated(code_gen_type: str, file_count: int) -> None:
     ai_code_gen_files_generated.labels(code_gen_type=code_gen_type).observe(file_count)
 
 
-def record_rag_cache_hit(status: str) -> None:
-    """记录 RAG 缓存命中/未命中。status: 'hit' | 'miss'"""
-    ai_rag_cache_hit_total.labels(status=status).inc()
+def record_rag_cache_hit(status: str, *, phase: str = "unknown",
+                         channel: str = "unknown") -> None:
+    """Record a bounded RAG cache read outcome."""
+    ai_rag_cache_hit_total.labels(
+        phase=_bounded(phase, _KNOWN_PHASES),
+        channel=_bounded(channel, _KNOWN_RAG_CHANNELS),
+        status=_bounded(status, {"hit", "miss", "bypass"}),
+    ).inc()
+
+
+def record_prompt_cache_tokens(usage: dict, *, phase: str = "") -> None:
+    """Expose distinct provider token categories and input denominator."""
+    from config import config
+    request_model = _bounded(str(usage.get("request_model") or usage.get("model") or ""),
+                             set(config.LLM_MODEL_ALIASES.values()))
+    actual_model = _bounded(str(usage.get("actual_model") or "unknown"),
+                            _KNOWN_ACTUAL_MODELS)
+    labels = {"phase": _bounded(phase or get_current_phase(), _KNOWN_PHASES),
+              "request_model": request_model, "actual_model": actual_model}
+    for kind, field in (("input", "input_tokens"), ("hit", "cache_hit_tokens"),
+                        ("miss", "cache_miss_tokens"),
+                        ("creation", "cache_creation_tokens")):
+        value = usage.get(field, 0)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            ai_prompt_cache_tokens_total.labels(kind=kind, **labels).inc(value)
+
+
+def record_memory_compaction(success: bool, duration_seconds: float) -> None:
+    status = "success" if success else "failure"
+    ai_memory_compaction_total.labels(status=status).inc()
+    ai_memory_compaction_duration_seconds.labels(status=status).observe(duration_seconds)
 
 
 # ============ FastAPI 集成 ============

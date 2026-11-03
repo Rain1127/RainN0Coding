@@ -27,6 +27,7 @@ dependencies = [
     "pymilvus>=2.4",
     "qdrant-client>=1.18,<1.19",
     "pytest>=8.0",
+    "playwright>=1.51,<2",
     "pyyaml>=6.0",
     "python-dotenv>=1.2.2",
     "rank-bm25>=0.2.2",

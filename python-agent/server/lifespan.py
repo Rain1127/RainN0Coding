@@ -126,6 +126,9 @@ async def _periodic_quality_cleanup():
                         {"app_id": e_app_id, "file_path": e_file_path},
                     )
                     deleted_vectors += count
+                    if count:
+                        from rag.rag_cache import rag_cache
+                        rag_cache.code_store_changed()
                 except Exception as e:
                     logger.warning(
                         f"[QualityCleanup] vector store delete failed "

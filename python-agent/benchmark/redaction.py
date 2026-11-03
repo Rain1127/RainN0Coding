@@ -27,6 +27,12 @@ _SENSITIVE_KEY_SUFFIXES = (
 _BEARER = re.compile(r"\bBearer\s+[^\s,;\"']+", re.IGNORECASE)
 _BASIC = re.compile(r"\bBasic\s+[^\s,;\"']+", re.IGNORECASE)
 _SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
+_NATURAL_CREDENTIAL = re.compile(
+    r"(?P<prefix>(?:我的|你的|这个|该|登录|账户|账号|系统)?"
+    r"(?:密码|口令|验证码|密钥|令牌|访问令牌|授权码)\s*(?:是|为|[:：=])\s*)"
+    r"[^\s，。；;,.]+",
+    re.IGNORECASE,
+)
 _CREDENTIAL_ASSIGNMENT = re.compile(
     r"(?P<prefix>\b(?P<key>[A-Za-z][A-Za-z0-9_.-]*)[\"']?\s*[:=]\s*)"
     r"(?:(?:Bearer|Basic)\s+[^\s,;\"']+|(?P<double>\"[^\"\r\n]*\")|"
@@ -84,6 +90,9 @@ def _redact_text(value: str) -> str:
     redacted = _BEARER.sub(f"Bearer {_REDACTED}", redacted)
     redacted = _BASIC.sub(f"Basic {_REDACTED}", redacted)
     redacted = _SECRET.sub(_REDACTED, redacted)
+    redacted = _NATURAL_CREDENTIAL.sub(
+        lambda match: f"{match.group('prefix')}{_REDACTED}", redacted
+    )
     redacted = _WINDOWS_USER_PATH.sub(_REDACTED_USER_PATH, redacted)
     return _UNIX_USER_PATH.sub(_REDACTED_USER_PATH, redacted)
 

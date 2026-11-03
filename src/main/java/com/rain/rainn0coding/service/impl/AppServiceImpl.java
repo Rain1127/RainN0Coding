@@ -274,7 +274,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper,App>  implements AppSe
             return StrUtil.blankToDefault(payload.getStr("message"), StrUtil.blankToDefault(status, "error"));
         }
         if ("done".equals(type) && StrUtil.isNotBlank(status)) {
-            if ("partial_success".equals(status) || "degraded_success".equals(status) || "paused".equals(status)) {
+            if ("degraded_success".equals(status) || "paused".equals(status)) {
                 return null;
             }
             if (!"success".equals(status)) {

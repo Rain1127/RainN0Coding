@@ -43,4 +43,11 @@ class GenerationQueueServiceTest {
         owned();when(store.get("t")).thenReturn(task("INTERRUPTED"));when(work.busy(1)).thenThrow(new IllegalStateException());
         assertFalse(service.get("t",user).retryAllowed());
     }
+    @Test void userPauseIntentIsDurableBeforePythonIsContacted() {
+        owned();when(store.get("t")).thenReturn(task("RUNNING"));
+        service.pause("t",user);
+        var order=inOrder(store,work);
+        order.verify(store).markPausing("t");
+        order.verify(work).pause(any());
+    }
 }

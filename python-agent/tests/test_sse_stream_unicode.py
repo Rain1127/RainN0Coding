@@ -8,7 +8,7 @@ def test_initial_progress_events_preserve_chinese_text(monkeypatch):
     monkeypatch.setattr(
         sse_stream.conversation_memory,
         "get_context",
-        lambda _thread_id: {"summary": "", "recent_messages": []},
+        lambda _thread_id, query=None: {"summary": "", "recent_messages": []},
     )
 
     async def fake_run_workflow_async(*_args, **_kwargs):

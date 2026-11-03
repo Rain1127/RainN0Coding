@@ -69,6 +69,12 @@ app:
     max-wait-hours: ${APP_GENERATION_QUEUE_MAX_WAIT_HOURS:24}
     task-timeout-minutes: ${APP_GENERATION_QUEUE_TASK_TIMEOUT_MINUTES:30}
     event-retention-days: ${APP_GENERATION_QUEUE_EVENT_RETENTION_DAYS:7}
+    auto-recovery-enabled: ${APP_GENERATION_QUEUE_AUTO_RECOVERY_ENABLED:true}
+    max-retries: ${APP_GENERATION_QUEUE_MAX_RETRIES:3}
+    retry-base-seconds: ${APP_GENERATION_QUEUE_RETRY_BASE_SECONDS:5}
+    retry-max-seconds: ${APP_GENERATION_QUEUE_RETRY_MAX_SECONDS:60}
+    heartbeat-seconds: ${APP_GENERATION_QUEUE_HEARTBEAT_SECONDS:10}
+    lease-seconds: ${APP_GENERATION_QUEUE_LEASE_SECONDS:60}
   deploy-host: ${APP_DEPLOY_HOST:http://localhost:8123/api/static}
   cors:
     allowed-origin-patterns: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}

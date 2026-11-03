@@ -87,15 +87,40 @@ def has_partial_code(state: dict) -> bool:
     code_gen_type = state.get("code_gen_type") or ""
     if not code_files:
         return False
-    if any(item.get("path") == "src/App.vue" for item in code_files):
-        return True
-    return any(item.get("content", "").strip() for item in code_files) and bool(code_gen_type)
+    metadata_paths = {"architecture.json", "prd.json", "images.json"}
+    return any(
+        item.get("path") not in metadata_paths and item.get("content", "").strip()
+        for item in code_files
+    ) and bool(code_gen_type)
 
 
 def compute_final_status(state: dict) -> dict:
     state = ensure_availability_defaults(state)
     partial_code = has_partial_code(state)
     state["partial_code_available"] = partial_code
+
+    # Agents may return an error state instead of raising an exception. Build and
+    # review outcomes also need to be checked independently of failed_phase.
+    outcome_failure = None
+    if (state.get("runtime_result") or {}).get("status") in ("failed", "unverified"):
+        outcome_failure = "builder"
+    elif (state.get("build_result") or {}).get("status") == "unverified":
+        outcome_failure = "builder"
+    elif (state.get("build_result") or {}).get("success") is False:
+        outcome_failure = "builder"
+    elif (state.get("quality_gate_result") or {}).get("passed") is False:
+        outcome_failure = "builder"
+    elif (state.get("review") or {}).get("passed") is False:
+        outcome_failure = "reviewer"
+    if state.get("error") or state.get("phase") == "error" or outcome_failure:
+        if outcome_failure and not state.get("error") and state.get("phase") != "error":
+            state["failed_phase"] = outcome_failure
+        state["final_status"] = FINAL_PARTIAL_SUCCESS if partial_code else FINAL_FAILED
+        state["recovery_hint"] = (
+            "Editable files are available, but the request failed validation or execution. Fix the failure before deploying."
+            if partial_code else "Retry the request after the failed phase is available again."
+        )
+        return state
 
     if state.get("failed_phase") == "builder" and partial_code:
         state["final_status"] = FINAL_PARTIAL_SUCCESS
@@ -141,6 +166,18 @@ def finalize_state(state: dict) -> dict:
         "review_score": review.get("score"),
         "review_passed": review.get("passed"),
         "build_success": build.get("success"),
+        "build_status": build.get("status"),
+        "build_failure_kind": build.get("failure_kind"),
+        "build_log": build.get("log"),
+        "runtime_result": state.get("runtime_result"),
+        "build_repair_count": state.get("build_repair_count", 0),
+        "repair_stop_reason": state.get("repair_stop_reason"),
+        "budget": state.get("budget_report"),
+        "budget_stop_reason": state.get("budget_stop_reason"),
+        "artifact_status": state.get("artifact_status"),
+        "artifact_run_id": state.get("artifact_run_id"),
+        "project_dir": state.get("project_dir"),
+        "artifact_base": state.get("artifact_base"),
         "indexing_success": indexing.get("success"),
         "indexing_message": indexing.get("message"),
         "quality_gate_passed": quality_gate.get("passed"),
@@ -198,7 +235,10 @@ def apply_architect_fallback(state: dict, reason_code: str) -> dict:
     state["architecture"] = {
         "tech_stack": state.get("code_gen_type", "generic"),
         "component_tree": [],
-        "file_list": [{"path": "src/App.vue", "purpose": "entry"}],
+        "file_list": [{
+            "path": "index.html" if state.get("code_gen_type") == "html" else "src/App.vue",
+            "purpose": "entry",
+        }],
         "data_flow": [],
     }
     state["phase"] = "arch_done"
@@ -250,6 +290,9 @@ async def _run_phase_runner(phase: str, state: dict, runner):
             return result
 
     timeout_seconds = phase_timeout_seconds(phase, cfg)
+    from workflow.budget import active_budget
+    if active_budget.get():
+        timeout_seconds = min(timeout_seconds, active_budget.get().remaining_seconds())
     if inspect.iscoroutinefunction(runner):
         async def tracked_runner():
             with execution_registry.track(working_state.get("app_id", "")):
@@ -262,12 +305,42 @@ async def _run_phase_runner(phase: str, state: dict, runner):
 
 
 async def guarded_phase_call(phase: str, state: dict, runner):
+    # Fixed graph edges can visit downstream nodes after a returned error.
+    # Preserve the first failure and avoid any further model or build calls.
+    if state.get("phase") == "error" or state.get("error"):
+        return copy_state(state)
+    from workflow.budget import budget_scope, BudgetExceeded
     try:
-        result = await _run_phase_runner(phase, state, runner)
+        with budget_scope(state) as budget:
+            result = await _run_phase_runner(phase, state, runner)
+            if budget.data.get("stop_reason"):
+                raise BudgetExceeded(budget.data["stop_reason"])
+            budget.check()
+            budget_state = budget.report()
+        result["budget_report"] = budget_state
         result = ensure_availability_defaults(result)
+        if result.get("phase") == "error" or result.get("error"):
+            result["phase"] = "error"
+            result["error"] = result.get("error") or f"{phase} returned an error state"
+            result["failed_phase"] = phase
+            result["last_good_phase"] = state.get("last_good_phase")
+            failure = classify_phase_failure(
+                phase, RuntimeError(result["error"]),
+                "agent_error",
+            )
+            return append_phase_failure(result, failure)
         result["last_good_phase"] = phase
         return result
+    except BudgetExceeded as exc:
+        result = copy_state(state)
+        result.update(phase="error", error=str(exc), failed_phase=phase, budget_stop_reason=str(exc))
+        return result
     except TimeoutError as exc:
+        if (state.get("budget_report") or {}).get("active_seconds", 0) >= getattr(_config(), "TASK_MAX_SECONDS", 1200):
+            result = copy_state(state)
+            result.update(phase="error", error="task_time_budget_exceeded", failed_phase=phase,
+                          budget_stop_reason="task_time_budget_exceeded")
+            return result
         reason_code = f"{phase}_timeout"
         failure = classify_phase_failure(phase, exc, "timeout")
         if phase == "intent":

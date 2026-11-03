@@ -42,6 +42,7 @@ class CodeGrep:
                     "--no-heading",
                     "-g", "!*.min.*",              # 跳过压缩文件
                     "-g", "!.git",                 # 跳过 .git 目录
+                    "-g", "!.rag-cache-*",
                     "--",                          # 参数结束
                     symbol,
                     str(self.store_dir),
@@ -72,6 +73,7 @@ class CodeGrep:
                     "-g", "!*.min.*",
                     "-g", "!.git",
                     "-g", "!*.lock",
+                    "-g", "!.rag-cache-*",
                     "--", pattern, str(self.store_dir),
                 ],
                 capture_output=True, text=True,
@@ -87,6 +89,8 @@ class CodeGrep:
         dest = self.store_dir / app_id / file_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8", errors="ignore")
+        from rag.rag_cache import rag_cache
+        rag_cache.code_store_changed()
 
     def delete_code(self, app_id: str, file_path: str = "") -> bool:
         """删除单个代码文件或整个 app 目录。
@@ -106,7 +110,7 @@ class CodeGrep:
         if target.is_file():
             target.unlink()
         elif target.is_dir():
-            shutil.rmtree(target, ignore_errors=True)
+            shutil.rmtree(target)
         # 清理空的父目录（上溯到 store_dir）
         parent = target.parent
         while parent != self.store_dir:
@@ -118,13 +122,16 @@ class CodeGrep:
             except OSError:
                 break
             parent = parent.parent
+        from rag.rag_cache import rag_cache
+        rag_cache.code_store_changed()
         return True
 
     def get_file_count(self) -> int:
         """统计已验证代码库的文件数"""
         if not self.store_dir.exists():
             return 0
-        return sum(1 for _ in self.store_dir.rglob("*") if _.is_file())
+        return sum(1 for path in self.store_dir.rglob("*")
+                   if path.is_file() and not path.name.startswith(".rag-cache-"))
 
     # ========== 内部方法 ==========
 
@@ -159,6 +166,8 @@ class CodeGrep:
             return results
         for fpath in self.store_dir.rglob("*"):
             if not fpath.is_file():
+                continue
+            if fpath.name.startswith(".rag-cache-"):
                 continue
             fname = fpath.name.lower()
             sym_lower = symbol.lower()

@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rag.sqlite_store import sqlite_store
 from rag.code_grep import code_grep
-from rag.rag_cache import rag_cache
+from rag.rag_cache import rag_cache, retrieval_input
 from rag.retrieval_common import PostProcessor, RetrievalContext, RetrievalResult
 from config import config, get_lang_config
 
@@ -79,7 +79,7 @@ class HybridEngine:
         """
         混合检索入口 —— 与 RetrievalEngine.retrieve() 签名完全一致。
 
-        每个子通道独立缓存：rag_cache:{version}:{phase}:{channel}:{query_md5}
+        每个子通道独立缓存：rag:v2:{data_version}:{channel_version}:{phase}:{channel}:{query_sha256}
 
         Args:
             ctx: RetrievalContext (复用现有数据模型)
@@ -101,16 +101,13 @@ class HybridEngine:
 
         # 提取共用的搜索关键词
         keywords = self._extract_keywords(ctx)
+        cache_query = retrieval_input(ctx, keywords)
         phase = ctx.phase
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             # === Grep 通道：SQLite FTS5 ===
             if "framework_api" in grep_cols:
-                lang_cfg = get_lang_config(ctx.code_gen_type)
-                fw_keywords = keywords + self._framework_tokens(
-                    lang_cfg.get("framework", ""))
-                fa_query = " ".join(fw_keywords)
-                fa_cached = rag_cache.get(phase, "grep_fa", fa_query)
+                fa_cached = rag_cache.get(phase, "grep_fa", cache_query)
                 if fa_cached is not None:
                     fa_results = self._deserialize_results(fa_cached, "grep:framework_api")
                     if fa_results:
@@ -119,27 +116,16 @@ class HybridEngine:
                 else:
                     f = ex.submit(self._grep_framework_api, keywords, ctx)
                     futures[f] = "grep:framework_api"
-                    _cache_meta[f] = ("grep_fa", fa_query)
+                    _cache_meta[f] = ("grep_fa", cache_query)
 
             if "component_library" in grep_cols:
-                lang_cfg = get_lang_config(ctx.code_gen_type)
-                fw_keywords = keywords + self._framework_tokens(
-                    lang_cfg.get("framework", ""))
-                cl_query = " ".join(fw_keywords)
-                cl_cached = rag_cache.get(phase, "grep_cl", cl_query)
-                if cl_cached is not None:
-                    cl_results = self._deserialize_results(cl_cached, "grep:component_library")
-                    if cl_results:
-                        print(f"[HybridEngine] cache HIT grep_cl: {len(cl_results)} 条")
-                        all_results.extend(cl_results)
-                else:
-                    f = ex.submit(self._grep_component, keywords, ctx)
-                    futures[f] = "grep:component_library"
-                    _cache_meta[f] = ("grep_cl", cl_query)
+                f = ex.submit(self._cached_channel, phase, "grep_cl", cache_query,
+                              lambda: self._grep_component(keywords, ctx))
+                futures[f] = "grep:component_library"
 
             if "error_pattern" in grep_cols:
                 error_text = self._extract_error_text(ctx)
-                ep_cached = rag_cache.get(phase, "grep_ep", error_text) if error_text else None
+                ep_cached = rag_cache.get(phase, "grep_ep", cache_query) if error_text else None
                 if ep_cached is not None:
                     ep_results = self._deserialize_results(ep_cached, "grep:error_pattern")
                     if ep_results:
@@ -148,11 +134,10 @@ class HybridEngine:
                 elif error_text:
                     f = ex.submit(self._grep_error, error_text)
                     futures[f] = "grep:error_pattern"
-                    _cache_meta[f] = ("grep_ep", error_text)
+                    _cache_meta[f] = ("grep_ep", cache_query)
 
             if "code_store" in grep_cols:
-                cs_query = " ".join(keywords[:3])
-                cs_cached = rag_cache.get(phase, "grep_cs", cs_query)
+                cs_cached = rag_cache.get(phase, "grep_cs", cache_query)
                 if cs_cached is not None:
                     cs_results = self._deserialize_results(cs_cached, "grep:code_store")
                     if cs_results:
@@ -161,33 +146,21 @@ class HybridEngine:
                 else:
                     f = ex.submit(self._grep_code_store, keywords, ctx)
                     futures[f] = "grep:code_store"
-                    _cache_meta[f] = ("grep_cs", cs_query)
+                    _cache_meta[f] = ("grep_cs", cache_query)
 
             # === Semantic 通道：Milvus ===
             if use_semantic and _semantic_retriever is not None:
-                sem_query = ctx.user_request + str(ctx.file_info or "")
-                sem_cached = rag_cache.get(phase, "semantic", sem_query)
-                if sem_cached is not None:
-                    sem_results = self._deserialize_results(sem_cached, "semantic")
-                    if sem_results:
-                        print(f"[HybridEngine] cache HIT semantic: {len(sem_results)} 条")
-                        all_results.extend(sem_results)
-                else:
-                    f = ex.submit(
-                        _semantic_retriever.retrieve,
-                        ctx.user_request,
-                        ctx.file_info,
-                        ctx.architecture,
-                    )
-                    futures[f] = "semantic"
-                    _cache_meta[f] = ("semantic", sem_query)
+                f = ex.submit(self._cached_channel, phase, "semantic", cache_query,
+                              lambda: _semantic_retriever.retrieve(
+                                  ctx.user_request, ctx.file_info, ctx.architecture))
+                futures[f] = "semantic"
 
             # === 收集结果 & 回写缓存 ===
             for f in as_completed(futures):
                 source = futures[f]
                 try:
                     results = f.result()
-                    if results:
+                    if results is not None:
                         print(f"[HybridEngine] {source}: {len(results)} 条结果")
                         all_results.extend(results)
                         # 回写缓存
@@ -195,7 +168,8 @@ class HybridEngine:
                         if meta:
                             channel, query_text = meta
                             serialized = self._serialize_results(results)
-                            rag_cache.set(phase, channel, query_text, serialized)
+                            rag_cache.set(phase, channel, query_text, serialized,
+                                          negative=not results)
                 except Exception as e:
                     print(f"[HybridEngine] {source} 失败: {e}")
 
@@ -211,6 +185,23 @@ class HybridEngine:
 
         formatted = self._postprocessor.format(ranked)
         return formatted
+
+    def _cached_channel(self, phase, channel, query, loader):
+        """Serialize before publishing, then give each caller its own objects."""
+        def serialized_load():
+            results = loader()
+            return None if results is None else self._serialize_results(results)
+
+        # Support existing cache adapters that expose only get/set.
+        if hasattr(rag_cache, 'get_or_load'):
+            value = rag_cache.get_or_load(phase, channel, query, serialized_load)
+        else:
+            value = rag_cache.get(phase, channel, query)
+            if value is None:
+                value = serialized_load()
+                if value is not None:
+                    rag_cache.set(phase, channel, query, value, negative=value == '[]')
+        return None if value is None else self._deserialize_results(value, channel)
 
     # ========== Grep 子通道 ==========
 
@@ -271,6 +262,7 @@ class HybridEngine:
     def _grep_code_store(self, keywords: list[str], ctx) -> list:
         """ripgrep 搜索已验证代码"""
         results = []
+        files = []
         for kw in keywords[:3]:
             files = code_grep.search(kw, max_files=3)
             for f in files:
@@ -335,7 +327,7 @@ class HybridEngine:
         chinese_words = re.findall(r'[一-鿿]{2,4}', ctx.user_request)
         tokens.update(chinese_words)
 
-        return list(tokens)
+        return sorted(tokens)
 
     def _extract_error_text(self, ctx) -> str:
         """构建 error_pattern 搜索的报错文本"""

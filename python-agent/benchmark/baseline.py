@@ -11,7 +11,7 @@ from benchmark.redaction import redact
 
 
 _IDENTITY_FIELDS = (
-    "suite", "dataset_versions", "dataset_fingerprint", "prompt_fingerprint", "model_aliases", "offline",
+    "suite", "dataset_versions", "dataset_fingerprint", "model_aliases", "offline",
 )
 
 
@@ -52,6 +52,10 @@ def _publish(temporary: Path, destination: Path) -> None:
 
 
 def promote(report: BenchmarkReport, baseline_dir: str | Path) -> Path:
+    if any(result.infrastructure_error for result in report.results):
+        raise ValueError("cannot promote a baseline with infrastructure errors")
+    if any(item.get("type") != "no_baseline" for item in report.gate.get("failures", [])):
+        raise ValueError("cannot promote a baseline that failed quality gates")
     destination = _target(report, baseline_dir)
     if destination.exists():
         raise FileExistsError(f"baseline already exists: {destination}")

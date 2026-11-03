@@ -156,7 +156,9 @@ class PostProcessor:
             count = meta.get("occurrence_count", 1)
             return min(float(count) / 10.0, 1.0)
         if col == "component_library":
-            use_count = meta.get("use_count", 1)
+            use_count = meta.get("use_count")
+            if use_count is None:
+                use_count = 1
             return min(float(use_count) / 20.0, 1.0)
         return 0.5
 

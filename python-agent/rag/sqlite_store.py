@@ -16,18 +16,31 @@ SQLite FTS5 精确检索 —— framework_api / error_pattern / component_librar
 import os
 import re
 import sqlite3
+from functools import wraps
+from threading import RLock
 from config import config
+
+
+def _serialized(method):
+    """Keep one SQLite connection out of concurrent worker threads."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 class SqliteStore:
     """SQLite FTS5 全文检索引擎 —— framework_api / error_pattern / component_library"""
 
     def __init__(self, db_path: str | None = None):
+        self._lock = RLock()
         self.db_path = db_path or config.SQLITE_DB_PATH
         self._conn: sqlite3.Connection | None = None
 
     # ========== 连接管理 ==========
 
+    @_serialized
     def connect(self):
         if self._conn is not None:
             return
@@ -37,6 +50,7 @@ class SqliteStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
 
+    @_serialized
     def close(self):
         if self._conn:
             self._conn.close()
@@ -44,6 +58,7 @@ class SqliteStore:
 
     # ========== 建表 ==========
 
+    @_serialized
     def init_tables(self):
         """创建 FTS5 虚拟表（如已存在则跳过）"""
         self.connect()
@@ -122,6 +137,7 @@ class SqliteStore:
 
     # ========== 搜索 ==========
 
+    @_serialized
     def search_framework_api(self, keywords: list[str], limit: int = 5) -> list[dict]:
         """
         按 API 名称精确搜索。
@@ -161,6 +177,7 @@ class SqliteStore:
             rows.extend(cur.fetchall())
         return [self._load_meta("framework_api_meta", r["rowid"]) for r in rows[:limit]]
 
+    @_serialized
     def search_error(self, error_text: str, limit: int = 5) -> list[dict]:
         """
         从报错文本中提取异常类名，精确匹配 error_pattern。
@@ -205,6 +222,7 @@ class SqliteStore:
                 unique.append(r)
         return unique[:limit]
 
+    @_serialized
     def search_component(self, keywords: list[str], limit: int = 5) -> list[dict]:
         """
         按组件名称搜索。
@@ -243,6 +261,7 @@ class SqliteStore:
 
     # ========== 数据种子 ==========
 
+    @_serialized
     def insert_framework_api(self, item: dict):
         """插入单条 framework_api（写入 meta，FTS5 延迟索引）"""
         self.connect()
@@ -260,6 +279,7 @@ class SqliteStore:
         self._conn.commit()
         return cur.lastrowid
 
+    @_serialized
     def insert_error_pattern(self, item: dict):
         """插入单条 error_pattern"""
         self.connect()
@@ -275,6 +295,7 @@ class SqliteStore:
         self._conn.commit()
         return cur.lastrowid
 
+    @_serialized
     def insert_component(self, item: dict):
         """插入单条 component_library"""
         self.connect()
@@ -291,6 +312,7 @@ class SqliteStore:
         self._conn.commit()
         return cur.lastrowid
 
+    @_serialized
     def rebuild_indexes(self):
         """重建所有 FTS5 索引（批量写入后调用）"""
         self.connect()
@@ -299,6 +321,7 @@ class SqliteStore:
         self._conn.commit()
         print("[SqliteStore] FTS5 索引重建完成")
 
+    @_serialized
     def seed_all(self, framework_seeds: list[dict], component_seeds: list[dict],
                  error_seeds: list[dict]):
         """批量写入种子数据（写入 meta + 重建 FTS5 索引）"""

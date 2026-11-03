@@ -129,6 +129,7 @@ def index_code_files(code_files: list, app_id: str, code_gen_type: str,
     if not code_files:
         return
 
+    filesystem_count = 0
     # 写入文件系统（供 CodeGrep 搜索）
     for f in code_files:
         content = f.get("content", "")
@@ -136,6 +137,7 @@ def index_code_files(code_files: list, app_id: str, code_gen_type: str,
             continue
         try:
             code_grep.write_code(app_id, f.get("path", ""), content)
+            filesystem_count += 1
         except Exception as e:
             print(f"[RAG] 文件系统写入失败 {f.get('path', '?')}: {e}")
 
@@ -174,6 +176,10 @@ def index_code_files(code_files: list, app_id: str, code_gen_type: str,
         except Exception as e:
             print(f"[RAG] 向量数据库写入跳过: {e}")
 
+    if indexed:
+        from rag.rag_cache import rag_cache
+        rag_cache.code_store_changed()
+
     # 记录质量元数据到反馈追踪器 (P2)
     try:
         from rag.feedback_tracker import feedback_tracker
@@ -189,3 +195,7 @@ def index_code_files(code_files: list, app_id: str, code_gen_type: str,
         f"[RAG] 已入库 {indexed}/{len(code_files)} 文件到向量数据库，"
         f"文件系统共 {file_count} 文件"
     )
+    total = sum(bool(f.get("content")) for f in code_files)
+    return {"success": indexed == total and filesystem_count == total,
+            "message": f"向量入库 {indexed}/{total}，文件入库 {filesystem_count}/{total}",
+            "indexed_count": indexed, "total_count": total, "filesystem_count": filesystem_count}

@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 from guardrails.audit import audit_from_decision
 from guardrails.engine import evaluate_output_event
 from guardrails.models import OutputEvent
-from memory.conversation_memory import conversation_memory
+from memory.conversation_memory import canonical_facts_json, conversation_memory
 from monitoring import record_files_generated, record_phase_duration, record_retries
 from tracing import start_span
 from workflow.code_gen_workflow import run_workflow_async
@@ -45,6 +45,7 @@ async def stream_workflow(
         phase_timers: dict[str, float] = {}
         seen_phases: set[str] = set()
         prev_retry_count = 0
+        prev_build_repair_count = 0
         code_gen_type_value = code_gen_type
 
         def _event(event_type: str, **kwargs) -> str:
@@ -67,15 +68,30 @@ async def stream_workflow(
             return json.dumps(payload, ensure_ascii=False)
 
         thread_id = f"{user_id}_{app_id}"
-        memory_ctx = conversation_memory.get_context(thread_id)
+        memory_ctx = conversation_memory.get_context(thread_id, query=user_request)
+        facts = memory_ctx.get("facts") or {}
         summary = memory_ctx.get("summary", "")
         recent = memory_ctx.get("recent_messages", [])
+        history_hits = memory_ctx.get("history_hits", [])
+        omitted_fact_count = memory_ctx.get("omitted_fact_count", 0)
 
         enriched_request = user_request
-        if summary or recent:
+        if facts or summary or recent or history_hits:
             parts = []
             if summary:
                 parts.append(f"[对话摘要] {summary}")
+            if history_hits:
+                evidence = []
+                for hit in history_hits[:2]:
+                    evidence.append(f"摘要批次 {hit['id']}: {hit['text'][:200]}")
+                    for source in hit.get("sources", [])[:3]:
+                        evidence.append(f"原消息: {source['content'][:300]}")
+                parts.append("[历史证据] " + "\n".join(evidence))
+            if facts and any(facts.values()):
+                parts.append(f"[关键事实] {canonical_facts_json(facts)}")
+                parts.append("[记忆规则] 查询当前状态时，以关键事实为准；历史证据只用于回溯。")
+            if omitted_fact_count:
+                parts.append(f"[记忆提示] {omitted_fact_count} 项有效事实未注入本次提示。")
             if recent:
                 parts.append("[最近对话]")
                 for message in recent[-6:]:
@@ -120,8 +136,8 @@ async def stream_workflow(
                     error = state.get("error")
                     retry_count = state.get("retry_count", 0)
 
-                    if error:
-                        yield _event("error", message=str(error))
+                    if error or phase == "error":
+                        yield _event("error", message=str(error or "Workflow returned an error state"))
                         yield _event("done", status="error")
                         terminal_sent = True
                         continue
@@ -211,15 +227,19 @@ async def stream_workflow(
 
                     if phase == "code_done" or (replay_files and state.get("code_files")):
                         replay_files = False
-                        is_retry = retry_count > prev_retry_count
+                        build_repair_count = state.get("build_repair_count", 0)
+                        build_retry = build_repair_count > prev_build_repair_count
+                        is_retry = retry_count > prev_retry_count or build_retry
                         if is_retry:
                             prev_retry_count = retry_count
+                            prev_build_repair_count = build_repair_count
                             phase_start_times["code_retry"] = time.time()
                             yield _event(
                                 "phase_start",
                                 phase="code_retry",
-                                retry=retry_count,
-                                message=f"正在修复审查发现的问题（第 {retry_count} 次重试）...",
+                                retry=build_repair_count if build_retry else retry_count,
+                                message=(f"正在修复构建或运行验收发现的问题（第 {build_repair_count} 次修复）..." if build_retry else
+                                         f"正在修复审查发现的问题（第 {retry_count} 次重试）..."),
                             )
 
                         code_files = state.get("code_files", [])
@@ -302,9 +322,18 @@ async def stream_workflow(
                         else:
                             phase_start_times["build"] = time.time()
 
+                    if phase == "change_planned":
+                        yield _event("change_plan", plan=state.get("change_plan"))
+                    if phase == "code_done" and state.get("change_result"):
+                        yield _event("code_diff", changes=state["change_result"])
+                    if phase == "runtime_done":
+                        yield _event("runtime_validation", result=state.get("runtime_result"))
                     if phase == "build_done":
                         build = state.get("build_result") or {}
-                        yield _event("phase_complete", phase="build", output={"success": build.get("success")})
+                        yield _event("phase_complete", phase="build", output={
+                            "success": build.get("success"), "status": build.get("status"),
+                            "failure_kind": build.get("failure_kind"), "log": build.get("log"),
+                        })
 
                     if phase == "completed" or phase == "error":
                         final = state.get("final_result") or {}
@@ -349,6 +378,9 @@ async def stream_workflow(
                         yield _event(
                             "done",
                             status=final_status,
+                            message=("代码已保留，构建未验证: " + str(final.get("build_log", ""))[:200]
+                                     if final.get("build_status") == "unverified" else
+                                     "代码已保留，验收未通过" if final_status == "partial_success" else "生成流程已结束"),
                             failed_phase=final.get("failed_phase"),
                             degraded=final.get("degraded", False),
                             degraded_reasons=final.get("degraded_reasons", []),

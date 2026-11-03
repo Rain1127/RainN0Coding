@@ -14,6 +14,7 @@ Mode Detector —— 双重信号路由（零 LLM 调用）
 """
 import json
 import os
+import re
 from state.code_gen_state import CodeGenState
 
 
@@ -39,13 +40,17 @@ _MODIFY_KEYWORDS = [
 
 # ============ Helper 函数 ============
 
+def current_request(text: str) -> str:
+    return text.rsplit("[当前请求]", 1)[-1].strip()
+
 def _detect_language_signal(user_request: str) -> str:
     """从用户输入中检测语言信号：rebuild / new / modify / ambiguous。
 
     优先级：rebuild > new > modify（rebuild 是最强信号）。
     多字关键词优先匹配（如"重新生成"在"生成"之前检查）。
     """
-    text = user_request
+    # Remove negated clauses before checking positive rebuild signals.
+    text = re.sub(r"(?:不要|不用|不必|无需|别|禁止|不允许|不需要|不是|不)\s*(?:(?:再|进行|从头|给我|要|去)\s*)*(?:重新生成|重新|重来|重做|从头开始|覆盖|换方案)[^，。；,;]*", "", current_request(user_request))
 
     for kw in _REBUILD_KEYWORDS:
         if kw in text:
@@ -95,7 +100,7 @@ def _collect_code_files(project_dir: str) -> list[dict]:
         dirs[:] = [d for d in dirs if d not in
                    {"node_modules", ".git", "__pycache__", ".venv", "dist", "build"}]
         for name in files:
-            if name.endswith((".pyc", ".log", ".lock", ".tmp", ".json")):
+            if name.endswith((".pyc", ".log", ".lock", ".tmp")) or name in {"prd.json", "architecture.json", "images.json", "review-coverage.json", ".generation-run-id"}:
                 continue
             full = os.path.join(root, name)
             rel = os.path.relpath(full, project_dir).replace("\\", "/")
@@ -119,6 +124,11 @@ def mode_detector(state: CodeGenState) -> CodeGenState:
     """
     project_dir = state.get("project_dir", "")
     user_request = state.get("user_request", "")
+
+    if project_dir:
+        from pathlib import Path
+        from workflow.artifacts import recover
+        recover(Path(project_dir).resolve())
 
     # 1. 状态信号：检查是否有历史产物
     has_existing_code = _has_files_in_dir(project_dir)
@@ -153,14 +163,11 @@ def mode_detector(state: CodeGenState) -> CodeGenState:
             os.path.join(project_dir, "architecture.json"))
         state["existing_code_files"] = _collect_code_files(project_dir)
 
-    # 5. rebuild 模式：可选择性清理旧产物（非关键，失败不阻塞）
-    if mode == "rebuild":
-        import shutil
-        try:
-            if os.path.isdir(project_dir):
-                shutil.rmtree(project_dir)
-        except Exception:
-            pass  # 清理失败不影响流程
+    # All writes (metadata, tools, builder) use an isolated candidate.
+    # Current output remains readable across generation failure and pause.
+    from workflow.artifacts import prepare
+    if project_dir:
+        state = prepare(state)
 
     state["phase"] = "mode_detected"
 

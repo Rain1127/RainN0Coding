@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '@/api/app'
 import PromptComposer from '@/components/generation/PromptComposer.vue'
 import { useAppsStore } from '@/stores/apps'
@@ -48,6 +48,38 @@ async function mountHome() {
 describe('ChatHome', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(() => healthResponse()))
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('checks Python on the webpage origin in production', async () => {
+    vi.stubEnv('DEV', false)
+    vi.stubEnv('VITE_PYTHON_API_BASE', undefined)
+    const { wrapper } = await mountHome()
+
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/health/python', expect.any(Object))
+    expect(wrapper.findAll('.service-status--online')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('keeps the local Python endpoint for development', async () => {
+    vi.stubEnv('DEV', true)
+    vi.stubEnv('VITE_PYTHON_API_BASE', undefined)
+    const { wrapper } = await mountHome()
+
+    expect(fetch).toHaveBeenNthCalledWith(2, 'http://localhost:8000/api/health', expect.any(Object))
+    wrapper.unmount()
+  })
+
+  it('honors an explicit Python endpoint override', async () => {
+    vi.stubEnv('DEV', false)
+    vi.stubEnv('VITE_PYTHON_API_BASE', 'https://python.example.test/')
+    const { wrapper } = await mountHome()
+
+    expect(fetch).toHaveBeenNthCalledWith(2, 'https://python.example.test/api/health', expect.any(Object))
+    wrapper.unmount()
   })
 
   it('creates once and carries only the initial prompt in navigation state', async () => {

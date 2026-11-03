@@ -84,7 +84,8 @@ def test_default_policy_gates_labeled_rag_recall_without_breaking_pr_replay() ->
 
     assert pr_report.metrics["recall_at_k"]["mean"] == 1.0
     assert empty_live_report.metrics["recall_at_k"]["mean"] == 0.5
-    assert evaluate_gate(pr_report, None, policy)["passed"] is True
+    assert evaluate_gate(pr_report, pr_report, policy)["passed"] is True
+    policy = {**policy, "require_baseline": False, "regression_thresholds": {}}
     result = evaluate_gate(empty_live_report, None, policy)
     assert result["passed"] is False
     assert result["failures"] == [{

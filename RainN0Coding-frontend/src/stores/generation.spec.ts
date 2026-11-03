@@ -270,7 +270,6 @@ describe('applyGenerationEvent', () => {
 
   it.each([
     'success',
-    'partial_success',
     'degraded_success',
     'duplicate_completed',
   ])('treats done status %s as successful', (status) => {
@@ -282,6 +281,14 @@ describe('applyGenerationEvent', () => {
     expect(success.status).toBe('success')
     expect(success.phase).toBe('done')
     expect(success.error).toBeNull()
+  })
+
+  it('keeps an unverified partial result out of successful completion', () => {
+    const result = applyGenerationEvent(generationState({ status: 'running' }), {
+      type: 'done', status: 'partial_success', message: '文件已保留，构建未验证',
+    })
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('构建未验证')
   })
 
   it('fails a done event with a real failure status', () => {

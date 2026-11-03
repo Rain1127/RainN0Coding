@@ -65,9 +65,11 @@ def test_pause_reopen_resume_preserves_completed_node(tmp_path):
         assert states[-1] == {"step": 2}
         assert calls == ["first", "second"]
         assert store.get("r1", "u", "a")["status"] == "completed"
-        with pytest.raises(RunControlError):
-            async with RunSession(store, "r1", "u", "a", resume=True):
-                pass
+        async with RunSession(store, "r1", "u", "a", resume=True) as replay:
+            replayed = [s async for s in replay.states(graph(replay, calls), None)]
+        assert replayed == [{"step": 2}]
+        assert calls == ["first", "second"]
+        assert store.get("r1", "u", "a")["status"] == "completed"
 
     asyncio.run(start())
     asyncio.run(resume())
@@ -87,6 +89,27 @@ def test_duplicate_execution_and_new_run_while_paused_rejected(tmp_path):
             _ = [s async for s in session.states(graph(session, []), {})]
         with pytest.raises(RunControlError):
             async with RunSession(store, "r2", "u", "a"):
+                pass
+
+    asyncio.run(run())
+
+
+def test_completed_without_checkpoint_cannot_restart_graph(tmp_path):
+    from workflow.run_control import RunStore, RunSession, RunControlError
+
+    async def run():
+        store = RunStore(tmp_path / "missing.db")
+        store.create("r1", "u", "a", {})
+        store.update_status("r1", "completed")
+        calls = []
+        with pytest.raises(RunControlError, match="terminal checkpoint"):
+            async with RunSession(store, "r1", "u", "a", resume=True) as session:
+                _ = [s async for s in session.states(graph(session, calls), {})]
+        assert calls == []
+        assert store.get("r1", "u", "a")["status"] == "completed"
+        store.update_status("r1", "failed")
+        with pytest.raises(RunControlError, match="already ended"):
+            async with RunSession(store, "r1", "u", "a", resume=True):
                 pass
 
     asyncio.run(run())

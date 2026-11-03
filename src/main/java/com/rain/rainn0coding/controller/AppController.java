@@ -652,7 +652,7 @@ public class AppController {
             return new SseFailure(errorCodeForStatus(status), semanticFailureMessage(payload, status));
         }
         if ("done".equals(type) && StrUtil.isNotBlank(status) && !"success".equals(status)) {
-            if ("partial_success".equals(status) || "degraded_success".equals(status) || "paused".equals(status)) {
+            if ("degraded_success".equals(status) || "paused".equals(status)) {
                 return null;
             }
             return new SseFailure(errorCodeForStatus(status), semanticFailureMessage(payload, status));
@@ -682,14 +682,14 @@ public class AppController {
         if ("overloaded".equals(status)) {
             return ErrorCode.AI_GENERATION_OVERLOADED.getCode();
         }
-        if ("partial_success".equals(status) || "degraded_success".equals(status)) {
+        if ("degraded_success".equals(status)) {
             return ErrorCode.SUCCESS.getCode();
         }
         return ErrorCode.SYSTEM_ERROR.getCode();
     }
 
     private String semanticFailureMessage(JSONObject payload, String status) {
-        if ("partial_success".equals(status) || "degraded_success".equals(status)) {
+        if ("degraded_success".equals(status)) {
             return null;
         }
         String message = payload.getStr("message");

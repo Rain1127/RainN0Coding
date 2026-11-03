@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from config import config
 from core.model_router import model_router
 from request_context import build_litellm_metadata, record_llm_response
+from prompt_builder import compose_messages, stable_system
 
 # 创建 LLM 实例
 def create_llm(temperature: float | None = None) -> ChatOpenAI:
@@ -37,22 +38,14 @@ def _call_with_parser(messages: list, output_schema: type[BaseModel],
     """
     if _client is not None:
         # === 路由器路径：用 LangChain ChatOpenAI client ===
-        msgs = list(messages)
-        last_msg = msgs[-1]
-        msgs[-1] = last_msg.__class__(
-            content=last_msg.content + "\n\n" + field_spec
-        )
+        msgs = _with_system_field_spec(messages, field_spec)
         response = _client.invoke(msgs, config=_config)
         record_llm_response(response, _model or "unknown")
         content = response.content or ""
     else:
         # === 旧兼容路径：LangChain ChatOpenAI ===
         llm = create_llm(temperature=config.LLM_TEMPERATURE_STRUCTURED)
-        msgs = list(messages)
-        last_msg = msgs[-1]
-        msgs[-1] = last_msg.__class__(
-            content=last_msg.content + "\n\n" + field_spec
-        )
+        msgs = _with_system_field_spec(messages, field_spec)
         response = llm.invoke(msgs)
         response_metadata = getattr(response, "response_metadata", {}) or {}
         response_model = response_metadata.get("model_name", "unknown") if isinstance(response_metadata, dict) else "unknown"
@@ -69,6 +62,18 @@ def _call_with_parser(messages: list, output_schema: type[BaseModel],
     return output_schema.model_validate(obj)
 
 
+def _with_system_field_spec(messages: list, field_spec: str) -> list:
+    """Preserve the dynamic tail while moving fixed schema rules to System."""
+    msgs = list(messages)
+    if not msgs:
+        raise ValueError("structured prompt requires messages")
+    if msgs[0].type == "system":
+        msgs[0] = stable_system(msgs[0].content, field_spec)
+    else:
+        msgs.insert(0, stable_system("", field_spec))
+    return msgs
+
+
 def create_json_parser(output_schema: type[BaseModel], field_spec: str,
                        group: str = "structured", agent_name: str = None):
     """
@@ -81,7 +86,7 @@ def create_json_parser(output_schema: type[BaseModel], field_spec: str,
 
     Args:
         output_schema: Pydantic 模型类
-        field_spec:    字段规格文本（追加到 prompt 末尾）
+        field_spec:    字段规格文本（加入固定 System 前缀）
         group:         模型组: "reasoning" | "structured" | "lightweight"
         agent_name:    Agent 名称，用于 LangSmith trace tag（如 "pm_agent"）
     """
@@ -104,6 +109,7 @@ def create_json_parser(output_schema: type[BaseModel], field_spec: str,
             ),
             allow_degraded=True,
             langsmith_extra=langsmith_extra,
+            budget_extra_input=field_spec,
         )
     return invoke
 
@@ -169,6 +175,9 @@ class _ToolEnabledRouter:
             parser=invoke_with_tools,
             allow_degraded=False,
             langsmith_extra=config,
+            budget_extra_input=json.dumps([tool if isinstance(tool, str) else {"name": tool.name, "description": tool.description,
+                "parameters": (tool.args_schema if isinstance(tool.args_schema, dict) else
+                               tool.args_schema.model_json_schema() if tool.args_schema else {})} for tool in self.tools], ensure_ascii=False),
         )
 
 

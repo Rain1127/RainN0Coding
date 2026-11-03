@@ -26,17 +26,30 @@ public class GenerationWork {
     public GenerationWork(AiCodeGeneratorFacade facade,PythonAiClient python,AppService apps,UserService users,ChatHistoryService history,GenerationTaskStore store) {
         this.facade=facade;this.python=python;this.apps=apps;this.users=users;this.history=history;this.store=store;
     }
-    public boolean busy(long appId) {return facade.isFinalizing(appId) || python.isExecutionBusy(appId);}
+    public boolean busy(long appId) {
+        try {return facade.isFinalizing(appId)||python.isExecutionBusy(appId);}
+        catch(RuntimeException unavailable) {throw new BusinessException(ErrorCode.PYTHON_SERVICE_UNAVAILABLE);}
+    }
     public Flux<String> stream(GenerationTaskStore.Task task) {
         var user=users.getById(task.userId());
         var app=apps.getById(task.appId());
         if(user==null||app==null||!Long.valueOf(task.userId()).equals(app.getUserId()))
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR,"应用或用户已失效");
+        if(store.finalized(task.taskId()))return Flux.just("{\"type\":\"done\",\"status\":\"success\"}");
         MonitorContextHolder.setContext(MonitorContext.builder().appId(String.valueOf(task.appId()))
                 .userId(String.valueOf(task.userId())).traceId(task.traceId()).build());
+        var succeeded=new java.util.concurrent.atomic.AtomicBoolean();
+        var failed=new java.util.concurrent.atomic.AtomicBoolean();
         try {
             return facade.generateAndSaveCodeStream(task.prompt(),CodeGenTypeEnum.getEnumByValue(task.codeGenType()),
-                    task.appId(),task.userId(),user.getUserRole(),task.taskId(),task.taskId(),store.shouldResume(task.taskId()),true);
+                    task.appId(),task.userId(),user.getUserRole(),task.taskId(),task.taskId(),store.shouldResume(task.taskId()),true,
+                    ()->store.owns(task.taskId(),task.ownerId()))
+                    .doOnNext(raw->{
+                        var json=cn.hutool.json.JSONUtil.parseObj(raw.startsWith("data:")?raw.substring(5).trim():raw);
+                        if("error".equals(json.getStr("type")))failed.set(true);
+                        if("done".equals(json.getStr("type")))succeeded.set(java.util.Set.of("success","degraded_success").contains(json.getStr("status","")));
+                    })
+                    .doOnComplete(()->{if(succeeded.get()&&!failed.get())store.markFinalized(task.taskId(),task.ownerId());});
         } finally {MonitorContextHolder.clearContext();}
     }
     public java.util.Map<String,Object> pause(GenerationTaskStore.Task task) {

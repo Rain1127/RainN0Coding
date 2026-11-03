@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from llm_factory import create_json_parser
+from prompt_builder import compose_messages
 from state.code_gen_state import CodeGenState
 from config import LANGUAGE_CONFIGS, get_lang_config
 
@@ -78,8 +79,24 @@ def _build_arch_prompt(code_gen_type: str | None) -> str:
     lc = get_lang_config(code_gen_type)
     is_frontend = lc.get("is_frontend", False)
 
+    if code_gen_type == "html":
+        return f"""你是一个资深{lc['arch_role']}。根据产品 PRD 设计{lc['label']}页面结构。
+
+## 技术栈（严格遵循）
+- 框架: {lc['framework']}
+- 语言: {lc['lang']}
+- 入口: 项目根目录 {lc['entry']}
+
+## 设计规则
+1. **file_list 必须包含根目录 index.html**：单个 HTML 文件，内联 <style> 和 <script>，路径写为 index.html
+2. **component_tree 描述页面的逻辑区域**：完整覆盖 PRD 功能，各区域在同一个 HTML 中实现
+3. **data_flow 描述页面交互的数据流**：使用原生 DOM 事件和 JavaScript
+4. **无需 npm 构建或框架脚手架**：保持原生静态页面结构
+5. **不要写代码实现**：只设计结构和接口
+"""
+
     if is_frontend:
-        return f"""你是一个资深{lc['arch_role']}。根据产品 PRD 设计{lc['label']}项目代码骨架。
+        return (f"""你是一个资深{lc['arch_role']}。根据产品 PRD 设计{lc['label']}项目代码骨架。
 
 ## 技术栈（严格遵循）
 - 框架: {lc['framework']}
@@ -96,9 +113,9 @@ def _build_arch_prompt(code_gen_type: str | None) -> str:
 3. **文件清单必须完整**：所有组件文件、路由配置、状态管理、类型定义、工具函数
 4. **数据流要具体**：写明数据来源/流向/传递机制（props / store / provide-inject / emit）
 5. **不要写代码实现**：只设计结构和接口
-"""
+""")
     else:
-        return f"""你是一个资深{lc['arch_role']}。根据需求设计{lc['label']}项目代码架构。
+        return (f"""你是一个资深{lc['arch_role']}。根据需求设计{lc['label']}项目代码架构。
 
 ## 技术栈（严格遵循）
 - 框架: {lc['framework']}
@@ -114,7 +131,7 @@ def _build_arch_prompt(code_gen_type: str | None) -> str:
 3. **file_list 必须完整**：所有源码文件、配置文件、依赖声明({lc.get('entry', 'main')})、测试文件
 4. **data_flow 要具体**：模块间的调用关系、接口定义、数据传递方式
 5. **不要写代码实现**：只设计结构和接口
-"""
+""")
 
 
 ARCH_FIELD_SPEC = """Output ONLY a valid JSON object with these EXACT field names:
@@ -171,12 +188,12 @@ def architect_agent(state: CodeGenState) -> CodeGenState:
 ## 数据依赖
 {_format_list(prd.get('data_dependencies', []))}
 
-请输出完整的架构方案（组件树 + 文件清单 + 数据流 + 技术栈）。"""
+"""
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_prompt),
-    ]
+    messages = compose_messages(
+        agent="architect_agent", system=system_prompt, context=user_prompt,
+        request="请输出完整的架构方案（组件树 + 文件清单 + 数据流 + 技术栈）。",
+    )
 
     try:
         arch: Architecture = parser(messages, user_id=state.get("user_id"))
@@ -191,6 +208,13 @@ def architect_agent(state: CodeGenState) -> CodeGenState:
         state["phase"] = "error"
         log_agent_fail("Architect Agent", "设计项目结构失败，可用模型候选为空")
         return state
+
+    if code_gen_type == "html" and state.get("mode", "new") != "modify":
+        if not any(item.path == "index.html" for item in arch.file_list):
+            state["error"] = "HTML 架构必须包含根目录 index.html"
+            state["phase"] = "error"
+            log_agent_fail("Architect Agent", state["error"])
+            return state
 
     # 写入 State
     state["architecture"] = arch.model_dump()

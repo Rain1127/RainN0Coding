@@ -20,7 +20,23 @@ import os
 import sqlite3
 import time
 import threading
+import hashlib
+import json
+from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
 from config import config
+
+_attribution = ContextVar("rag_attribution", default=("", ""))
+
+
+@contextmanager
+def attribution_scope(run_id, target_file):
+    token = _attribution.set((run_id, target_file))
+    try:
+        yield
+    finally:
+        _attribution.reset(token)
 
 
 class FeedbackTracker:
@@ -82,6 +98,18 @@ class FeedbackTracker:
                     ON rag_retrieval_log(rag_app_id, rag_file_path);
                 CREATE INDEX IF NOT EXISTS idx_quality_score
                     ON rag_quality(quality_score, updated_at);
+                CREATE TABLE IF NOT EXISTS rag_attribution (
+                    run_id TEXT NOT NULL, gen_app_id TEXT NOT NULL,
+                    rag_app_id TEXT NOT NULL, rag_file_path TEXT NOT NULL,
+                    target_file TEXT NOT NULL, source_hash TEXT,
+                    evidence TEXT, outcome TEXT NOT NULL DEFAULT 'pending',
+                    PRIMARY KEY(run_id, rag_app_id, rag_file_path, target_file)
+                );
+                CREATE TABLE IF NOT EXISTS verified_repairs (
+                    fingerprint TEXT PRIMARY KEY, run_id TEXT NOT NULL,
+                    environment TEXT NOT NULL, symptom TEXT NOT NULL,
+                    repair TEXT NOT NULL, validation TEXT NOT NULL
+                );
             """)
             self._conn.commit()
 
@@ -102,59 +130,91 @@ class FeedbackTracker:
         if gen_app_id not in self._pending_sessions:
             self._pending_sessions[gen_app_id] = set()
         self._pending_sessions[gen_app_id].add((rag_app_id, rag_file_path))
+        run_id, target_file = _attribution.get()
+        if run_id and target_file:
+            self.init_tables()
+            with self._lock:
+                self._conn.execute("INSERT OR IGNORE INTO rag_attribution (run_id,gen_app_id,rag_app_id,rag_file_path,target_file) VALUES (?,?,?,?,?)",
+                                   (run_id, gen_app_id, rag_app_id, rag_file_path, target_file))
+                self._conn.commit()
 
     # ========== 构建完成时：应用反馈 ==========
 
-    def apply_feedback(self, gen_app_id: str, build_success: bool):
-        """构建完成时调用：将本次会话的检索记录刷入 SQLite，更新质量分。
+    def apply_feedback(self, gen_app_id: str, build_success: bool | None, *, run_id: str = "",
+                       validation: dict | None = None, code_files: list | None = None,
+                       changed_files: set | None = None):
+        """Only an adopted snippet in a validated changed file earns quality feedback.
 
-        Args:
-            gen_app_id: 本次生成的 app_id
-            build_success: 构建是否成功
+        Legacy calls without run-scoped validation are neutral. Retrieval alone is
+        never evidence that a source caused a project-level failure.
         """
-        session = self._pending_sessions.pop(gen_app_id, set())
-        if not session:
+        self._pending_sessions.pop(gen_app_id, None)
+        if not run_id:
             return
-
-        self.connect()
+        self.init_tables()
+        files = {f["path"]: f.get("content", "") for f in code_files or []}
+        validation = validation or {}
+        verified = validation.get("status") == "succeeded" and build_success is True
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-        delta = config.QUALITY_BOOST_ON_SUCCESS if build_success else -config.QUALITY_PENALTY_ON_FAILURE
-
         with self._lock:
-            for rag_app_id, rag_file_path in session:
-                # 写入检索日志
-                self._conn.execute(
-                    """INSERT INTO rag_retrieval_log
-                       (gen_app_id, rag_app_id, rag_file_path, created_at, build_applied)
-                       VALUES (?, ?, ?, ?, 1)""",
-                    (gen_app_id, rag_app_id, rag_file_path, ts),
-                )
-                # 更新质量表：UPSERT
-                self._conn.execute(
-                    """INSERT INTO rag_quality
-                       (app_id, file_path, quality_score, success_count,
-                        failure_count, total_retrievals, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-                       ON CONFLICT(app_id, file_path) DO UPDATE SET
-                         quality_score = MAX(0.0, MIN(100.0,
-                           rag_quality.quality_score + ?)),
-                         success_count = rag_quality.success_count + ?,
-                         failure_count = rag_quality.failure_count + ?,
-                         total_retrievals = rag_quality.total_retrievals + 1,
-                         updated_at = ?""",
-                    (
-                        rag_app_id, rag_file_path,
-                        max(0.0, min(100.0, config.QUALITY_INITIAL_SCORE + delta)),
-                        1 if build_success else 0,
-                        0 if build_success else 1,
-                        ts, ts,
-                        delta,
-                        1 if build_success else 0,
-                        0 if build_success else 1,
-                        ts,
-                    ),
-                )
+            rows = self._conn.execute("SELECT rag_app_id,rag_file_path,target_file FROM rag_attribution WHERE run_id=? AND gen_app_id=? AND outcome='pending'", (run_id, gen_app_id)).fetchall()
+            credited = set()
+            for source_app, source_file, target in rows:
+                source_root = Path(config.CODE_STORE_DIR).resolve()
+                source = (source_root / source_app / source_file).resolve()
+                adopted = False
+                source_hash = None
+                if source.is_relative_to(source_root) and source.is_file() and target in (changed_files or set()):
+                    snippet = source.read_text(encoding="utf-8")
+                    source_hash = hashlib.sha256(snippet.encode()).hexdigest()
+                    adopted = len(snippet.strip()) >= 80 and snippet in files.get(target, "")
+                positive = verified and adopted
+                evidence = json.dumps({"adopted": adopted, "target_file": target,
+                    "validation_status": validation.get("status"), "reason": "verified_exact_reuse" if positive else "insufficient_causal_evidence"}, ensure_ascii=False)
+                self._conn.execute("UPDATE rag_attribution SET source_hash=?,evidence=?,outcome=? WHERE run_id=? AND rag_app_id=? AND rag_file_path=? AND target_file=? AND outcome='pending'",
+                    (source_hash, evidence, "positive" if positive else "neutral", run_id, source_app, source_file, target))
+                if positive and (source_app, source_file) not in credited:
+                    credited.add((source_app, source_file))
+                    delta = config.QUALITY_BOOST_ON_SUCCESS
+                    self._conn.execute("""INSERT INTO rag_quality(app_id,file_path,quality_score,success_count,failure_count,total_retrievals,created_at,updated_at)
+                        VALUES (?,?,?,1,0,1,?,?) ON CONFLICT(app_id,file_path) DO UPDATE SET
+                        quality_score=MIN(100,rag_quality.quality_score+?),success_count=rag_quality.success_count+1,
+                        total_retrievals=rag_quality.total_retrievals+1,updated_at=?""",
+                        (source_app, source_file, min(100, config.QUALITY_INITIAL_SCORE + delta), ts, ts, delta, ts))
             self._conn.commit()
+
+    def record_verified_repair(self, *, run_id, environment, symptom, repair, validation):
+        """Persist only validated, redacted repair experience; replay is idempotent."""
+        if validation.get("status") != "succeeded":
+            return False
+        from benchmark.redaction import redact
+        payload = redact({"environment": environment, "symptom": symptom, "repair": repair, "validation": validation})
+        import re
+        serialized = json.dumps(payload, ensure_ascii=False)
+        private_value = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|(?<!\d)1[3-9]\d{9}(?!\d)", serialized)
+        if not symptom or not repair or "REDACTED" in serialized or private_value:
+            return False
+        fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        self.init_tables()
+        with self._lock:
+            self._conn.execute("INSERT OR IGNORE INTO verified_repairs VALUES (?,?,?,?,?,?)",
+                (fingerprint, run_id, json.dumps(payload["environment"]), str(payload["symptom"]), str(payload["repair"]), json.dumps(payload["validation"])))
+            self._conn.commit()
+        return True
+
+    def find_verified_repairs(self, error_log: str, limit: int = 3, code_gen_type: str = "") -> list[dict]:
+        """Search only verified experience; use error terms rather than application identity."""
+        import re
+        terms = re.findall(r"[A-Za-z_][A-Za-z_]{3,}", error_log)
+        if not terms:
+            return []
+        self.init_tables()
+        with self._lock:
+            rows = self._conn.execute("SELECT environment,symptom,repair,validation FROM verified_repairs ORDER BY rowid DESC LIMIT 200").fetchall()
+        scored = sorted(((sum(term in row[1] for term in set(terms)), row) for row in rows
+                         if not code_gen_type or json.loads(row[0]).get("language") == code_gen_type), reverse=True)
+        return [{"environment": json.loads(row[0]), "symptom": row[1], "repair": row[2], "validation": json.loads(row[3])}
+                for score,row in scored[:min(limit, 3)] if score > 0]
 
     # ========== 入库时：记录初始质量 ==========
 

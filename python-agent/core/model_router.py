@@ -7,6 +7,7 @@ from core.model_registry import get_model_alias
 from monitoring import record_llm_call
 from request_context import build_litellm_metadata, record_llm_response
 from tracing import start_span
+from workflow.budget import active_budget, BudgetExceeded
 
 
 class ModelRouter:
@@ -19,8 +20,11 @@ class ModelRouter:
         parser=None,
         allow_degraded: bool = True,
         langsmith_extra: dict | None = None,
+        budget_extra_input: str = "",
     ):
         model_alias = get_model_alias(group_name)
+        budget = active_budget.get()
+        output_limit = budget.reserve(messages, budget_extra_input) if budget else None
         runnable_config = dict(langsmith_extra or {})
         litellm_metadata = build_litellm_metadata(
             runnable_config.get("metadata", {})
@@ -35,10 +39,11 @@ class ModelRouter:
                     model=model_alias,
                     api_key=config.LITELLM_API_KEY,
                     base_url=config.LITELLM_BASE_URL,
-                    timeout=config.LLM_TIMEOUT,
+                    timeout=min(config.LLM_TIMEOUT, budget.remaining_seconds()) if budget else config.LLM_TIMEOUT,
                     max_retries=0,
                     temperature=0.0,
                     extra_body={"metadata": litellm_metadata},
+                    **({"max_tokens": output_limit} if output_limit is not None else {}),
                 )
                 if parser:
                     result = parser(
@@ -55,9 +60,15 @@ class ModelRouter:
                     result = response.content or ""
                     if not result:
                         raise ValueError(f"{model_alias}: empty gateway response")
+                if budget and budget.pending:
+                    budget.observe(None)
                 record_llm_call(model_alias, status="success")
                 return result
             except Exception as exc:
+                if isinstance(exc, BudgetExceeded):
+                    raise
+                if budget and budget.pending:
+                    budget.observe(None)
                 record_llm_call(model_alias, status="error")
                 if allow_degraded:
                     return None

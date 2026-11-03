@@ -52,6 +52,11 @@ def test_production_stream_pause_resume_replays_files(monkeypatch, tmp_path, fak
         assert any(e["type"] == "code_file" and e["content"] == "hello" for e in second)
         assert calls == ["code", "review"]
         assert RunStore(config.config.CHECKPOINT_DB_PATH).get("api-run", "u", "a")["status"] == "completed"
+        replay = [json.loads(e) async for e in sse_stream.stream_persistent_workflow(
+            "", "u", "a", request_id="api-run", resume=True)]
+        assert replay[-1]["status"] == "success", replay
+        assert any(e["type"] == "code_file" and e["content"] == "hello" for e in replay)
+        assert calls == ["code", "review"]
 
     asyncio.run(run())
 

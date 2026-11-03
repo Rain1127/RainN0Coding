@@ -166,6 +166,11 @@ class RunMetadata(StrictModel):
     model_aliases: dict[str, str]
     offline: bool
     started_at: str
+    environment: dict[str, Any] = Field(default_factory=dict)
+    workspace_diff_sha256: str | None = None
+    execution_modes: list[str] = Field(default_factory=list)
+    repeats: dict[str, int] = Field(default_factory=dict)
+    source_manifest: dict[str, str] = Field(default_factory=dict)
 
 
 class BenchmarkReport(StrictModel):

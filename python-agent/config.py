@@ -69,6 +69,14 @@ class Config:
 
     # ===== 重试 =====
     MAX_RETRIES: int = 3
+    BUILD_MAX_REPAIRS: int = int(os.getenv("BUILD_MAX_REPAIRS", "2"))
+    BUILD_REPAIR_TIMEOUT_SECONDS: int = int(os.getenv("BUILD_REPAIR_TIMEOUT_SECONDS", "480"))
+    REVIEW_MAX_CALLS: int = int(os.getenv("REVIEW_MAX_CALLS", "24"))
+    TASK_MAX_LLM_CALLS: int = int(os.getenv("TASK_MAX_LLM_CALLS", "50"))
+    TASK_MAX_TOKENS: int = int(os.getenv("TASK_MAX_TOKENS", "250000"))
+    TASK_MAX_SECONDS: int = int(os.getenv("TASK_MAX_SECONDS", "1200"))
+    REPAIR_EXPERIENCE_ENABLED: bool = os.getenv("REPAIR_EXPERIENCE_ENABLED", "true").lower() == "true"
+    FEEDBACK_WRITES_ENABLED: bool = os.getenv("FEEDBACK_WRITES_ENABLED", "true").lower() == "true"
     AUTO_GEN_MAX_ROUNDS: int = 8
 
     # ===== 服务 =====
@@ -139,7 +147,7 @@ class Config:
     # ===== 项目目录 =====
     CODE_OUTPUT_DIR: str = os.getenv(
         "CODE_OUTPUT_DIR",
-        "/tmp/ai-code-project",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tmp", "code_output"),
     )
 
 
@@ -180,6 +188,7 @@ LANGUAGE_CONFIGS: dict[str, dict] = {
         "review_role": "前端代码审查专家",
         "framework": "原生 HTML5 + 内联 CSS + JavaScript",
         "lang": "JavaScript (ES6+)",
+        "entry": "index.html",
         "file_ext": ".html",
         "is_frontend": True,
         "needs_npm_build": False,
@@ -304,7 +313,7 @@ LANGUAGE_CONFIGS: dict[str, dict] = {
         "is_frontend": False,
         "needs_npm_build": False,
         "needs_syntax_check": True,
-        "syntax_check_cmd": 'cargo check 2>&1',
+        "syntax_check_cmd": 'cargo check',
         "syntax_check_file_glob": None,
         "syntax_check_per_file": False,
         "syntax_check_timeout": 120,

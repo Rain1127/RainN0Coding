@@ -6,6 +6,9 @@ import json
 import os
 import subprocess
 import tempfile
+import platform
+import sys
+import importlib.metadata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -85,6 +88,15 @@ def _load_cases(suite: SuiteConfig, suite_dir: Path) -> list[LoadedCase]:
 def _git_sha() -> str:
     repo_root = Path(__file__).resolve().parents[2]
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_root, encoding="utf-8").strip()
+
+
+def _source_manifest() -> dict[str, str]:
+    root = Path(__file__).resolve().parent.parent
+    files = []
+    for directory in ("agents", "workflow", "core", "rag", "state", "benchmark"):
+        files.extend((root / directory).rglob("*.py"))
+    files.extend(root.glob("*.py"))
+    return {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(set(files))}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -176,6 +188,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             model_aliases=dict(config.LLM_MODEL_ALIASES),
             offline=suite.offline,
             started_at=started_at,
+            environment={"python": sys.version, "platform": platform.platform(),
+                         "dependencies": {name: importlib.metadata.version(name) for name in
+                                          ("pydantic", "langgraph", "langchain-core", "pytest")}},
+            workspace_diff_sha256=hashlib.sha256(subprocess.check_output(
+                ["git", "diff", "HEAD", "--", "python-agent", "RainN0Coding-frontend", "src"],
+                cwd=Path(__file__).resolve().parents[2])).hexdigest(),
+            execution_modes=sorted({item.case.execution.mode for item in cases}),
+            repeats={item.case.id: item.case.execution.repeats for item in cases},
+            source_manifest=_source_manifest(),
         )
         results = run_cases(cases, RunContext(run_id=run_id, offline=suite.offline, record_dir=Path(args.record_dir)))
         report = build_report(metadata, results)

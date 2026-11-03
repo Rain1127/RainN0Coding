@@ -153,6 +153,7 @@ class RunSession:
         self.user_id, self.app_id = user_id, app_id
         self.resume, self.payload = resume, payload or {}
         self.finished = False
+        self.replay_completed = False
         self.workers = set()
         self.config = {"configurable": {"thread_id": json.dumps([user_id, app_id, run_id])},
                        "recursion_limit": 150}
@@ -163,8 +164,9 @@ class RunSession:
         try:
             if self.resume:
                 row = self.store.get(self.run_id, self.user_id, self.app_id)
-                if row["status"] in ("completed", "failed"):
+                if row["status"] == "failed":
                     raise RunControlError("Generation has already ended")
+                self.replay_completed = row["status"] == "completed"
                 self.payload = json.loads(row["payload"])
             else:
                 self.store.create(self.run_id, self.user_id, self.app_id, self.payload)
@@ -182,7 +184,7 @@ class RunSession:
     async def __aexit__(self, *exc):
         try:
             await self.wait_workers()
-            if not self.finished:
+            if not self.finished and not self.replay_completed:
                 self.store.update_status(self.run_id, "interrupted")
             await self.saver_context.__aexit__(*exc)
         finally:
@@ -210,6 +212,8 @@ class RunSession:
         graph_input = initial
         if self.resume:
             checkpoint = await graph.aget_state(self.config)
+            if self.replay_completed and (not checkpoint.values or checkpoint.next):
+                raise RunControlError("Completed generation has no terminal checkpoint to replay")
             if not checkpoint.values:
                 # The process may die after task creation but before graph input.
                 if initial is None:
@@ -234,7 +238,7 @@ class RunSession:
         if status == "completed":
             final_status = (snapshot.values.get("final_result") or {}).get("status")
             if snapshot.values.get("error") or snapshot.values.get("phase") == "clarify" or (
-                final_status and final_status not in ("success", "partial_success", "degraded_success")
+                final_status and final_status not in ("success", "degraded_success")
             ):
                 status = "failed"
         self.store.update_status(self.run_id, status)

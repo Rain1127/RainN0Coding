@@ -11,8 +11,14 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start
 from llm_factory import create_json_parser
+from prompt_builder import compose_messages
 from state.code_gen_state import CodeGenState
 from config import config, get_lang_config
+from agents.review_context import review_units, dependency_manifest, static_issues
+from request_context import capture_llm_usage
+import json
+import os
+import time
 
 
 # ============ Pydantic 输出模型 ============
@@ -23,6 +29,7 @@ class Issue(BaseModel):
     category: str = Field(description="问题分类: syntax / logic / security / style / performance / accessibility")
     description: str = Field(description="问题描述")
     suggestion: str = Field(description="修复建议")
+    line: int | None = Field(default=None, description="原文件行号")
 
 
 class ReviewResult(BaseModel):
@@ -109,41 +116,8 @@ Output ONLY the JSON, no markdown, no explanation."""
 # ============ 辅助函数 ============
 
 def _build_code_summary(code_files: list) -> str:
-    """构建代码摘要——不发完整代码以节省 Token"""
-    if not code_files:
-        return "(无代码文件)"
-
-    lines = []
-    for f in code_files:
-        path = f.get("path", "unknown")
-        content = f.get("content", "")
-        line_count = len(content.split("\n"))
-
-        # 提取关键结构信息
-        has_template = "<template>" in content
-        has_script = "<script" in content
-        has_style = "<style" in content
-        imports = [l.strip() for l in content.split("\n") if l.strip().startswith("import")]
-
-        block_info = []
-        if has_template: block_info.append("template")
-        if has_script: block_info.append("script")
-        if has_style: block_info.append("style")
-        blocks = "+".join(block_info) if block_info else "empty"
-
-        lines.append(f"### {path} ({line_count} 行, 含: {blocks})")
-        if imports:
-            lines.append("导入: " + " | ".join(imports[:5]))
-            if len(imports) > 5:
-                lines.append(f"  ... 共 {len(imports)} 个 import")
-
-        # 只传关键结构，不传完整代码
-        lines.append(content[:2500])
-        if len(content) > 2500:
-            lines.append(f"  ... (截断，共 {len(content)} 字符)")
-        lines.append("---")
-
-    return "\n".join(lines)
+    """Compatibility formatter: every review unit is retained, with original locations."""
+    return "\n".join(f"### {u['file']}:{u['start']}-{u['end']}\n{u['content']}" for u in review_units(code_files))
 
 
 def _format_prd_features(features: list) -> str:
@@ -180,7 +154,12 @@ def reviewer_agent(state: CodeGenState) -> CodeGenState:
     prd = state.get("prd") or {}
     architecture = state.get("architecture") or {}
 
-    code_summary = _build_code_summary(code_files)
+    units = review_units(code_files)
+    manifest = dependency_manifest(code_files)
+    static = static_issues(code_files)
+    coverage = {"reviewed": [], "uncovered": [], "calls": 0, "tokens": None,
+                "static_checks": ["python_ast", "local_import_paths"], "elapsed_ms": 0}
+    started = time.monotonic()
 
     user_prompt = f"""请审查以下代码，对照架构方案检查完整性和正确性：
 
@@ -191,33 +170,62 @@ def reviewer_agent(state: CodeGenState) -> CodeGenState:
 ## PRD 功能清单（对照检查）
 {_format_prd_features(prd.get('features', []))}
 
-## 代码文件
-{code_summary}
+## 全项目文件与导入依赖
+{manifest}
 
-请逐一审查每个文件，输出 ReviewResult。"""
+"""
 
     code_gen_type = state.get("code_gen_type", "vue_project")
 
-    messages = [
-        SystemMessage(content=_build_review_prompt(code_gen_type)),
-        HumanMessage(content=user_prompt),
-    ]
-
+    results = []
     try:
-        result: ReviewResult = parser(messages, user_id=state.get("user_id"))
+        with capture_llm_usage() as usage:
+            for unit in units:
+                location = {k: unit[k] for k in ("file", "start", "end")}
+                if coverage["calls"] >= getattr(config, "REVIEW_MAX_CALLS", 24) or len(manifest) > 16000:
+                    coverage["uncovered"].append(location)
+                    continue
+                messages = compose_messages(
+                    agent="reviewer_agent", system=_build_review_prompt(code_gen_type),
+                    context=user_prompt + f"\n## 本次审查 {unit['file']} 行 {unit['start']}–{unit['end']}\n{unit['content']}",
+                    request="审查本片段并结合依赖表检查跨文件问题。行号使用原文件行号，禁止把未见的片段视为已审查。",
+                )
+                coverage["calls"] += 1
+                result = parser(messages, user_id=state.get("user_id"))
+                if result is None:
+                    coverage["uncovered"].append(location)
+                else:
+                    results.append(result)
+                    coverage["reviewed"].append(location)
+            total = [entry.get("total_tokens") for entry in usage]
+            if total and all(isinstance(n, (int, float)) for n in total):
+                coverage["tokens"] = sum(total)
     except Exception as e:
+        covered = len(coverage["reviewed"]) + len(coverage["uncovered"])
+        coverage["uncovered"].extend({k: u[k] for k in ("file", "start", "end")} for u in units[covered:])
+        state["review_coverage"] = coverage
         state["error"] = f"Reviewer Agent LLM 调用失败: {e}"
         state["phase"] = "error"
         log_agent_fail("Reviewer Agent", f"审查代码失败，原因={e}")
         return state
 
-    if result is None:
+    coverage["elapsed_ms"] = round((time.monotonic() - started) * 1000, 2)
+    state["review_coverage"] = coverage
+    if state.get("project_dir"):
+        with open(os.path.join(state["project_dir"], "review-coverage.json"), "w", encoding="utf-8") as fh:
+            json.dump(coverage, fh, ensure_ascii=False, indent=2)
+    if not results:
         state["error"] = "Reviewer Agent 失败：所有模型候选不可用（全部已熔断或调用失败）"
         state["phase"] = "error"
         log_agent_fail("Reviewer Agent", "审查代码失败，可用模型候选为空")
         return state
 
     # 写入 State
+    issues = [issue.model_dump() for item in results for issue in item.issues] + static
+    passed = all(item.passed for item in results) and not coverage["uncovered"] and not any(i["severity"] == "critical" for i in issues)
+    result = ReviewResult(passed=passed, score=min(item.score for item in results),
+                          issues=[Issue(**issue) for issue in issues],
+                          summary=f"reviewed={len(coverage['reviewed'])}, uncovered={len(coverage['uncovered'])}")
     state["review"] = result.model_dump()
 
     # === 关键：递增 retry_count（修复 §7.6 和 §8.6 记录的无限循环 bug）===

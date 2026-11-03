@@ -196,14 +196,14 @@ def test_builder_agent_logs_clear_success_summary(monkeypatch, tmp_path):
     )
 
     assert result["phase"] == "build_done"
-    assert result["build_result"]["success"] is True
+    assert result["build_result"]["status"] == "not_required"
+    assert result["build_result"]["success"] is None
     assert result["quality_gate_result"]["passed"] is True
     assert logs == [
         "[Builder Agent] START 正在构建项目，code_gen_type=python file_count=1 project_dir=" + str(tmp_path),
-        "[Builder Agent] OK 构建阶段完成，build_success=yes log_mode=no_npm_build",
+        "[Builder Agent] OK 构建阶段完成，status=not_required log_mode=no_npm_build",
         "[Builder Agent] OK 质量门禁通过，review_score=92 syntax_passed=yes reason=ok",
-        "[Builder Agent] OK 跳过索引，reason=app_id missing",
-        "[Builder Agent] OK 构建结束，build_success=yes quality_gate=passed files=1 project_dir=" + str(tmp_path),
+        "[Builder Agent] OK 构建结束，build_success=no quality_gate=passed files=1 project_dir=" + str(tmp_path),
     ]
 
 

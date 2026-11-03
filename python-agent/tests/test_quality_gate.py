@@ -140,7 +140,7 @@ class TestRunSyntaxCheck:
         """未配置命令时跳过"""
         lang_config = {"needs_syntax_check": True, "syntax_check_cmd": ""}
         result = _run_syntax_check("/tmp/test", [], lang_config)
-        assert result["passed"] is True
+        assert result["passed"] is False
 
     def test_per_file_syntax_pass(self):
         """逐文件模式 — Python 语法通过"""
@@ -192,7 +192,7 @@ class TestRunSyntaxCheck:
             with open(dummy_py, "w") as f:
                 f.write("# dummy\n")
             result = _run_syntax_check(tmpdir, [], lang_config)
-            assert result["passed"] is True
+            assert result["passed"] is False
             assert result["tool_available"] is False
             assert "not installed" in result["log"]
 
@@ -207,7 +207,7 @@ class TestRunSyntaxCheck:
                 "syntax_check_timeout": 10,
             }
             result = _run_syntax_check(tmpdir, [], lang_config)
-            assert result["passed"] is True
+            assert result["passed"] is False
             assert "no matching files" in result["log"]
 
     def test_project_level_go_vet(self):

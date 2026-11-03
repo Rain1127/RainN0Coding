@@ -17,7 +17,7 @@ class GenerationTaskStoreTest {
     GenerationQueueProperties properties;
     @BeforeEach void setup() {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
-        new ResourceDatabasePopulator(new ClassPathResource("sql/generation-queue.sql")).execute(ds);
+        new ResourceDatabasePopulator(new ClassPathResource("sql/generation-queue.sql"),new ClassPathResource("sql/generation-queue-reliability.sql")).execute(ds);
         properties = new GenerationQueueProperties();
         store = new GenerationTaskStore(new JdbcTemplate(ds), new DataSourceTransactionManager(ds), properties);
     }

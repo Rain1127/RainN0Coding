@@ -47,6 +47,7 @@ class CodeGenState(TypedDict, total=False):
 
     # ========== Reviewer Agent 产出 ==========
     review: dict | None        # {passed, score, issues}
+    review_coverage: dict
     retry_count: int           # 当前重试次数
     max_retries: int           # 最大重试次数，默认 3
 
@@ -64,6 +65,27 @@ class CodeGenState(TypedDict, total=False):
 
     # ========== 工具与构建字段 ==========
     project_dir: str           # 工具操作的工作目录，由 workflow 在 architect 之后设置
+    current_project_dir: str
+    previous_project_dir: str
+    artifact_run_id: str
+    artifact_base: dict
+    artifact_status: str
+    artifact_publish_owner: str
+    build_repair_count: int
+    repair_started_at: float
+    repair_history: list[dict]
+    repair_stop_reason: str
+    build_repair_context: dict
+    validation_route: str
+    runtime_result: dict | None
+    change_plan: dict
+    change_result: dict
+    task_complexity: str
+    budget_report: dict
+    budget_stop_reason: str
+    repair_experiences: list[dict]
+    repair_before_files: list[dict]
+    repair_diffs: list[dict]
 
     # ========== 控制字段 ==========
     phase: str                 # 当前阶段：init / prd_done / arch_done / code_done / review_done / build_done / completed / error

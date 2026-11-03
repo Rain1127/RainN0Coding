@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from agents.agent_logging import log_agent_fail, log_agent_ok, log_agent_start, summarize_request
 from llm_factory import create_json_parser
+from prompt_builder import compose_messages
 from state.code_gen_state import CodeGenState
 from config import get_lang_config
 
@@ -112,10 +113,8 @@ def pm_agent(state: CodeGenState) -> CodeGenState:
 
     code_gen_type = state.get("code_gen_type", "vue_project")
 
-    messages = [
-        SystemMessage(content=_build_pm_prompt(code_gen_type)),
-        HumanMessage(content=f"用户需求：{user_request}"),
-    ]
+    messages = compose_messages(agent="pm_agent", system=_build_pm_prompt(code_gen_type),
+                                request=f"用户需求：{user_request}")
 
     try:
         prd: PRD = parser(messages, user_id=state.get("user_id"))

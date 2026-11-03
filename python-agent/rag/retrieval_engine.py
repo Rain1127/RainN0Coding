@@ -18,7 +18,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rag.embedding_service import embedding_service
-from rag.rag_cache import rag_cache
+from rag.rag_cache import rag_cache, retrieval_input
 from rag.retrieval_common import PostProcessor, RetrievalContext, RetrievalResult
 from rag.vector_store import vector_store
 from config import config, get_lang_config
@@ -94,7 +94,7 @@ class IntentDirectedRetriever:
             try:
                 query_vector = embedding_service.embed(query_text)
             except Exception:
-                continue
+                raise
             queries.append((col, query_vector, top_k))
 
         if not queries:
@@ -170,7 +170,7 @@ class GlobalVectorRetriever:
         try:
             query_vector = embedding_service.embed(query_text)
         except Exception:
-            return []
+            raise
 
         # 构造并行查询
         queries = [(col, query_vector, 5) for col in self.ALL_COLLECTIONS]
@@ -247,7 +247,7 @@ class RetrievalEngine:
     def retrieve_results(self, ctx: RetrievalContext) -> list[RetrievalResult]:
         """Execute the dual-channel pipeline and expose its ranked results.
 
-        每个通道独立缓存：rag_cache:{version}:{phase}:{channel}:{query_md5}
+        每个通道独立缓存：rag:v2:{data_version}:{channel_version}:{phase}:{channel}:{query_sha256}
         """
         channels = self.select_channels(ctx.phase, ctx.retry_count)
         all_results: list[RetrievalResult] = []
@@ -257,13 +257,11 @@ class RetrievalEngine:
         _cache_meta: dict = {}  # future → (channel_name, query_text)
         phase = ctx.phase
 
-        lang_cfg = get_lang_config(ctx.code_gen_type)
-        framework = lang_cfg.get("framework", "")
+        cache_query = retrieval_input(ctx)
 
         with ThreadPoolExecutor(max_workers=2) as ex:
             if channels["intent_directed"]:
-                ia_query = ctx.user_request + str(ctx.file_info or "") + framework
-                ia_cached = rag_cache.get(phase, "intent_directed", ia_query)
+                ia_cached = rag_cache.get(phase, "intent_directed", cache_query)
                 if ia_cached is not None:
                     ia_results = self._deserialize_results(ia_cached)
                     if ia_results:
@@ -272,11 +270,10 @@ class RetrievalEngine:
                 else:
                     f = ex.submit(self.channel_a.retrieve, ctx)
                     futures[f] = "A"
-                    _cache_meta[f] = ("intent_directed", ia_query)
+                    _cache_meta[f] = ("intent_directed", cache_query)
 
             if channels["global_vector"]:
-                gv_query = ctx.user_request + str(ctx.file_info or "") + phase
-                gv_cached = rag_cache.get(phase, "global_vector", gv_query)
+                gv_cached = rag_cache.get(phase, "global_vector", cache_query)
                 if gv_cached is not None:
                     gv_results = self._deserialize_results(gv_cached)
                     if gv_results:
@@ -285,7 +282,7 @@ class RetrievalEngine:
                 else:
                     f = ex.submit(self.channel_b.retrieve, ctx)
                     futures[f] = "B"
-                    _cache_meta[f] = ("global_vector", gv_query)
+                    _cache_meta[f] = ("global_vector", cache_query)
 
             for f in as_completed(futures):
                 channel_name = futures[f]
@@ -295,10 +292,11 @@ class RetrievalEngine:
                     all_results.extend(channel_results)
                     # 回写缓存
                     meta = _cache_meta.get(f)
-                    if meta and channel_results:
+                    if meta:
                         ch, query_text = meta
                         serialized = self._serialize_results(channel_results)
-                        rag_cache.set(phase, ch, query_text, serialized)
+                        rag_cache.set(phase, ch, query_text, serialized,
+                                      negative=not channel_results)
                 except Exception as e:
                     print(f"[RetrievalEngine] 通道 {channel_name} 失败: {e}")
 

@@ -18,6 +18,7 @@ from config import config, get_lang_config
 from state.code_gen_state import CodeGenState
 from rag.rag_builder import build_rag_context
 from llm_factory import create_tool_enabled_llm
+from prompt_builder import compose_messages
 from tools import (
     get_all_tools, set_tool_context, get_user_role,
     create_file, read_file, modify_file, delete_file, list_files, exit_tool,
@@ -74,6 +75,8 @@ def _build_coder_prompt(code_gen_type: str | None) -> str:
     rules_text = "\n".join(f"{i+1}. {r}" for i, r in enumerate(rules)) if rules else "遵循该语言的标准编码规范"
 
     extras = []
+    if code_gen_type == "html":
+        extras.append("- 新建/重建入口: 项目根目录 index.html；修改模式保留已有入口路径")
     if lc.get("css"):
         extras.append(f"- CSS: {lc['css']}")
     if lc.get("state"):
@@ -90,9 +93,7 @@ def _build_coder_prompt(code_gen_type: str | None) -> str:
 
     tools_section = """## 可用工具
 
-你可以使用以下工具完成任务。请用 create_file 逐个创建文件，每创建完一个文件可
-用 read_file 检查内容是否正确，用 list_files 查看当前项目结构。全部文件创建完成后，
-调用 exit_tool 退出。
+你可以使用以下固定工具集合完成新建或修改任务。工作模式由本轮请求指定。
 
 - create_file(path, content): 创建文件
 - read_file(path): 读取已有文件内容
@@ -103,9 +104,8 @@ def _build_coder_prompt(code_gen_type: str | None) -> str:
 
 ## 工作流程
 1. 先调用 list_files 查看当前项目已有文件
-2. 逐个使用 create_file 创建架构方案 file_list 中的所有文件
-3. 如果某个文件创建后发现需要调整，用 modify_file 修改
-4. 全部文件创建完成后，调用 exit_tool 退出"""
+2. 根据本轮工作模式创建或定点修改所需文件，避免改动无关文件
+3. 完成后调用 exit_tool 退出"""
 
     return f"""你是资深{lc['role']}。根据架构方案生成所有代码文件。
 
@@ -256,7 +256,7 @@ def _collect_code_files(project_dir: str) -> list[dict]:
         dirs[:] = [d for d in dirs if d not in
                    {"node_modules", ".git", "__pycache__", ".venv", "dist", "build"}]
         for name in files:
-            if name.endswith((".pyc", ".log", ".lock", ".tmp")):
+            if name.endswith((".pyc", ".log", ".lock", ".tmp")) or name in {"prd.json", "architecture.json", "images.json", "review-coverage.json", ".generation-run-id"}:
                 continue
             full = os.path.join(root, name)
             rel = os.path.relpath(full, project_dir).replace("\\", "/")
@@ -322,11 +322,8 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
         f"正在生成代码，mode={mode} retry_count={retry_count} target_files={target_files}",
     )
 
-    # 根据模式选择 System Prompt
-    if mode == "modify":
-        system_prompt = _build_coder_modify_prompt(code_gen_type)
-    else:
-        system_prompt = _build_coder_prompt(code_gen_type)
+    # 同一技术栈的 System 不随本轮新建/修改模式变化。
+    system_prompt = _build_coder_prompt(code_gen_type)
 
     # architecture 校验：modify 模式用 existing_architecture 兜底
     if not architecture:
@@ -341,6 +338,13 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
         state["phase"] = "error"
         log_agent_fail("Coder Agent", "architecture.file_list 为空，没有可生成的目标文件")
         return state
+
+    if code_gen_type == "html" and mode != "modify":
+        if not any(item.get("path") == "index.html" for item in file_list):
+            state["error"] = "HTML 架构必须包含根目录 index.html"
+            state["phase"] = "error"
+            log_agent_fail("Coder Agent", state["error"])
+            return state
 
     # === 设置工具工作目录 ===
     project_dir = state.get("project_dir", "")
@@ -360,9 +364,23 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
     # === 重试上下文（含 AutoGen 讨论结论） ===
     review = state.get("review")
     retry_context = ""
+    if state.get("change_plan"):
+        retry_context += "\n## 允许修改的计划（不得改动其他源文件）\n" + json.dumps(state["change_plan"], ensure_ascii=False)
+    if state.get("build_repair_context"):
+        retry_context += "\n## 验证失败定点修复\n" + json.dumps(state["build_repair_context"], ensure_ascii=False)
+        experiences = []
+        if config.REPAIR_EXPERIENCE_ENABLED:
+            try:
+                from rag.feedback_tracker import feedback_tracker
+                experiences = feedback_tracker.find_verified_repairs(state["build_repair_context"].get("log", ""), code_gen_type=code_gen_type)
+            except Exception:
+                pass
+        state["repair_experiences"] = experiences
+        if experiences:
+            retry_context += "\n## 已验证修复经验（核对环境后使用）\n" + json.dumps(experiences, ensure_ascii=False)
     if review and not review.get("passed"):
         issues = review.get("issues", [])
-        retry_context = _format_issues(issues)
+        retry_context += _format_issues(issues)
         # 如果有 AutoGen 三方讨论结论，附加上
         autogen_ctx = review.get("autogen_context", "")
         if autogen_ctx:
@@ -371,14 +389,16 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
     # === RAG 检索 ===
     rag_contexts: dict[str, str] = {}
     for f in file_list:
-        ctx = build_rag_context(
-            f, architecture,
-            phase=state.get("phase", "code"),
-            retry_count=state.get("retry_count", 0),
-            user_request=state.get("user_request", ""),
-            code_gen_type=code_gen_type,
-            app_id=app_id,
-        )
+        from rag.feedback_tracker import attribution_scope
+        with attribution_scope(state.get("artifact_run_id", ""), f.get("path", "")):
+            ctx = build_rag_context(
+                f, architecture,
+                phase=state.get("phase", "code"),
+                retry_count=state.get("retry_count", 0),
+                user_request=state.get("user_request", ""),
+                code_gen_type=code_gen_type,
+                app_id=app_id,
+            )
         if ctx:
             rag_contexts[f.get("path", "")] = ctx
     rag_section = ""
@@ -394,9 +414,6 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
             "请根据以下用户需求，在现有代码基础上进行增量修改。",
             "先调用 list_files 查看项目当前结构，用 read_file 查看需要修改的文件，",
             "然后用 modify_file 做定点修改。只修改受影响的文件，不要重新生成无关文件。",
-            "",
-            "## 用户修改需求",
-            state.get("user_request", ""),
             "",
             _format_existing_code_context(
                 state.get("existing_code_files", []),
@@ -429,12 +446,12 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
             str(architecture.get("tech_stack", {})),
         ]
 
-    if rag_section:
-        user_prompt_parts.append(rag_section)
-    if retry_context:
-        user_prompt_parts.extend(["", retry_context])
-
-    user_message = "\n".join(user_prompt_parts)
+    mode_instruction = (
+        "修改模式：先读后改，只修改受影响文件；必要时新增文件。"
+        if mode == "modify" else
+        "新建模式：按架构文件清单逐个创建文件。"
+    )
+    current_request = f"{mode_instruction}\n\n{state.get('user_request', '')}"
 
     tools = get_all_tools()
     llm = create_tool_enabled_llm(tools, group="reasoning")
@@ -449,10 +466,11 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
         },
     }
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_message),
-    ]
+    messages = compose_messages(
+        agent="coder_agent", system=system_prompt,
+        context="\n".join(user_prompt_parts), rag=rag_section,
+        retry=retry_context, request=current_request,
+    )
 
     # === ReAct 循环 ===
     code_files: list[dict] = []
@@ -555,12 +573,19 @@ def coder_agent(state: CodeGenState) -> CodeGenState:
         code_files = _collect_code_files(project_dir)
 
     if not code_files:
-        state["error"] = "Coder Agent 未能生成任何代码文件"
+        missing = _missing_required_files(project_dir, file_list)
+        state["error"] = "Coder Agent 未能生成任何代码文件" + ("，缺少: " + ", ".join(missing) if missing else "")
         state["phase"] = "error"
         log_agent_fail("Coder Agent", "未生成任何代码文件")
         return state
 
     state["code_files"] = code_files
+    if code_gen_type == "html" and mode != "modify":
+        if not any(f.get("path") == "index.html" and f.get("content", "").strip() for f in code_files):
+            state["error"] = "HTML 生成结果缺少非空的根目录 index.html"
+            state["phase"] = "error"
+            log_agent_fail("Coder Agent", state["error"])
+            return state
     state["phase"] = "code_done"
 
     total_lines = sum(len(f["content"].split("\n")) for f in code_files)

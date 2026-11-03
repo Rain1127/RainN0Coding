@@ -29,7 +29,7 @@ def _create_model_client() -> OpenAIChatCompletionClient:
 
     AutoGen 0.7 需要显式 model_info 来声明网关模型能力。
     """
-    return OpenAIChatCompletionClient(
+    client = OpenAIChatCompletionClient(
         model=config.LLM_REASONING_MODEL,
         api_key=config.LITELLM_API_KEY,
         base_url=config.LITELLM_BASE_URL,
@@ -44,6 +44,25 @@ def _create_model_client() -> OpenAIChatCompletionClient:
             "structured_output": False,
         },
     )
+    from workflow.budget import active_budget
+    budget = active_budget.get()
+    if budget:
+        original_create = client.create
+        async def budgeted_create(messages, *args, **kwargs):
+            limit = budget.reserve(messages)
+            extra = dict(kwargs.pop("extra_create_args", {}) or {})
+            extra["max_tokens"] = limit
+            try:
+                result = await original_create(messages, *args, extra_create_args=extra, **kwargs)
+                usage = result.usage
+                budget.observe({"total_tokens": usage.prompt_tokens + usage.completion_tokens, "cost_usd": None})
+                return result
+            except BaseException:
+                if budget.pending:
+                    budget.observe(None)
+                raise
+        client.create = budgeted_create
+    return client
 
 
 def create_review_team():

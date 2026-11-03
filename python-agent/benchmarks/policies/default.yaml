@@ -1,4 +1,5 @@
 schema_version: 1
+require_baseline: true
 hard_fail_metrics:
   - route_accuracy
   - retry_route_accuracy
@@ -10,4 +11,12 @@ hard_fail_metrics:
 absolute_thresholds:
   recall_at_k.mean:
     minimum: 0.75
-regression_thresholds: {}
+# The pinned offline PR baseline has 1.0 for all three rates. No drop allowed.
+# Latency/token thresholds wait for a repeated live baseline; missing usage is not zero.
+regression_thresholds:
+  case_pass_rate:
+    max_drop: 0.0
+  observation_pass_rate:
+    max_drop: 0.0
+  assertion_pass_rate:
+    max_drop: 0.0

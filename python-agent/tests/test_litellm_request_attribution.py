@@ -3,28 +3,24 @@ import json
 import openai
 
 from memory.conversation_memory import ConversationMemory
+import core.model_router as model_router_module
 from rag import ragas_evaluator
 from request_context import bind_request_context
 from workflow import autogen_discussion
 
 
 def test_conversation_summary_sends_nested_spend_metadata(monkeypatch):
-    captured = {}
+    captured = {"messages": []}
 
-    class FakeCompletions:
-        def create(self, **kwargs):
-            captured.update(kwargs)
-            message = type("Message", (), {"content": "summary"})()
-            choice = type("Choice", (), {"message": message})()
-            return type("Response", (), {"choices": [choice]})()
-
-    class FakeOpenAI:
+    class FakeClient:
         def __init__(self, **kwargs):
-            self.chat = type(
-                "Chat", (), {"completions": FakeCompletions()}
-            )()
+            captured["client"] = kwargs
 
-    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+        def invoke(self, messages, config=None):
+            captured["messages"].append(messages)
+            return type("Response", (), {"content": "summary"})()
+
+    monkeypatch.setattr(model_router_module, "ChatOpenAI", FakeClient)
 
     with bind_request_context(
         request_id="req-memory",
@@ -33,9 +29,10 @@ def test_conversation_summary_sends_nested_spend_metadata(monkeypatch):
         app_id="app-memory",
     ):
         result = ConversationMemory()._call_llm("summarize")
+        ConversationMemory()._call_llm("summarize another batch")
 
     assert result == "summary"
-    assert captured["extra_body"]["metadata"] == {
+    assert captured["client"]["extra_body"]["metadata"] == {
         "user_id": "user-memory",
         "spend_logs_metadata": {
             "request_id": "req-memory",
@@ -44,6 +41,9 @@ def test_conversation_summary_sends_nested_spend_metadata(monkeypatch):
             "app_id": "app-memory",
         },
     }
+    assert captured["messages"][0][0] == captured["messages"][1][0]
+    assert '"type": "object"' in captured["messages"][0][0].content
+    assert captured["messages"][0][-1].content == "summarize"
 
 
 def test_autogen_client_sends_spend_metadata_header(monkeypatch):

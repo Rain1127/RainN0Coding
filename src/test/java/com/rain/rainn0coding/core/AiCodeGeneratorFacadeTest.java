@@ -25,6 +25,41 @@ import static org.mockito.Mockito.when;
 
 class AiCodeGeneratorFacadeTest {
     @Test
+    void sharedValidatedCandidateIsPublishedWithoutRebuildingOrLosingMetadata() throws Exception {
+        var facade=new AiCodeGeneratorFacade();var python=mock(PythonAiClient.class);var builder=mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(facade,"pythonAiClient",python);ReflectionTestUtils.setField(facade,"vueProjectBuilder",builder);
+        long appId=Math.abs(java.util.UUID.randomUUID().getMostSignificantBits());
+        String runId=java.util.UUID.randomUUID().toString().replace("-","");
+        Path current=Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR,"html_"+appId).toAbsolutePath();
+        Path store=current.resolveSibling("."+current.getFileName()+".versions");
+        Path candidate=store.resolve(runId+".candidate");Files.createDirectories(candidate);
+        Files.writeString(candidate.resolve("index.html"),"accepted");Files.writeString(candidate.resolve("architecture.json"),"{}");
+        Files.writeString(candidate.resolve(".generation-run-id"),runId);
+        String done=cn.hutool.json.JSONUtil.toJsonStr(java.util.Map.of("type","done","status","success","result",java.util.Map.of(
+            "artifact_status","validated_candidate","artifact_run_id",runId,"project_dir",candidate.toString())));
+        when(python.streamCodeGen("2",Long.toString(appId),"p","html","user",null,null,null)).thenReturn(Flux.just(done));
+        try {
+            facade.generateAndSaveCodeStream("p",CodeGenTypeEnum.HTML,appId,2L,"user").blockLast();
+            facade.generateAndSaveCodeStream("p",CodeGenTypeEnum.HTML,appId,2L,"user").blockLast();
+            assertThat(Files.readString(current.resolve("index.html"))).isEqualTo("accepted");
+            assertThat(Files.exists(current.resolve("architecture.json"))).isTrue();
+            verifyNoInteractions(builder);
+        }finally{deleteDirectory(current);deleteDirectory(store);}
+    }
+    @Test
+    void lostExecutionOwnershipPreventsFileWritesAndBuild() {
+        var facade=new AiCodeGeneratorFacade();var python=mock(PythonAiClient.class);var builder=mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(facade,"pythonAiClient",python);
+        ReflectionTestUtils.setField(facade,"vueProjectBuilder",builder);
+        when(python.streamCodeGen("2","900","prompt","vue_project","user",null,"task","task"))
+                .thenReturn(Flux.just("{\"type\":\"done\",\"status\":\"success\"}"));
+        var owns=new java.util.concurrent.atomic.AtomicInteger();
+        assertThrows(com.rain.rainn0coding.exception.GenerationLeaseLostException.class,
+                ()->facade.generateAndSaveCodeStream("prompt",CodeGenTypeEnum.VUE_PROJECT,900L,2L,"user","task","task",false,true,
+                        ()->owns.incrementAndGet()==1).blockLast());
+        verifyNoInteractions(builder);
+    }
+    @Test
     void queuedGenerationRequiresExplicitSuccessBeforeSavingOrBuilding() {
         var facade = new AiCodeGeneratorFacade();
         var python = mock(PythonAiClient.class);
@@ -49,12 +84,12 @@ class AiCodeGeneratorFacadeTest {
         String event = "{\"type\":\"code_file\",\"path\":\"index.html\",\"content\":\"resumed\"}";
         when(python.streamCodeGen("1", Long.toString(appId), "", "vue_project", "user", null, "run", null, true))
                 .thenReturn(Flux.just(event, "{\"type\":\"done\",\"status\":\"success\"}"));
-        when(builder.buildProject(AppConstant.CODE_OUTPUT_ROOT_DIR + "/vue_project_" + appId)).thenReturn(true);
+        when(builder.buildProject(org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
         try {
             facade.generateAndSaveCodeStream("", CodeGenTypeEnum.VUE_PROJECT, appId, 1L, "user", "run", null, true)
                     .collectList().block();
             assertThat(Files.readString(outputDir.resolve("index.html"))).isEqualTo("resumed");
-            verify(builder).buildProject(AppConstant.CODE_OUTPUT_ROOT_DIR + "/vue_project_" + appId);
+            verify(builder).buildProject(org.mockito.ArgumentMatchers.contains("candidate-"));
         } finally {
             deleteDirectory(outputDir);
         }

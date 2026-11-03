@@ -59,8 +59,8 @@ public class GenerationQueueService {
         var task=ownedTask(id,user);
         if(task.settled())return snapshot(task);
         if(store.pauseQueued(id))return snapshot(store.get(id));
-        work.pause(task);
         store.markPausing(id);
+        work.pause(task);
         return snapshot(store.get(id));
     }
     public Snapshot resume(String id,User user) {

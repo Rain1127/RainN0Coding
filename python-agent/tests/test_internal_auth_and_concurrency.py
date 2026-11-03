@@ -618,5 +618,5 @@ class _FakeStore:
 
 
 class _FakeConversationMemory:
-    def get_context(self, thread_id):
+    def get_context(self, thread_id, query=None):
         return {"summary": "", "recent_messages": []}

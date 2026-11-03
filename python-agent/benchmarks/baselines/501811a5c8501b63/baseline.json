@@ -1,0 +1,675 @@
+{
+  "by_category": {
+    "fallback": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 1,
+      "observation_pass_rate": 1.0,
+      "observations": 1,
+      "passed": 1,
+      "passed_observations": 1
+    },
+    "recovery": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 1,
+      "observation_pass_rate": 1.0,
+      "observations": 1,
+      "passed": 1,
+      "passed_observations": 1
+    },
+    "retrieval": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 2,
+      "observation_pass_rate": 1.0,
+      "observations": 2,
+      "passed": 2,
+      "passed_observations": 2
+    },
+    "retry": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 1,
+      "observation_pass_rate": 1.0,
+      "observations": 1,
+      "passed": 1,
+      "passed_observations": 1
+    },
+    "routing": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 2,
+      "observation_pass_rate": 1.0,
+      "observations": 2,
+      "passed": 2,
+      "passed_observations": 2
+    },
+    "security": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 1,
+      "observation_pass_rate": 1.0,
+      "observations": 1,
+      "passed": 1,
+      "passed_observations": 1
+    },
+    "workflow": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 1,
+      "observation_pass_rate": 1.0,
+      "observations": 1,
+      "passed": 1,
+      "passed_observations": 1
+    }
+  },
+  "by_target": {
+    "e2e": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 1,
+      "observation_pass_rate": 1.0,
+      "observations": 1,
+      "passed": 1,
+      "passed_observations": 1
+    },
+    "intent": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 1,
+      "observation_pass_rate": 1.0,
+      "observations": 1,
+      "passed": 1,
+      "passed_observations": 1
+    },
+    "rag": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 2,
+      "observation_pass_rate": 1.0,
+      "observations": 2,
+      "passed": 2,
+      "passed_observations": 2
+    },
+    "reviewer": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 1,
+      "observation_pass_rate": 1.0,
+      "observations": 1,
+      "passed": 1,
+      "passed_observations": 1
+    },
+    "supervisor": {
+      "assertion_pass_rate": 1.0,
+      "case_pass_rate": 1.0,
+      "cases": 4,
+      "observation_pass_rate": 1.0,
+      "observations": 4,
+      "passed": 4,
+      "passed_observations": 4
+    }
+  },
+  "gate": {
+    "baseline_run_id": null,
+    "comparisons": [],
+    "failures": [],
+    "passed": true,
+    "warnings": [
+      {
+        "type": "no_baseline"
+      }
+    ]
+  },
+  "metadata": {
+    "dataset_fingerprint": "1252ba8584ee30b1a236eb4ace147d4c878745ffd13de5a8774c8255a3c181da",
+    "dataset_versions": [
+      "2026.09.1"
+    ],
+    "environment": {},
+    "execution_modes": [],
+    "git_sha": "0ee1e58a15e2e334203b54bc0173044d9f28d1ff",
+    "model_aliases": {
+      "lightweight": "code-lightweight",
+      "reasoning": "code-reasoning",
+      "structured": "code-structured"
+    },
+    "offline": true,
+    "prompt_fingerprint": "d8e57bd0e603f61f0891c1ef3642f9938fd0967caea52999d8a321a92e44f984",
+    "repeats": {},
+    "report_schema_version": 1,
+    "run_id": "f6e378b518a542f780f09371d72723d3",
+    "started_at": "2026-10-27T08:10:30.880032+00:00",
+    "suite": "pr",
+    "workspace_diff_sha256": null
+  },
+  "metrics": {
+    "duration_ms": {
+      "max": 18.098599975928664,
+      "mean": 2.1780444593686195,
+      "min": 0.000300002284348011,
+      "observations": 9,
+      "p50": 0.04569999873638153,
+      "p95": 18.098599975928664,
+      "stdev": 5.635457947174341,
+      "sum": 19.602400134317577
+    },
+    "mrr": {
+      "max": 1.0,
+      "mean": 1.0,
+      "min": 1.0,
+      "observations": 2,
+      "p50": 1.0,
+      "p95": 1.0,
+      "stdev": 0.0,
+      "sum": 2.0
+    },
+    "ndcg_at_k": {
+      "max": 1.0,
+      "mean": 1.0,
+      "min": 1.0,
+      "observations": 2,
+      "p50": 1.0,
+      "p95": 1.0,
+      "stdev": 0.0,
+      "sum": 2.0
+    },
+    "precision_at_k": {
+      "max": 0.5,
+      "mean": 0.5,
+      "min": 0.5,
+      "observations": 2,
+      "p50": 0.5,
+      "p95": 0.5,
+      "stdev": 0.0,
+      "sum": 1.0
+    },
+    "recall_at_k": {
+      "max": 1.0,
+      "mean": 1.0,
+      "min": 1.0,
+      "observations": 2,
+      "p50": 1.0,
+      "p95": 1.0,
+      "stdev": 0.0,
+      "sum": 2.0
+    },
+    "retrieval_latency_ms": {
+      "max": 0.2587999915704131,
+      "mean": 0.23750000400468707,
+      "min": 0.21620001643896103,
+      "observations": 2,
+      "p50": 0.21620001643896103,
+      "p95": 0.2587999915704131,
+      "stdev": 0.021299987565726042,
+      "sum": 0.47500000800937414
+    },
+    "review_score": {
+      "max": 94.0,
+      "mean": 67.0,
+      "min": 40.0,
+      "observations": 2,
+      "p50": 40.0,
+      "p95": 94.0,
+      "stdev": 27.0,
+      "sum": 134.0
+    }
+  },
+  "results": [
+    {
+      "assertions": [
+        {
+          "metric": "task_correctness",
+          "passed": true,
+          "path": "phase",
+          "rule": "equals"
+        },
+        {
+          "metric": "task_correctness",
+          "passed": true,
+          "path": "final_status",
+          "rule": "equals"
+        },
+        {
+          "metric": "critical_defect_recall",
+          "passed": true,
+          "path": "review.passed",
+          "rule": "equals"
+        },
+        {
+          "metric": "quality_gate_accuracy",
+          "passed": true,
+          "path": "quality_gate_result.passed",
+          "rule": "equals"
+        },
+        {
+          "metric": "build_success",
+          "passed": true,
+          "path": "build_result.success",
+          "rule": "equals"
+        },
+        {
+          "metric": "build_failed",
+          "passed": true,
+          "path": "benchmark_generated_files.passed",
+          "rule": "equals"
+        },
+        {
+          "metric": "output_protocol_completeness",
+          "passed": true,
+          "path": "benchmark_required_files.passed",
+          "rule": "equals"
+        },
+        {
+          "metric": "build_failed",
+          "passed": true,
+          "path": "benchmark_code_check.passed",
+          "rule": "equals"
+        },
+        {
+          "metric": "output_protocol_completeness",
+          "passed": true,
+          "path": "intent.primary_intent",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "output_protocol_completeness",
+          "passed": true,
+          "path": "review.score",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "output_protocol_completeness",
+          "passed": true,
+          "path": "quality_gate_result.reason",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "output_protocol_completeness",
+          "passed": true,
+          "path": "build_result.log",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "output_protocol_completeness",
+          "passed": true,
+          "path": "code_files",
+          "rule": "required_text"
+        },
+        {
+          "metric": "output_protocol_completeness",
+          "passed": true,
+          "path": "index.html",
+          "rule": "required_files"
+        }
+      ],
+      "assertions_passed": 14,
+      "assertions_total": 14,
+      "attempt_index": 0,
+      "case_id": "e2e-valid-html-replay",
+      "category": "workflow",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 18.098599975928664,
+        "review_score": 94.0
+      },
+      "output": {
+        "benchmark_code_check": {
+          "infrastructure_error": null,
+          "log": "parsed 1 HTML file(s) without execution",
+          "metric": "build_success",
+          "passed": true
+        },
+        "benchmark_generated_files": {
+          "passed": true
+        },
+        "benchmark_required_files": {
+          "missing": [],
+          "passed": true
+        },
+        "build_result": {
+          "log": "static HTML fixture validated offline",
+          "success": true
+        },
+        "code_files": [
+          {
+            "content": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <title>Benchmark Ready</title>\n  </head>\n  <body>\n    <main id=\"benchmark-ready\">Offline benchmark fixture</main>\n  </body>\n</html>\n",
+            "path": "index.html"
+          }
+        ],
+        "final_status": "success",
+        "intent": {
+          "confidence": 0.98,
+          "primary_intent": "create_web_page"
+        },
+        "phase": "completed",
+        "quality_gate_result": {
+          "has_critical_issues": false,
+          "passed": true,
+          "reason": "reviewed offline fixture",
+          "review_score": 94,
+          "syntax_check_passed": true
+        },
+        "review": {
+          "issues": [],
+          "passed": true,
+          "score": 94
+        }
+      },
+      "passed": true,
+      "target": "e2e"
+    },
+    {
+      "assertions": [
+        {
+          "metric": "intent_state_transition",
+          "passed": true,
+          "path": "phase",
+          "rule": "equals"
+        },
+        {
+          "metric": "intent_failure_handling",
+          "passed": true,
+          "path": "error",
+          "rule": "equals"
+        },
+        {
+          "metric": "intent_output_protocol_completeness",
+          "passed": true,
+          "path": "intent.primary_intent",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "intent_output_protocol_completeness",
+          "passed": true,
+          "path": "intent.slots.code_gen_type",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "intent_output_protocol_completeness",
+          "passed": true,
+          "path": "clarification",
+          "rule": "required_paths"
+        }
+      ],
+      "assertions_passed": 5,
+      "assertions_total": 5,
+      "attempt_index": 0,
+      "case_id": "intent-fallback-vue",
+      "category": "fallback",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 0.000400003045797348
+      },
+      "output": {
+        "clarification": {
+          "questions": []
+        },
+        "error": null,
+        "intent": {
+          "primary_intent": "code generation",
+          "slots": {
+            "code_gen_type": "vue_project"
+          }
+        },
+        "phase": "intent_done"
+      },
+      "passed": true,
+      "target": "intent"
+    },
+    {
+      "assertions": [
+        {
+          "metric": "retrieval_replay_completeness",
+          "passed": true,
+          "path": "retrieved_count",
+          "rule": "equals"
+        },
+        {
+          "metric": "retrieval_output_protocol_completeness",
+          "passed": true,
+          "path": "retrieved_document_ids",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "retrieval_output_protocol_completeness",
+          "passed": true,
+          "path": "retrieved_count",
+          "rule": "required_paths"
+        }
+      ],
+      "assertions_passed": 3,
+      "assertions_total": 3,
+      "attempt_index": 0,
+      "case_id": "rag-component-table-replay",
+      "category": "retrieval",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 0.21740002557635307,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "precision_at_k": 0.5,
+        "recall_at_k": 1.0,
+        "retrieval_latency_ms": 0.21620001643896103
+      },
+      "output": {
+        "retrieved_count": 2,
+        "retrieved_document_ids": [
+          "component_library:DataTable",
+          "component_library:SearchFilter"
+        ]
+      },
+      "passed": true,
+      "target": "rag"
+    },
+    {
+      "assertions": [
+        {
+          "metric": "retrieval_replay_completeness",
+          "passed": true,
+          "path": "retrieved_count",
+          "rule": "equals"
+        },
+        {
+          "metric": "retrieval_output_protocol_completeness",
+          "passed": true,
+          "path": "retrieved_document_ids",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "retrieval_output_protocol_completeness",
+          "passed": true,
+          "path": "retrieved_count",
+          "rule": "required_paths"
+        }
+      ],
+      "assertions_passed": 3,
+      "assertions_total": 3,
+      "attempt_index": 0,
+      "case_id": "rag-vue-watch-replay",
+      "category": "retrieval",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 0.2606000052765012,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "precision_at_k": 0.5,
+        "recall_at_k": 1.0,
+        "retrieval_latency_ms": 0.2587999915704131
+      },
+      "output": {
+        "retrieved_count": 2,
+        "retrieved_document_ids": [
+          "framework_api:watch",
+          "framework_api:computed"
+        ]
+      },
+      "passed": true,
+      "target": "rag"
+    },
+    {
+      "assertions": [
+        {
+          "metric": "critical_defect_detection",
+          "passed": true,
+          "path": "passed",
+          "rule": "equals"
+        },
+        {
+          "metric": "review_output_protocol_completeness",
+          "passed": true,
+          "path": "score",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "review_output_protocol_completeness",
+          "passed": true,
+          "path": "issues",
+          "rule": "required_paths"
+        },
+        {
+          "metric": "critical_defect_recall",
+          "passed": true,
+          "path": "issues",
+          "rule": "required_text"
+        }
+      ],
+      "assertions_passed": 4,
+      "assertions_total": 4,
+      "attempt_index": 0,
+      "case_id": "reviewer-detects-xss",
+      "category": "security",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 0.000300002284348011,
+        "review_score": 40.0
+      },
+      "output": {
+        "issues": [
+          {
+            "description": "XSS caused by v-html"
+          }
+        ],
+        "passed": false,
+        "score": 40
+      },
+      "passed": true,
+      "target": "reviewer"
+    },
+    {
+      "assertions": [
+        {
+          "metric": "architecture_escalation_accuracy",
+          "passed": true,
+          "path": "next_node",
+          "rule": "equals"
+        }
+      ],
+      "assertions_passed": 1,
+      "assertions_total": 1,
+      "attempt_index": 0,
+      "case_id": "supervisor-architecture-discussion",
+      "category": "routing",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 0.036800047382712364
+      },
+      "output": {
+        "next_node": "autogen_discussion"
+      },
+      "passed": true,
+      "target": "supervisor"
+    },
+    {
+      "assertions": [
+        {
+          "metric": "retry_route_accuracy",
+          "passed": true,
+          "path": "next_node",
+          "rule": "equals"
+        }
+      ],
+      "assertions_passed": 1,
+      "assertions_total": 1,
+      "attempt_index": 0,
+      "case_id": "supervisor-code-retry",
+      "category": "retry",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 0.04569999873638153
+      },
+      "output": {
+        "next_node": "coder_agent"
+      },
+      "passed": true,
+      "target": "supervisor"
+    },
+    {
+      "assertions": [
+        {
+          "metric": "retry_limit_enforcement",
+          "passed": true,
+          "path": "next_node",
+          "rule": "equals"
+        }
+      ],
+      "assertions_passed": 1,
+      "assertions_total": 1,
+      "attempt_index": 0,
+      "case_id": "supervisor-retry-exhausted",
+      "category": "recovery",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 0.02510007470846176
+      },
+      "output": {
+        "next_node": "human_intervention"
+      },
+      "passed": true,
+      "target": "supervisor"
+    },
+    {
+      "assertions": [
+        {
+          "metric": "route_accuracy",
+          "passed": true,
+          "path": "next_node",
+          "rule": "equals"
+        }
+      ],
+      "assertions_passed": 1,
+      "assertions_total": 1,
+      "attempt_index": 0,
+      "case_id": "supervisor-review-passed",
+      "category": "routing",
+      "failures": [],
+      "infrastructure_error": null,
+      "observed_metrics": {
+        "duration_ms": 0.9175000013783574
+      },
+      "output": {
+        "next_node": "builder_agent"
+      },
+      "passed": true,
+      "target": "supervisor"
+    }
+  ],
+  "summary": {
+    "assertion_pass_rate": 1.0,
+    "case_pass_rate": 1.0,
+    "cases": 9,
+    "observation_pass_rate": 1.0,
+    "observations": 9,
+    "passed": 9,
+    "passed_observations": 9
+  }
+}

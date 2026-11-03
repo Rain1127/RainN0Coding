@@ -94,25 +94,45 @@ def _token_count(usage: dict[str, object], primary: str, fallback: str) -> int |
     return value
 
 
-def record_llm_response(response: object, model: str) -> None:
-    """Record provider usage without allowing telemetry to affect the model call."""
-    captured = _llm_usage.get()
-    if captured is None:
-        return
+def _safe_cache_tokens(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
+
+def _actual_model_label(value: object, requested: str) -> str:
+    if not isinstance(value, str) or not value or value == requested:
+        return "unknown"
+    name = value.lower()
+    if name in {"code-reasoning-glm", "code-structured-glm", "code-lightweight-glm"}:
+        return "glm"
+    if name == "code-reasoning-chat":
+        return "deepseek"
+    for prefix, label in (("deepseek", "deepseek"), ("glm", "glm"),
+                          ("zhipu", "glm"), ("claude", "claude"),
+                          ("anthropic", "claude"), ("gpt", "openai")):
+        if name.startswith(prefix) or f"/{prefix}" in name:
+            return label
+    return "unknown"
+
+
+def normalize_llm_usage(response: object, requested_model: str) -> dict[str, object] | None:
+    """Normalize provider cache fields while preserving their distinct meanings."""
     try:
         response_metadata = getattr(response, "response_metadata", {}) or {}
         if not isinstance(response_metadata, dict):
             response_metadata = {}
-        usage = getattr(response, "usage_metadata", None)
-        if not isinstance(usage, dict):
-            fallback_usage = response_metadata.get("token_usage", {}) or {}
-            usage = fallback_usage if isinstance(fallback_usage, dict) else {}
+        reported_usage = getattr(response, "usage_metadata", None)
+        token_usage = response_metadata.get("token_usage", {}) or {}
+        if not isinstance(token_usage, dict):
+            token_usage = {}
+        has_counts = (isinstance(reported_usage, dict)
+                      and any(key in reported_usage for key in ("input_tokens", "prompt_tokens"))
+                      and any(key in reported_usage for key in ("output_tokens", "completion_tokens")))
+        usage = reported_usage if has_counts else token_usage
 
         input_tokens = _token_count(usage, "input_tokens", "prompt_tokens")
         output_tokens = _token_count(usage, "output_tokens", "completion_tokens")
         if input_tokens is None or output_tokens is None:
-            return
+            return None
         expected_total = input_tokens + output_tokens
         total_value = usage.get("total_tokens", expected_total)
         if (
@@ -120,7 +140,30 @@ def record_llm_response(response: object, model: str) -> None:
             or not isinstance(total_value, int)
             or total_value < expected_total
         ):
-            return
+            return None
+
+        cache_sources = [source for source in (usage, token_usage,
+                         usage.get("input_token_details"),
+                         token_usage.get("prompt_tokens_details"),
+                         response_metadata.get("usage")) if isinstance(source, dict)]
+        def cache_value(*names: str) -> int:
+            for source in cache_sources:
+                for name in names:
+                    if name in source:
+                        return _safe_cache_tokens(source[name])
+            return 0
+
+        hit = cache_value("prompt_cache_hit_tokens", "cache_read_input_tokens",
+                          "cache_read", "cached_tokens")
+        miss = cache_value("prompt_cache_miss_tokens")
+        creation = cache_value("cache_creation_input_tokens", "cache_creation")
+        actual_model = "unknown"
+        for candidate in (response_metadata.get("model"),
+                          response_metadata.get("model_name"),
+                          response_metadata.get("litellm_model")):
+            actual_model = _actual_model_label(candidate, requested_model)
+            if actual_model != "unknown":
+                break
 
         raw_cost = response_metadata.get("response_cost")
         cost = None
@@ -137,13 +180,42 @@ def record_llm_response(response: object, model: str) -> None:
                 if math.isfinite(normalized_cost):
                     cost = normalized_cost
     except Exception:
+        return None
+    return {
+        "model": requested_model,
+        "request_model": requested_model,
+        "actual_model": actual_model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_value,
+        "cache_hit_tokens": hit,
+        "cache_miss_tokens": miss,
+        "cache_creation_tokens": creation,
+        "cost_usd": cost,
+    }
+
+
+def record_llm_response(response: object, model: str) -> None:
+    """Record usage without allowing telemetry to affect the model call."""
+    usage = normalize_llm_usage(response, model)
+    from workflow.budget import active_budget
+    budget = active_budget.get()
+    if budget and budget.pending:
+        budget.observe(usage)
+    if usage is None:
         return
-    captured.append(
-        {
-            "model": model,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": total_value,
-            "cost_usd": cost,
-        }
-    )
+    captured = _llm_usage.get()
+    if captured is not None:
+        item = {key: usage[key] for key in (
+            "model", "input_tokens", "output_tokens", "total_tokens", "cost_usd")}
+        if usage["actual_model"] != "unknown":
+            item["actual_model"] = usage["actual_model"]
+        for key in ("cache_hit_tokens", "cache_miss_tokens", "cache_creation_tokens"):
+            if usage[key]:
+                item[key] = usage[key]
+        captured.append(item)
+    try:
+        from monitoring import record_prompt_cache_tokens
+        record_prompt_cache_tokens(usage)
+    except Exception:
+        pass

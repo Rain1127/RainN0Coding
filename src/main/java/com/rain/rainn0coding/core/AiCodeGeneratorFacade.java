@@ -7,6 +7,7 @@ import com.rain.rainn0coding.core.builder.VueProjectBuilder;
 import com.rain.rainn0coding.core.python.PythonAiClient;
 import com.rain.rainn0coding.exception.BusinessException;
 import com.rain.rainn0coding.exception.ErrorCode;
+import com.rain.rainn0coding.exception.GenerationLeaseLostException;
 import com.rain.rainn0coding.model.enums.CodeGenTypeEnum;
 import com.rain.rainn0coding.monitor.MonitorContext;
 import com.rain.rainn0coding.monitor.MonitorContextHolder;
@@ -36,6 +37,8 @@ public class AiCodeGeneratorFacade {
 
     @Resource
     private PythonAiClient pythonAiClient;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ArtifactVersionService artifactVersionService;
 
     public Flux<String> generateAndSaveCodeStream(String userMessage,
                                                   CodeGenTypeEnum codeGenTypeEnum,
@@ -62,6 +65,12 @@ public class AiCodeGeneratorFacade {
 
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum,
             Long appId, Long userId, String userRole, String requestId, String idempotencyKey, boolean resume,boolean strictTerminal) {
+        return generateAndSaveCodeStream(userMessage,codeGenTypeEnum,appId,userId,userRole,requestId,idempotencyKey,resume,strictTerminal,()->true);
+    }
+
+    public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum,
+            Long appId, Long userId, String userRole, String requestId, String idempotencyKey, boolean resume,
+            boolean strictTerminal,java.util.function.BooleanSupplier ownsExecution) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "code generation type cannot be null");
         }
@@ -81,8 +90,11 @@ public class AiCodeGeneratorFacade {
 
         List<CodeFileDto> codeFiles = new ArrayList<>();
         AtomicReference<String> terminalStatus = new AtomicReference<>();
+        AtomicReference<JSONObject> artifact = new AtomicReference<>();
 
-        return sseStream.doOnNext(line -> {
+        // Ownership checks use JDBC; keep them off the WebClient event loop with bounded prefetch.
+        return sseStream.publishOn(reactor.core.scheduler.Schedulers.boundedElastic(),1).doOnNext(line -> {
+            requireExecution(ownsExecution);
             JSONObject obj = parseSseJson(line);
             if (obj == null) {
                 return;
@@ -93,6 +105,7 @@ public class AiCodeGeneratorFacade {
                 return;
             }
             if ("done".equals(type)) {
+                artifact.set(obj.getJSONObject("result"));
                 terminalStatus.updateAndGet(current -> current != null && !"success".equals(current)
                         ? current
                         : strictTerminal && obj.getStr("status") == null ? "missing_success" : successfulStatus(obj.getStr("status")));
@@ -111,17 +124,23 @@ public class AiCodeGeneratorFacade {
                             try {
                                 if (strictTerminal && terminalStatus.get() == null)
                                     throw new BusinessException(ErrorCode.OPERATION_ERROR, "生成连接结束但没有成功结果");
-                                finalizeGeneratedCode(codeFiles, codeGenTypeEnum, appId, terminalStatus.get());
+                                requireExecution(ownsExecution);
+                                finalizeGeneratedCode(codeFiles, codeGenTypeEnum, appId, terminalStatus.get(),ownsExecution,artifact.get());
                             } finally { finalizingApps.remove(appId); }
                         }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
                         .then(Mono.empty()))
                 .doOnError(e -> log.error("Python Agent code generation failed: {}", e.getMessage()));
     }
 
-    private File saveCodeFiles(List<CodeFileDto> files, CodeGenTypeEnum codeGenType, Long appId) {
-        Path basePath = Path.of(resolveBaseDir(codeGenType, appId)).toAbsolutePath().normalize();
+    private void requireExecution(java.util.function.BooleanSupplier ownsExecution) {
+        if(!ownsExecution.getAsBoolean())throw new GenerationLeaseLostException();
+    }
+
+    private File saveCodeFiles(List<CodeFileDto> files, Path basePath,
+            java.util.function.BooleanSupplier ownsExecution) {
         createDirectories(basePath, "create output directory");
         for (CodeFileDto file : files) {
+            requireExecution(ownsExecution);
             Path outPath = basePath.resolve(file.path()).normalize();
             if (!outPath.startsWith(basePath)) {
                 throw new BusinessException(ErrorCode.PARAMS_ERROR,
@@ -137,25 +156,58 @@ public class AiCodeGeneratorFacade {
     }
 
     private void finalizeGeneratedCode(List<CodeFileDto> codeFiles, CodeGenTypeEnum codeGenTypeEnum,
-                                       Long appId, String terminalStatus) {
+                                       Long appId, String terminalStatus,java.util.function.BooleanSupplier ownsExecution,JSONObject artifact) {
         if (terminalStatus != null && !"success".equals(terminalStatus)) {
             log.warn("Skip code save/build because Python workflow ended with status: {}", terminalStatus);
             return;
         }
+        Path current = Path.of(resolveBaseDir(codeGenTypeEnum, appId)).toAbsolutePath().normalize();
+        if (artifact != null && "validated_candidate".equals(artifact.getStr("artifact_status"))) {
+            String runId=artifact.getStr("artifact_run_id", "");
+            if (!runId.matches("[a-f0-9]{32}"))throw new BusinessException(ErrorCode.OPERATION_ERROR,"无效候选版本标识");
+            Path expected=current.resolveSibling("."+current.getFileName()+".versions").resolve(runId+".candidate");
+            try {
+                Path marker=current.resolve(".generation-run-id");
+                if(Files.isRegularFile(marker)&&Files.readString(marker).equals(runId))return;
+                if(!expected.equals(Path.of(artifact.getStr("project_dir", "")).toAbsolutePath().normalize())||!Files.isDirectory(expected))
+                    throw new BusinessException(ErrorCode.OPERATION_ERROR,"Python 与 Java 必须共享同一 CODE_OUTPUT_DIR；候选产物已保留");
+                requireExecution(ownsExecution);
+                JSONObject base=artifact.getJSONObject("artifact_base");
+                java.util.Map<String,String> expectedBase=new java.util.HashMap<>();
+                if(base!=null)base.forEach((key,value)->expectedBase.put(key,String.valueOf(value)));
+                if(artifactVersionService!=null)artifactVersionService.publish(appId,expected,base==null?null:expectedBase);
+                else ArtifactPublisher.publish(current,expected);
+                return;
+            } catch(IOException ex) {throw new BusinessException(ErrorCode.SYSTEM_ERROR,"候选版本发布失败: "+ex.getMessage());}
+        }
+        Path candidate = current;
         if (!codeFiles.isEmpty()) {
-            File saveDir = saveCodeFiles(codeFiles, codeGenTypeEnum, appId);
+            try { candidate = ArtifactPublisher.candidate(current); }
+            catch (IOException ex) { throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Cannot prepare candidate: " + ex.getMessage()); }
+            File saveDir = saveCodeFiles(codeFiles, candidate,ownsExecution);
             log.info("Saved {} files to {}", codeFiles.size(), saveDir);
         }
 
         if (codeGenTypeEnum == CodeGenTypeEnum.VUE_PROJECT
                 || codeGenTypeEnum == CodeGenTypeEnum.NODEJS) {
             String dirName = codeGenTypeEnum.getValue().toLowerCase();
-            String projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + dirName + "_" + appId;
+            String projectPath = codeFiles.isEmpty()
+                    ? AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + dirName + "_" + appId : candidate.toString();
+            requireExecution(ownsExecution);
             boolean buildSuccess = vueProjectBuilder.buildProject(projectPath);
+            requireExecution(ownsExecution);
             if (!buildSuccess) {
                 throw new BusinessException(ErrorCode.OPERATION_ERROR,
                         dirName + " project build failed");
             }
+        }
+        if (!codeFiles.isEmpty()) {
+            requireExecution(ownsExecution);
+            try {
+                if (artifactVersionService != null) artifactVersionService.publish(appId, candidate);
+                else ArtifactPublisher.publish(current, candidate);
+            }
+            catch (IOException ex) { throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Cannot publish candidate: " + ex.getMessage()); }
         }
     }
 
@@ -220,7 +272,7 @@ public class AiCodeGeneratorFacade {
         if (status == null || status.isBlank()) {
             return "success";
         }
-        return java.util.Set.of("success", "partial_success", "degraded_success").contains(status) ? "success" : status;
+        return "degraded_success".equals(status) ? "success" : status;
     }
 
     private record CodeFileDto(String path, String content) {}

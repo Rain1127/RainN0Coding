@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_FILES = [
-    path for path in ROOT.rglob("*.py") if "tests" not in path.parts
+    path for path in ROOT.rglob("*.py") if not set(path.parts).intersection({"tests", ".venv", "node_modules", "__pycache__"})
 ]
 
 

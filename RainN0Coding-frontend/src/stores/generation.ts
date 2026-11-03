@@ -16,7 +16,6 @@ import { sameEntityId } from '@/utils/entityId'
 export const MAX_GENERATION_EVENTS = 200
 const SUCCESSFUL_DONE_STATUSES = new Set([
   'success',
-  'partial_success',
   'degraded_success',
   'duplicate_completed',
 ])
